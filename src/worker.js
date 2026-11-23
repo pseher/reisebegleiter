@@ -64,6 +64,14 @@ const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l
   from: { eva: String(l.from.eva || ""), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8), ...coord(l.from) },
   to: { eva: String(l.to.eva || ""), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...(l.to.estimated ? { estimated: true } : {}) }, ...(l.must ? { must: true } : {}) });
 
+// Prüfung neuer Teilstrecken (Anlegen und Ändern)
+function checkLegs(legs) {
+  if (!legs.length || legs.length > 6 || !legs.every(validLeg)) return "Reise ungültig";
+  if (legs.some((l, i) => i > 0 && Date.parse(l.from.plan) < Date.parse(legs[i - 1].to.plan) - MIN)) return "Anschluss fährt vor der Ankunft ab";
+  if (Date.parse(legs[legs.length - 1].to.plan) < Date.now() - 30 * MIN) return "Diese Fahrt ist schon vorbei. Bitte prüfe Datum und Uhrzeit.";
+  return "";
+}
+
 async function api(req, env, url) {
   const p = url.pathname, method = req.method;
 
@@ -207,9 +215,7 @@ async function api(req, env, url) {
   if (p === "/api/trips" && method === "POST") {
     const b = await req.json().catch(() => ({}));
     const legs = Array.isArray(b.legs) ? b.legs : [];
-    if (!legs.length || legs.length > 6 || !legs.every(validLeg)) return fail(400, "Reise ungültig");
-    if (legs.some((l, i) => i > 0 && Date.parse(l.from.plan) < Date.parse(legs[i - 1].to.plan) - MIN)) return fail(400, "Anschluss fährt vor der Ankunft ab");
-    if (Date.parse(legs[legs.length - 1].to.plan) < Date.now() - 30 * MIN) return fail(400, "Diese Fahrt ist schon vorbei. Bitte prüfe Datum und Uhrzeit.");
+    const bad = checkLegs(legs); if (bad) return fail(400, bad);
     const ticket = ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex";
     const clean = legs.map(cleanLeg);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
@@ -256,6 +262,22 @@ async function api(req, env, url) {
     const t = await ownTrip(env, dev, m[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     if (method === "DELETE") { await db.remove(env, "rb_trips", t.id); return json({ ok: true }); }
+    // Reise ändern: neue Verbindung (andere Zeit, anderer Start/Ziel) – Ticket bleibt, Überwachung beginnt neu
+    if (method === "PUT") {
+      const b = await req.json().catch(() => ({}));
+      const legs = Array.isArray(b.legs) ? b.legs : [];
+      const bad = checkLegs(legs); if (bad) return fail(400, bad);
+      const minT = +t.legs[0]?.minT || 0;
+      t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
+      t.obs = []; t.state = {}; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
+      if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) t.ticket = b.ticket;
+      const now = Date.now(), cache = new Map();
+      await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
+      await assess(env, t, now, cache);
+      t.state = { ...t.state, rem: {}, start: null, pl: {}, zb: false };
+      await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ticket: t.ticket, active: true, ends_at: t.ends_at, updated_at: new Date().toISOString() });
+      return json(view(t, now));
+    }
     if (method === "PATCH") {
       const b = await req.json().catch(() => ({}));
       if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) await db.update(env, "rb_trips", t.id, { ticket: b.ticket });

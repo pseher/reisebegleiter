@@ -285,7 +285,7 @@ function renderTrip(t, many) {
   const sheet = sheetId === t.id;
   $app.innerHTML = `${flashBox()}
     ${many ? `<button class="back" data-list>← Alle Reisen</button>` : ""}
-    <div class="trip-head"><h1>${route(t)}</h1><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+    <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted ? " Achtung: Dein Sparpreis gilt nur für die gebuchten Züge, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
@@ -296,7 +296,8 @@ function renderTrip(t, many) {
     <div class="card flat">${timeline(t)}</div>
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · noch keine DB-Prognose" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Reise"}</button>
-    ${sheet ? `<section class="card">
+    ${sheet ? `<section class="card" id="sheet">
+      ${t.phase !== "done" ? `<button class="btn sec" data-edit="${t.id}">Andere Verbindung, Uhrzeit oder Strecke</button>` : ""}
       <p class="small muted">Zeit, die ich mindestens zum Umsteigen brauche</p>
       <div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-tmt="${m}" aria-pressed="${(t.minT || 0) === m}">${l}</button>`).join("")}</div>
       <p class="small muted">Ticket (nur für den Hinweis zur Zugbindung)</p>
@@ -308,6 +309,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
+  $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => { b.disabled = true; await startEdit(t); });
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
   $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => patch({ minT: +b.dataset.tmt }));   // nur diese Reise
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
@@ -380,6 +382,15 @@ function bindCommon() {
 
 // ---------- Reise anlegen (Assistent) ----------
 // W = { step, legs: [], station, from (Zeit), list, train, error }
+// Bestehende Reise ändern: Assistent mit Start, Ziel und Zeit der Reise vorbelegt
+async function startEdit(t) {
+  const first = t.legs[0].dep, last = t.legs[t.legs.length - 1].arr;
+  const st = async s => s.eva ? { eva: s.eva, name: s.name } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
+  const [rFrom, rTo] = await Promise.all([st(first), st(last)]);
+  W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan)), conns: null,
+    editId: t.id, editTicket: t.ticket, minT: t.minT || 0 };
+  go("add");
+}
 function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
 const dur = m => (m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60} Min.` : `${m} Min.`);
 // ---------- Datum & Uhrzeit: Schnellwahl + Monatskalender + Uhrzeit ----------
@@ -449,14 +460,14 @@ function connList(list) {
 
 function renderWizard() {
   if (!W) startWizard();
-  const n = W.legs.length, head = `<p class="steps">${n ? `Teilstrecke ${n + 1}` : "Neue Reise"}</p>`;
+  const n = W.legs.length, head = `<p class="steps">${W.editId ? "Reise ändern" : n ? `Teilstrecke ${n + 1}` : "Neue Reise"}</p>`;
   const back = `<button class="btn quiet" id="wBack">Zurück</button>`;
   if (W.busy) { $app.innerHTML = `${head}<h1>${esc(W.busy)}</h1><div class="spinner"></div>`; return; }
   const err = W.error ? `<p class="err">${esc(W.error)}</p>` : "";
 
   if (W.step === "route") {
-    $app.innerHTML = `<p class="steps">Neue Reise</p>
-      <section class="card import">
+    $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : "Neue Reise"}</p>
+      ${W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
         <div class="row"><label class="btn" style="margin:4px 0">Foto, Screenshot oder PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
@@ -464,11 +475,11 @@ function renderWizard() {
         ${W.showText ? `<textarea id="impText" rows="5" placeholder="Hier den geteilten Text oder die Buchungsbestätigung einfügen">${esc(W.impText || "")}</textarea>
           <div class="row"><button class="btn sec" id="impPaste" style="margin:4px 0">Aus Zwischenablage</button><button class="btn" id="impGo" style="margin:4px 0">Einlesen</button></div>` : ""}
       </section>
-      <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>
+      <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>`}
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       ${whenPicker("when")}
-      <p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}
+      ${W.editId ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
       <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
@@ -482,8 +493,8 @@ function renderWizard() {
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
-    document.getElementById("impFile").onchange = e => importFiles([...e.target.files]);
-    document.getElementById("impTextBtn").onclick = () => { W.showText = !W.showText; render(); };
+    document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));
+    document.getElementById("impTextBtn")?.addEventListener("click", () => { W.showText = !W.showText; render(); });
     const it = document.getElementById("impText"); if (it) it.oninput = () => { W.impText = it.value; };
     const ip = document.getElementById("impPaste");
     if (ip) ip.onclick = async () => { try { W.impText = await navigator.clipboard.readText(); render(); } catch { alert("Einfügen bitte per langem Tippen ins Textfeld."); } };
@@ -491,10 +502,10 @@ function renderWizard() {
   }
 
   else if (W.step === "conns") {
-    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${MINT ? `Umstiege mind. ${MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
+    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
-    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&min=${MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
@@ -562,10 +573,10 @@ function renderWizard() {
       <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
         <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
         ${l.jid ? "" : `<div class="small muted">${l.mode && !/RAIL|SUBURBAN|LONG/.test(l.mode) ? "Bus/U-Bahn/Tram: " : ""}ohne Echtzeit, nur Fahrplan</div>`}</li>`).join("")}</ol></div>
-      <button class="btn" id="done">Fertig – weiter</button>
+      <button class="btn" id="done">${W.editId ? "Reise so ändern" : "Fertig – weiter"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
-    document.getElementById("done").onclick = () => { W.step = "ticket"; render(); };
+    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); W.step = "ticket"; render(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
@@ -664,6 +675,15 @@ async function resolveLeg(stop, onRoute = true) {
 }
 
 async function saveTrip(ticket) {
+  if (W.editId) {
+    const id = W.editId, minT = W.minT;
+    W.busy = "Reise wird geändert …"; render();
+    try {
+      await api(`/api/trips/${id}`, { method: "PUT", body: { legs: W.legs.map(l => ({ ...l, minT })), ticket } });
+      flash = "Reise geändert. Ich überwache jetzt die neue Verbindung.";
+      W = null; await loadTrips(); openId = id; sheetId = null; return go("home");
+    } catch (e) { W.busy = null; W.error = e.message; return render(); }
+  }
   W.busy = "Reise wird angelegt …"; render();
   try {
     for (const legs of W.multi || [W.legs]) await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket } });
