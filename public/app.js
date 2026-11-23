@@ -159,7 +159,7 @@ function planBCard(t) {
   if (k < 0) return !open ? "" : `<section class="card"><div class="k">Möglichkeiten</div><p class="muted small">${open.altChecked
     ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Möglichkeit. Ich prüfe weiter.")
     : "Ich suche Möglichkeiten …"}</p>${t.here ? "" : `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`}</section>`;
-  const tr = t.transfers[k], lost = tr.status === "LOST", need = t.minT || 3;
+  const tr = t.transfers[k], lost = tr.status === "LOST", need = t.minT || 3, zbOn = t.ticket === "spar" && !t.zbLifted;
   const before = Date.now() < Date.parse(t.legs[0].dep.rt), curLeg = before ? t.legs[0] : t.legs[k];
   const curArr = Date.parse(t.plan.arr);
   const tone = g => (g < need ? "late" : g < need + 3 ? "warn-t" : "ok-t");
@@ -178,7 +178,7 @@ function planBCard(t) {
   const liveOf = liveBadge;
   const rows = tr.alt.map((a, ai) => {
     const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
-    return `<div class="cmp-row"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
+    return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr)}"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
       ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : point(a.watch?.point || tightest(a.legs || []))}
       ${goal(a.arr || a.dep, a.reach ? "" : delta(a))}
       <div class="cmp-live">${a.kind === "stay" ? "" : `<span class="small muted">ab ${hm(a.dep)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""} · </span>`}${liveOf(a)}${zbOn && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
@@ -186,7 +186,6 @@ function planBCard(t) {
       <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb === false ? "" : "1"}" data-adopt-text="${esc(tag(a))}: ${esc(a.label)}, Ziel ca. ${hm(a.arr || a.dep)}">Übernehmen</button>
         <button class="btn quiet small-btn" data-cmp="${id}">${isOpen ? "Weniger" : "Details"}</button></div>
     </div></div>`; }).join("");
-  const zbOn = t.ticket === "spar" && !t.zbLifted;
   const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn"><b>Sparpreis:</b> Bei Möglichkeiten mit „anderer Fernzug“ gilt dein Ticket erst, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge sind frei wählbar.</p>` : "";
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
@@ -198,6 +197,10 @@ function planBCard(t) {
   }
   return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}${t.here ? "" : `<div style="margin-top:8px">${here}</div>`}</section>`;
 }
+
+// Dezente Farbe je Möglichkeit: kommt sie (laut Plan bzw. Echtzeit) rechtzeitig an oder später als deine gebuchte Ankunft?
+const arrTone = (arr, planArr) => { const d = Math.round((Date.parse(arr) - Date.parse(planArr)) / MIN);
+  return !Number.isFinite(d) ? "" : d <= 2 ? "arr-ok" : d <= 20 ? "arr-late" : "arr-much"; };
 
 // Live-Zustand einer Möglichkeit (wird ab 3 Std. vor Abfahrt mitbeobachtet)
 function liveBadge(a) {
@@ -219,7 +222,7 @@ function hereCard(t) {
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
-    return `<div class="cmp-row"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
+    return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr)}"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
       <div class="cmp-point">${a.walkStart ? `${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}, ` : ""}ab <b>${hm(a.dep)}</b> ${esc(a.label)}</div>
       <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${span(-d)} früher</b>` : d > 1 ? ` · ${span(d)} später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
       <div class="cmp-live">${liveBadge(a)}</div>
