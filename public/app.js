@@ -175,13 +175,7 @@ function planBCard(t) {
   const curState = curNext.dep.cancelled ? `<span class="badge bad">fällt aus</span>` : curNext.dep.delay >= 3 ? `<span class="badge warn">${esc(nice(curNext))} +${curNext.dep.delay}</span>` : curNext.live ? `<span class="badge good">pünktlich</span>` : "";
   const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">
       ${cur ? point({ at: cur.at, arr: cur.arrRt, dep: cur.depRt, gap: cur.gap }) : point(null)}${goal(t.plan.arr, "")}${curState ? `<div class="cmp-live">${curState}</div>` : ""}</div></div>`;
-  // Live-Zustand einer Möglichkeit (wird ab 3 Std. vor Abfahrt mitbeobachtet)
-  const liveOf = a => { const w = a.watch;
-    if (!w) return `<span class="muted small">wird ab 3 Std. vorher live geprüft</span>`;
-    if (w.cancelled) return `<span class="badge bad">fällt aus</span>`;
-    if (!w.ok) return `<span class="badge bad">Umstieg geht nicht mehr</span>`;
-    const late = w.legs.filter(l => l.delay >= 3);
-    return late.length ? late.map(l => `<span class="badge warn">${esc(l.label)} +${l.delay}</span>`).join(" ") : `<span class="badge ${w.live ? "good" : ""}">${w.live ? "pünktlich" : "nur Fahrplan"}</span>`; };
+  const liveOf = liveBadge;
   const rows = tr.alt.map((a, ai) => {
     const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
     return `<div class="cmp-row"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
@@ -201,6 +195,35 @@ function planBCard(t) {
       ${open ? `${zb}${curRow}${rows}` : ""}<button class="btn quiet small-btn" data-cmp="calm:${t.id}">${open ? "Weniger" : "Möglichkeiten zeigen"}</button></section>`;
   }
   return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}</section>`;
+}
+
+// Live-Zustand einer Möglichkeit (wird ab 3 Std. vor Abfahrt mitbeobachtet)
+function liveBadge(a) {
+  const w = a.watch;
+  if (!w) return `<span class="muted small">wird ab 3 Std. vorher live geprüft</span>`;
+  if (w.cancelled) return `<span class="badge bad">fällt aus</span>`;
+  if (!w.ok) return `<span class="badge bad">Umstieg geht nicht mehr</span>`;
+  const late = w.legs.filter(l => l.delay >= 3);
+  return late.length ? late.map(l => `<span class="badge warn">${esc(l.label)} +${l.delay}</span>`).join(" ") : `<span class="badge ${w.live ? "good" : ""}">${w.live ? "pünktlich" : "nur Fahrplan"}</span>`;
+}
+
+// Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
+let hereBusy = null;
+function hereCard(t) {
+  if (t.phase === "done") return "";
+  if (hereBusy === t.id) return `<section class="card"><div class="k">Ab deinem Standort</div><div class="spinner"></div></section>`;
+  if (!t.here) return `<button class="btn quiet" data-here="${t.id}">Möglichkeiten ab meinem Standort</button>`;
+  const ref = Date.parse(t.plan.arr);
+  const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
+    return `<div class="cmp-row"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
+      <div class="cmp-point">${a.walkStart ? `${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}, ` : ""}ab <b>${hm(a.dep)}</b> ${esc(a.label)}</div>
+      <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
+      <div class="cmp-live">${liveBadge(a)}</div>
+      ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}
+    </div></div>`; }).join("");
+  return `<section class="card"><div class="k">Ab deinem Standort · ${hm(new Date(t.here.at).toISOString())}</div>
+    ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}
+    <button class="btn quiet small-btn" data-here="${t.id}">Neu suchen</button></section>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
@@ -267,6 +290,7 @@ function renderTrip(t, many) {
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted ? " Achtung: Dein Sparpreis gilt nur für die gebuchten Züge, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
     ${t.status === "WATCH" || t.status === "OK" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
+    ${hereCard(t)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
     <div class="card flat">${timeline(t)}</div>
@@ -327,12 +351,23 @@ function bindCommon() {
     openId = null; sheetId = null; await loadTrips().catch(() => {}); render();
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
-    const [id, k, idx] = b.dataset.adopt.split("|"), t = trips.find(x => x.id === id);
+    const [id, k, idx, src] = b.dataset.adopt.split("|"), t = trips.find(x => x.id === id);
     const zbWarn = t && t.ticket === "spar" && !t.zbLifted ? "\n\nAchtung Sparpreis: Die Zugbindung ist noch nicht aufgehoben. Mit einem anderen Zug kann ein neues Ticket fällig werden." : "";
     if (!confirm(`Diese Verbindung übernehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nIch überwache dann die neue Verbindung. Du kannst das rückgängig machen.`)) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
-    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx } }).catch(e => alert(e.message));
+    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
+  });
+  $app.querySelectorAll("[data-here]").forEach(b => b.onclick = () => {
+    const id = b.dataset.here;
+    if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
+    hereBusy = id; render();
+    navigator.geolocation.getCurrentPosition(async pos => {
+      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude } }); trips = trips.map(x => (x.id === id ? v : x)); }
+      catch (e) { alert(e.message); }
+      hereBusy = null; render();
+    }, err => { hereBusy = null; render(); alert(err.code === 1 ? "Ohne Erlaubnis für den Standort kann ich nicht ab hier suchen. Du kannst sie in den Browser-Einstellungen erteilen." : "Standort gerade nicht verfügbar. Bitte gleich noch einmal versuchen."); },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   });
   $app.querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => {
     b.disabled = true;

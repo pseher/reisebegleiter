@@ -54,7 +54,9 @@ export function simplify(data) {
         from: { ...place(l.from), plan: l.scheduledStartTime || place(l.from).plan, rt: l.startTime },
         to: { ...place(l.to), plan: l.scheduledEndTime || place(l.to).plan, rt: l.endTime } });
     }
-    return { dep: it.startTime, arr: it.endTime, minutes: Math.round((it.duration || 0) / 60), transfers: Math.max(0, legs.length - 1), legs };
+    const lead = (it.legs || []).findIndex(l => !["WALK", "BIKE", "CAR"].includes(l.mode));
+    const walkStart = Math.round((it.legs || []).slice(0, Math.max(0, lead)).reduce((m, l) => m + (l.duration || 0), 0) / 60);
+    return { dep: it.startTime, arr: it.endTime, minutes: Math.round((it.duration || 0) / 60), transfers: Math.max(0, legs.length - 1), walkStart, legs };
   }).filter(c => c.legs.length);
 }
 
