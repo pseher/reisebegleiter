@@ -45,6 +45,9 @@ export async function observe(env, checks, now, cache) {
 
 // Plan B: die Restreise bis zum Ziel neu suchen (MOTIS), mit der eigenen Umstiegszeit.
 // Vor der Abfahrt ab dem Startbahnhof, unterwegs ab dem gefährdeten Umsteigebahnhof.
+// Kleinster geplanter Umstieg einer Verbindung (Minuten)
+const minGapOf = legs => legs.slice(1).reduce((m, l, i) => Math.min(m, Math.round((Date.parse(l.from.plan) - Date.parse(legs[i].to.plan)) / MIN)), Infinity);
+
 export async function planB(env, trip, v, k, now) {
   const t = v.transfers[k], last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
   // Pflichtzug hinter dem gefährdeten Umstieg? Dann gezielt rechtzeitig dorthin.
@@ -55,16 +58,38 @@ export async function planB(env, trip, v, k, now) {
   const before = now < v.legs[0].dep.rt - MIN;
   const fromEva = before ? trip.legs[0].from.eva : t.eva;
   if (!fromEva) return [];
-  const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 20 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
+  // Vor der Abfahrt auch frühere Abfahrten zulassen (bis 45 Min. vor Plan)
+  const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 45 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
   const current = trip.legs.slice(before ? 0 : k + 1).map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
-  const cs = await connections(env, fromEva, finalEva, fromMs, own);
-  return cs.filter(c => !c.legs.some(l => l.cancelled))
-    .filter(c => c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|") !== current)
-    .sort((x, y) => Date.parse(x.arr) - Date.parse(y.arr)).slice(0, 2)
-    .map(c => ({ from: before ? "start" : k, at: before ? v.legs[0].dep.name : t.at, label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers,
-      dep: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", arr: c.legs[c.legs.length - 1].to.plan,
-      toName: (last.to.name || "").replace(/\s*\(tief\)$/i, ""), legs: c.legs }));
+  const curArr = v.legs[v.legs.length - 1].arr.rt;
+  const curMin = v.transfers.filter(x => x.status !== "DONE").reduce((m, x) => Math.min(m, x.gap), Infinity);
+  // Zwei Anfragen: normal und „mit mehr Luft“ – der Planer liefert sonst bei gleicher Ankunft nur die späteste (knappste) Abfahrt
+  const [normal, roomy] = await Promise.all([
+    connections(env, fromEva, finalEva, fromMs, own).catch(() => []),
+    connections(env, fromEva, finalEva, fromMs, Math.max(own, 5) + 7).catch(() => []),
+  ]);
+  const seen = new Set(), all = [];
+  for (const c of [...roomy, ...normal]) {
+    const key = c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
+    if (key === current || seen.has(key) || c.legs.some(l => l.cancelled)) continue;
+    seen.add(key); all.push({ c, arr: Date.parse(c.legs[c.legs.length - 1].to.plan), minGap: minGapOf(c.legs) });
+  }
+  const mk = (x, kind) => ({ kind, from: before ? "start" : k, at: before ? v.legs[0].dep.name : t.at, label: x.c.legs.map(l => l.label).join(" → "), transfers: x.c.transfers,
+    dep: x.c.legs[0].from.plan, depPl: x.c.legs[0].from.track || "", arr: x.c.legs[x.c.legs.length - 1].to.plan, minGap: Number.isFinite(x.minGap) ? x.minGap : null,
+    toName: (last.to.name || "").replace(/\s*\(tief\)$/i, ""), legs: x.c.legs });
+  const out = [];
+  // Sicherer: gleiche (oder frühere) Ankunft, deutlich mehr Umstiegszeit – möglichst spät los
+  const safer = all.filter(x => x.arr <= curArr + 2 * MIN && x.minGap >= Math.max(curMin + 4, own + 3)).sort((a, b) => Date.parse(b.c.dep) - Date.parse(a.c.dep))[0];
+  if (safer) out.push(mk(safer, "safer"));
+  // Schneller: früher am Ziel
+  const faster = all.filter(x => x !== safer && x.arr < curArr - 2 * MIN && (x.minGap >= own || x.minGap === Infinity)).sort((a, b) => a.arr - b.arr)[0];
+  if (faster) out.push(mk(faster, "faster"));
+  // Später: nächste entspannte Möglichkeit, falls der Plan kippt
+  const later = all.filter(x => x !== safer && x !== faster && x.arr > curArr + 2 * MIN).sort((a, b) => a.arr - b.arr)[0];
+  if (later) out.push(mk(later, "later"));
+  return out.slice(0, 3);
 }
+
 async function planToMust(env, trip, v, k, mi, now, own) {
   const must = trip.legs[mi], before = now < v.legs[0].dep.rt - MIN;
   const fromEva = before ? trip.legs[0].from.eva : v.transfers[k].eva;
@@ -76,7 +101,7 @@ async function planToMust(env, trip, v, k, mi, now, own) {
   return cs.filter(c => !c.legs.some(l => l.cancelled) && Date.parse(c.legs[c.legs.length - 1].to.rt || c.arr) <= deadline)
     .filter(c => c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|") !== current)
     .sort((x, y) => Date.parse(y.dep) - Date.parse(x.dep)).slice(0, 2)            // möglichst spät los, aber rechtzeitig
-    .map(c => ({ from: before ? "start" : k, until: mi, at: before ? v.legs[0].dep.name : v.transfers[k].at, label: `${c.legs.map(l => l.label).join(" → ")} → ${must.label}`,
+    .map(c => ({ kind: "must", minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null, from: before ? "start" : k, until: mi, at: before ? v.legs[0].dep.name : v.transfers[k].at, label: `${c.legs.map(l => l.label).join(" → ")} → ${must.label}`,
       transfers: c.transfers + 1, dep: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", arr: trip.legs[trip.legs.length - 1].to.plan,
       toName: (trip.legs[trip.legs.length - 1].to.name || "").replace(/\s*\(tief\)$/i, ""), reach: `${must.label} in ${must.from.name} erreicht`, legs: c.legs }));
 }
@@ -88,8 +113,8 @@ export async function assess(env, trip, now, cache) {
   const prev = { ...(trip.state || {}) }, alt = { ...(prev.alt || {}) }, altAt = { ...(prev.altAt || {}) };
   for (const t of v.transfers) {
     const k = v.transfers.indexOf(t);
-    if (t.status === "RISK" || t.status === "LOST") {
-      if (!alt[k] || now - (altAt[k] || 0) > 5 * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
+    if (t.status === "RISK" || t.status === "LOST" || t.status === "WATCH") {
+      if (!alt[k] || now - (altAt[k] || 0) > (t.status === "WATCH" ? 10 : 5) * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
   }
   const { state, msgs } = diff(trip, v, { ...prev, alt }, now);

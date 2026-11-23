@@ -19,7 +19,7 @@ test("Umstiegszeit: Knoten, gleiches Gleis, anderer Bahnhofsteil", () => {
   assert.equal(transferMinutes("8000001", "3", "8000001", "4"), 3);
   assert.equal(transferMinutes("8000001", "2", "8000001", "2"), 3);
   assert.equal(transferMinutes("8011160", "1", "8098160", "5"), 10);
-  assert.equal(growthBuffer(0), 0); assert.equal(growthBuffer(65, 5), 3); assert.equal(growthBuffer(500, 5), 5); assert.equal(growthBuffer(500, 20), 10); assert.equal(growthBuffer(89), 1);
+  assert.equal(growthBuffer(0), 0); assert.equal(growthBuffer(65, 5), 3); assert.equal(growthBuffer(500, 5), 5); assert.equal(growthBuffer(500, 20), 10); assert.equal(growthBuffer(89), 0); assert.equal(growthBuffer(120), 1);
 });
 
 test("pünktlich: alles läuft nach Plan, 17 Min. Umstieg", () => {

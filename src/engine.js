@@ -26,7 +26,7 @@ export function transferMinutes(arrEva, arrPl, depEva, depPl) {
 // Ist der Zug schon verspätet, wächst die Verspätung oft weiter → mehr Puffer, je weiter die Ankunft entfernt ist.
 // Ohne Verspätung nur ein kleiner Puffer für weit entfernte Umstiege.
 export const growthBuffer = (minutesUntilArrival, delay = 0) => (minutesUntilArrival <= 0 ? 0
-  : delay >= 3 ? Math.min(10, delay, Math.floor(minutesUntilArrival / 20)) : Math.min(2, Math.floor(minutesUntilArrival / 60)));
+  : delay >= 3 ? Math.min(10, delay, Math.floor(minutesUntilArrival / 20)) : minutesUntilArrival > 90 ? 1 : 0);
 
 // Halt (Abfahrt oder Ankunft) einer Teilstrecke mit Echtzeit zusammenführen
 function stop(leg, o, side) {

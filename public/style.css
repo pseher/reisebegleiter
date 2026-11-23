@@ -119,3 +119,10 @@ h2 { font-size: 22px; line-height: 1.25; margin: 2px 0 4px; }
 label.btn { cursor: pointer; }
 textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); margin-top: 8px; }
 .must { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--accent); color: #fff; }
+.warn-t { color: var(--watch); font-weight: 600; }
+.cmp-row { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 10px 0; }
+.cmp-row + .cmp-row { border-top: 1px solid var(--line); }
+.cmp-tag { font-weight: 700; font-size: 14px; padding-top: 2px; }
+.cmp-row:first-of-type .cmp-tag { color: var(--muted); }
+.cmp-times { font-variant-numeric: tabular-nums; font-size: 18px; }
+.small-btn { min-height: 40px; padding: 8px 12px; margin: 8px 0 0; }

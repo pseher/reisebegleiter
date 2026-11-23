@@ -95,25 +95,29 @@ function nextCard(n) {
   return `<section class="card next"><div class="k">${head}</div>${body}</section>`;
 }
 
+// Vergleich: dein Plan gegen die Möglichkeiten (sicherer, schneller, später, sitzen bleiben, Pflichtzug)
 function planBCard(t) {
-  const k = t.transfers.findIndex(x => (x.status === "RISK" || x.status === "LOST") && x.alt?.length);
+  const k = t.transfers.findIndex(x => ["RISK", "LOST", "WATCH"].includes(x.status) && x.alt?.length);
   const open = t.transfers.find(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
-  if (k < 0) return !open ? "" : `<section class="card"><div class="k">Plan B</div><p class="muted small">${open.altChecked
-    ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Alternative. Ich prüfe weiter.")
-    : "Ich suche Alternativen …"}</p></section>`;
-  const before = Date.now() < Date.parse(t.legs[0].dep.rt), cur = before ? t.legs[0] : t.legs[k];
-  const lastArr = Date.parse(t.legs[t.legs.length - 1].arr.rt);
-  const cmp = a => { if (!a.arr || t.transfers[k].status === "LOST") return ""; const d = Math.round((Date.parse(a.arr) - lastArr) / MIN);
-    return d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · gleiche Ankunft"; };
-  return `<section class="card planb"><div class="k">Plan B</div>${t.transfers[k].alt.map((a, ai) => {
-    const stay = a.legs?.length === 1 && a.label === cur.label;
-    return `
-    <div class="alt-row">
-      ${stay ? `<div><b>Im ${esc(a.label)} sitzen bleiben</b> bis ${esc(a.toName)}</div>`
-        : `<div><b>${hm(a.dep)}</b> ab ${esc(a.at)}${a.depPl ? ` ${gl(a.depPl)}` : ""}</div><div class="small">${esc(a.label)}</div>`}
-      ${a.reach ? `<div class="small"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}<div class="small muted">an ${esc(a.toName)} ${a.arr ? hm(a.arr) : "?"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : stay ? "" : " · direkt"}${cmp(a)}</div>
-      <button class="btn ${ai ? "sec" : ""}" data-adopt="${t.id}|${k}|${ai}">${ai ? "Diese nehmen" : "Plan B übernehmen"}</button>
-    </div>`; }).join("")}</section>`;
+  if (k < 0) return !open ? "" : `<section class="card"><div class="k">Möglichkeiten</div><p class="muted small">${open.altChecked
+    ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Möglichkeit. Ich prüfe weiter.")
+    : "Ich suche Möglichkeiten …"}</p></section>`;
+  const tr = t.transfers[k], cur = t.plan, lost = tr.status === "LOST";
+  const before = Date.now() < Date.parse(t.legs[0].dep.rt), curLeg = before ? t.legs[0] : t.legs[k];
+  const curArr = Date.parse(cur.arr);
+  const gapTag = (m, need) => m == null ? "kein Umstieg" : `<span class="${m < (need || 3) ? "late" : m < (need || 3) + 3 ? "warn-t" : "ok-t"}">${m} Min.</span>`;
+  const delta = a => { const d = Math.round((Date.parse(a.arr) - curArr) / MIN); return lost ? "" : d < -1 ? `<b class="ok-t">${-d} Min. früher</b>` : d > 1 ? `${d} Min. später` : "gleiche Ankunft"; };
+  const tag = a => a.legs?.length === 1 && a.label === curLeg.label ? "Sitzen bleiben" : ({ safer: "Sicherer", faster: "Schneller", later: "Später", must: "Rechtzeitig" }[a.kind] || "Alternative");
+  const row = (name, dep, arr, sub, gap, extra = "", btn = "") => `<div class="cmp-row">
+      <div class="cmp-tag">${name}</div>
+      <div class="cmp-main"><div class="cmp-times"><b>${hm(dep)} → ${hm(arr)}</b>${extra ? ` <span class="small">${extra}</span>` : ""}</div>
+        <div class="small muted">${sub}</div><div class="small">Knappster Umstieg: ${gap}</div>${btn}</div></div>`;
+  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>
+    ${lost ? "" : row("Dein Plan", cur.dep, cur.arr, esc(cur.label), gapTag(cur.minGap, t.minT || 3), tr.status === "WATCH" ? "" : `<span class="late">gefährdet</span>`)}
+    ${tr.alt.map((a, ai) => row(tag(a), a.dep, a.arr || a.dep, `${esc(a.label)} · ab ${esc(a.at)}${a.depPl ? `, Gl. ${esc(a.depPl)}` : ""}`, gapTag(a.minGap, t.minT || 3),
+      a.reach ? `<b class="ok-t">${esc(a.reach)}</b>` : delta(a),
+      `<button class="btn ${ai ? "sec" : ""} small-btn" data-adopt="${t.id}|${k}|${ai}">Übernehmen</button>`)).join("")}
+  </section>`;
 }
 
 // Kompakter Verlauf: eine Zeile pro Zug, Umstiege als schmale Zeile, Details auf Antippen
@@ -160,8 +164,7 @@ function renderTrip(t, many) {
     <div class="trip-head"><h1>${route(t)}</h1><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${KICKER[t.status] || ""}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ Plan B:.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
-    ${planBCard(t)}
-    ${nextCard(t.next)}
+    ${t.status === "WATCH" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
     <div class="card flat">${timeline(t)}</div>
