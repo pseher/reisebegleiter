@@ -513,8 +513,9 @@ function bindWhen(key, changed) {
   const set = ms => { W[key] = ms; changed(); render(); };
   $app.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { W.cal = null; set(Date.now() + +b.dataset.q * MIN); });
   $app.querySelector("[data-cal]")?.addEventListener("click", () => { W.cal = W.cal === key ? null : key; W.calM = startOfDay(W[key]); render(); });
-  $app.querySelectorAll("[data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
-  $app.querySelectorAll("[data-day]").forEach(b => b.onclick = () => {
+  const own = sel => [...$app.querySelectorAll(sel)].filter(b => !b.closest(".fav-days"));   // Kalender der Favoriten hat eigene Knöpfe
+  own("[data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
+  own("[data-day]").forEach(b => b.onclick = () => {
     const d = new Date(+b.dataset.day), t = new Date(W[key]); d.setHours(t.getHours(), t.getMinutes());
     W.cal = null; set(Math.max(d.getTime(), Date.now()));
   });
@@ -545,6 +546,15 @@ function favOfTrip(t) {
 const isFav = t => { const f = favOfTrip(t); return FAVS.some(x => x.id === f.id); };
 function toggleFav(t) { const f = favOfTrip(t); FAVS = isFav(t) ? FAVS.filter(x => x.id !== f.id) : [f, ...FAVS].slice(0, 12); saveFavs(); }
 // nächster Termin zur Lieblingsuhrzeit: heute, falls noch nicht vorbei, sonst morgen
+// Tagauswahl für einen Favoriten: die nächsten 7 Tage als Knöpfe, sonst Kalender
+function favDays(f) {
+  const [h, m] = f.time.split(":").map(Number), days = [];
+  for (let k = 0; k < 8 && days.length < 7; k++) { const d = new Date(); d.setDate(d.getDate() + k); d.setHours(h, m, 0, 0); if (d.getTime() > Date.now() - 2 * MIN) days.push(d.getTime()); }
+  const lbl = ms => sameDay(ms, Date.now()) ? "Heute" : sameDay(ms, Date.now() + 864e5) ? "Morgen" : new Date(ms).toLocaleDateString("de-DE", { weekday: "short", day: "numeric" }).replace(",", "");
+  return `<div class="fav-days"><p class="small" style="margin:6px 0"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b> um ${esc(f.time)} – an welchem Tag?</p><div class="day-grid">${days.map(ms => `<button class="chip" data-favday="${ms}">${lbl(ms)}</button>`).join("")}
+      <button class="chip" data-favcal aria-pressed="${W.cal === "favwhen"}">${CAL_ICON.replace("margin-right:8px", "margin-right:3px")}Mehr</button></div>
+    ${W.cal === "favwhen" ? whenPicker("favwhen").replace(/^[\s\S]*?<\/div>\s*<div class="when-row">[\s\S]*?<\/div>/, "") : ""}</div>`;
+}
 function nextAt(time) { const [h, m] = time.split(":").map(Number), d = new Date(); d.setHours(h, m, 0, 0); if (d.getTime() < Date.now() - 2 * MIN) d.setDate(d.getDate() + 1); return d.getTime(); }
 const sameTrains = (c, fav) => fav && c.legs.map(l => l.label.replace(/\s/g, "")).join(">") === fav.trains.map(x => x.replace(/\s/g, "")).join(">")
   && Math.abs((Date.parse(c.legs[0].from.plan) - new Date(c.legs[0].from.plan).setHours(...fav.time.split(":").map(Number), 0, 0)) / MIN) <= 5;
@@ -570,8 +580,9 @@ function renderWizard() {
   if (W.step === "route") {
     $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : "Neue Reise"}</p>
       ${!W.editId && FAVS.length ? `<section class="card favs"><div class="k">★ Favoriten</div><ul class="list">${FAVS.map((f, i) => `<li class="fav-row"><button data-fav="${i}"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><br>
-        <span class="small muted">${esc(f.time)} · ${esc(f.trains.join(" → "))}</span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>`).join("")}</ul>
-        <p class="small muted" style="margin:4px 0 0">Antippen sucht die nächste Fahrt zu dieser Uhrzeit. Anderer Tag: erst unten bei „Abfahrt“ das Datum wählen, dann den Favoriten antippen.</p></section>` : ""}
+        <span class="small muted">${esc(f.time)} · ${esc(f.trains.join(" → "))}</span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen" aria-expanded="${W.favOpen === i}">✕</button></li>`).join("")}</ul>
+        ${W.favOpen != null && FAVS[W.favOpen] ? favDays(FAVS[W.favOpen]) : ""}
+        <p class="small muted" style="margin:4px 0 0">Antippen, Tag wählen – ich suche die Fahrt zu deiner üblichen Uhrzeit.</p></section>` : ""}
       ${W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
@@ -613,13 +624,15 @@ function renderWizard() {
     bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.fav = null; W.step = "conns"; render(); };
-    $app.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => {
-      const f = FAVS[+b.dataset.fav]; if (!f) return;
-      // gewählter Tag (falls oben geändert) + Lieblingsuhrzeit, sonst der nächste passende Termin
-      const [h, m] = f.time.split(":").map(Number), d = new Date(W.when); d.setHours(h, m, 0, 0);
-      W.when = Math.max(Date.now(), (sameDay(W.when, Date.now()) ? nextAt(f.time) : d.getTime()) - 15 * MIN);   // etwas früher suchen, damit die übliche Verbindung sicher dabei ist
-      W.rFrom = f.from; W.rTo = f.to; W.fav = f; W.conns = null; W.error = ""; W.step = "conns"; render();
-    });
+    // Favorit antippen → Tag wählen → suchen (etwas vor der üblichen Uhrzeit, damit sie sicher dabei ist)
+    const favSearch = (f, ms) => { W.when = Math.max(Date.now(), ms - 15 * MIN); W.rFrom = f.from; W.rTo = f.to; W.fav = f; W.favOpen = null; W.cal = null; W.conns = null; W.error = ""; W.step = "conns"; render(); };
+    $app.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => { const i = +b.dataset.fav; W.favOpen = W.favOpen === i ? null : i; W.cal = null; render(); });
+    $app.querySelectorAll("[data-favday]").forEach(b => b.onclick = () => favSearch(FAVS[W.favOpen], +b.dataset.favday));
+    $app.querySelector("[data-favcal]")?.addEventListener("click", () => { const f = FAVS[W.favOpen]; W.favwhen = nextAt(f.time); W.calM = W.favwhen; W.cal = W.cal === "favwhen" ? null : "favwhen"; render(); });
+    // Tag im Kalender → gleich suchen
+    $app.querySelectorAll(".fav-days [data-day]").forEach(b => b.onclick = () => {
+      const f = FAVS[W.favOpen], [h, m] = f.time.split(":").map(Number), d = new Date(+b.dataset.day); d.setHours(h, m, 0, 0); favSearch(f, d.getTime()); });
+    $app.querySelectorAll(".fav-days [data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
     $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = () => { if (!confirm("Favorit entfernen?")) return; FAVS.splice(+b.dataset.favdel, 1); saveFavs(); render(); });
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
     document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));

@@ -244,3 +244,7 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 .fav-del { flex: 0 0 44px; border: 0; background: transparent; color: var(--muted); font-size: 16px; cursor: pointer; }
 .fav-tag { display: block; color: #b07f00; font-weight: 700; margin-bottom: 2px; }
 button.fav-hit { box-shadow: inset 3px 0 0 #d49a00; }
+.fav-days { padding: 6px 0 10px; }
+.day-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.day-grid .chip { justify-content: center; text-align: center; padding: 8px 2px; margin: 0; display: inline-flex; align-items: center; width: 100%; min-width: 0; flex: none; white-space: nowrap; font-size: 15px; }
+.fav-days .cal { margin-top: 8px; }
