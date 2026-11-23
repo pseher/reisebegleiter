@@ -647,10 +647,14 @@ function renderWizard() {
 
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
-      ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
-      ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
+      ${err}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn quiet" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
+      ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>` : ""}${back}`;
     if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
+    // eine Stunde früher suchen (nicht vor jetzt)
+    const ec = document.getElementById("earlierC");
+    if (ec) ec.onclick = () => { const first = W.conns[0] ? Date.parse(W.conns[0].legs[0].from.plan) : W.when; W.when = Math.max(Date.now(), Math.min(W.when, first) - 60 * MIN); W.conns = null; render(); };
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
@@ -683,9 +687,12 @@ function renderWizard() {
     const base = W.legs.length ? Date.parse(W.legs[n - 1].to.plan) : Date.now();
     $app.innerHTML = `${head}<h1>Welcher Zug ab ${esc(W.station.name)}?</h1>
       ${W.legs.length ? `<p class="muted small">Ankunft dort laut Plan ${hm(W.legs[n - 1].to.plan)}.</p>` : whenPicker("from")}
-      ${err}<div id="trains">${W.list ? trainList(W.list) : `<div class="spinner"></div>`}</div>
-      ${W.list ? `<button class="btn sec" id="later">Spätere Züge</button>` : ""}${back}`;
+      ${err}${W.list && W.from > Date.now() + 5 * MIN && !W.legs.length ? `<button class="btn quiet" id="earlier">↑ Frühere Züge</button>` : ""}
+      <div id="trains">${W.list ? trainList(W.list) : `<div class="spinner"></div>`}</div>
+      ${W.list ? `<button class="btn sec" id="later">↓ Spätere Züge</button>` : ""}${back}`;
     if (!W.legs.length) bindWhen("from", () => { W.list = null; });
+    const earlier = document.getElementById("earlier");
+    if (earlier) earlier.onclick = () => { W.from = Math.max(Date.now(), W.from - 60 * MIN); W.list = null; render(); };
     const later = document.getElementById("later");
     if (later) later.onclick = () => { const l = W.list[W.list.length - 1]; W.from = l ? Date.parse(l.rt) + MIN : W.from + 60 * MIN; W.list = null; render(); };
     if (!W.list) {
