@@ -180,7 +180,7 @@ function planBCard(t) {
   const liveOf = liveBadge;
   const rows = tr.alt.map((a, ai) => {
     const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
-    return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr)}"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
+    return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
       ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}
       ${a.from === "start" ? losZiel(a.dep, a.arr || a.dep, t.plan.dep, lost ? null : t.plan.arr) : losZiel(a.dep, a.arr || a.dep, null, lost ? null : t.plan.arr).replace("Los <b>", `Ab ${esc(cleanStop(a.at))} <b>`)}
       ${stepsHtml(altSteps(a))}
@@ -222,7 +222,7 @@ function losZiel(dep, arr, refDep, refArr) {
 const fmtSpan = m => (m >= 120 ? `${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 60} Min.` : ""}` : `${m} Min.`);
 
 // Dezente Farbe je Möglichkeit: kommt sie (laut Plan bzw. Echtzeit) rechtzeitig an oder später als deine gebuchte Ankunft?
-const arrTone = (arr, planArr) => { const d = Math.round((Date.parse(arr) - Date.parse(planArr)) / MIN);
+const arrTone = (arr, planArr, w) => { if (w && (w.cancelled || !w.ok)) return "arr-much"; const d = Math.round((Date.parse(arr) - Date.parse(planArr)) / MIN);
   return !Number.isFinite(d) ? "" : d <= 2 ? "arr-ok" : d <= 20 ? "arr-late" : "arr-much"; };
 
 // Live-Zustand einer Möglichkeit (wird ab 3 Std. vor Abfahrt mitbeobachtet)
@@ -249,7 +249,7 @@ function hereCard(t) {
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
-    return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr)}"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
+    return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
       ${losZiel(a.dep, a.arr, null, t.plan.arr)}
       ${a.walkStart ? `<div class="small muted">Vorher ${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}</div>` : ""}
       ${stepsHtml(altSteps(a))}
@@ -259,10 +259,11 @@ function hereCard(t) {
     </div></div>`; }).join("");
   const mode = t.here.mode || "trip";
   const title = mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · zur Reisezeit (${day(t.legs[0].dep.plan)})` : mode === "now" ? "Ab deinem Standort · ab jetzt" : `Ab deinem Standort · zur Reisezeit (${day(t.legs[0].dep.plan)})`;
-  return `<section class="card"><div class="k">${title}</div>
-    ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}
-    <button class="btn quiet small-btn" data-here="${t.id}" data-mode="${mode}">Neu suchen</button>
-    <p class="small muted" style="margin:8px 0 0">Oder suchen:</p>${searchChips(t, mode)}</section>`;
+  // Auswahl der Suche oben, darunter die Ergebnisse
+  return `<section class="card"><div class="k">Andere Verbindungen</div>
+    <div class="chips search-chips"><button class="chip" aria-pressed="true" data-here="${t.id}" data-mode="${mode}" title="Neu suchen">${mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · ${day(t.legs[0].dep.plan)}` : `${PIN}Ab meinem Standort · ${mode === "now" ? "jetzt" : "zur Reisezeit"}`} ↻</button></div>
+    ${searchChips(t, mode)}
+    ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}</section>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
