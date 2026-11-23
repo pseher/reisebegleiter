@@ -126,3 +126,10 @@ textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; 
 .cmp-row:first-of-type .cmp-tag { color: var(--muted); }
 .cmp-times { font-variant-numeric: tabular-nums; font-size: 18px; }
 .small-btn { min-height: 40px; padding: 8px 12px; margin: 8px 0 0; }
+.cmp-point { font-size: 16px; font-variant-numeric: tabular-nums; }
+.cmp-goal { font-size: 15px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.cmp-goal b { color: var(--ink); }
+.cmp-more { margin-top: 6px; }
+.cmp-act { margin-top: 4px; }
+.cmp-act .btn { margin: 4px 0 0; }
+.cmp-row.cur { background: var(--bg); margin: 0 -16px; padding: 10px 16px; border-radius: 0; }

@@ -95,29 +95,47 @@ function nextCard(n) {
   return `<section class="card next"><div class="k">${head}</div>${body}</section>`;
 }
 
-// Vergleich: dein Plan gegen die Möglichkeiten (sicherer, schneller, später, sitzen bleiben, Pflichtzug)
+// Vergleich: pro Option nur das Entscheidende – der knappste Umstieg (an → weiter) und die Ankunft am Ziel.
+// Züge, Gleise, Startbahnhof erst auf Antippen.
+let openCmp = null;
+const cleanStop = n => String(n || "").replace(/^(S\+U|S|U)\s+/, "").replace(/\s+Bhf\b/, "").replace(/\s*\((Berlin|tief)\)/g, "").trim();
+function tightest(legs) {   // aus Plan-B-Teilstrecken (MOTIS)
+  let best = null;
+  for (let j = 0; j + 1 < legs.length; j++) {
+    const arr = legs[j].to.plan, dep = legs[j + 1].from.plan, gap = Math.round((Date.parse(dep) - Date.parse(arr)) / MIN);
+    if (!best || gap < best.gap) best = { at: cleanStop(legs[j].to.name), arr, dep, gap };
+  }
+  return best;
+}
 function planBCard(t) {
   const k = t.transfers.findIndex(x => ["RISK", "LOST", "WATCH"].includes(x.status) && x.alt?.length);
   const open = t.transfers.find(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
   if (k < 0) return !open ? "" : `<section class="card"><div class="k">Möglichkeiten</div><p class="muted small">${open.altChecked
     ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Möglichkeit. Ich prüfe weiter.")
     : "Ich suche Möglichkeiten …"}</p></section>`;
-  const tr = t.transfers[k], cur = t.plan, lost = tr.status === "LOST";
+  const tr = t.transfers[k], lost = tr.status === "LOST", need = t.minT || 3;
   const before = Date.now() < Date.parse(t.legs[0].dep.rt), curLeg = before ? t.legs[0] : t.legs[k];
-  const curArr = Date.parse(cur.arr);
-  const gapTag = (m, need) => m == null ? "kein Umstieg" : `<span class="${m < (need || 3) ? "late" : m < (need || 3) + 3 ? "warn-t" : "ok-t"}">${m} Min.</span>`;
-  const delta = a => { const d = Math.round((Date.parse(a.arr) - curArr) / MIN); return lost ? "" : d < -1 ? `<b class="ok-t">${-d} Min. früher</b>` : d > 1 ? `${d} Min. später` : "gleiche Ankunft"; };
-  const tag = a => a.legs?.length === 1 && a.label === curLeg.label ? "Sitzen bleiben" : ({ safer: "Sicherer", faster: "Schneller", later: "Später", must: "Rechtzeitig" }[a.kind] || "Alternative");
-  const row = (name, dep, arr, sub, gap, extra = "", btn = "") => `<div class="cmp-row">
-      <div class="cmp-tag">${name}</div>
-      <div class="cmp-main"><div class="cmp-times"><b>${hm(dep)} → ${hm(arr)}</b>${extra ? ` <span class="small">${extra}</span>` : ""}</div>
-        <div class="small muted">${sub}</div><div class="small">Knappster Umstieg: ${gap}</div>${btn}</div></div>`;
-  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>
-    ${lost ? "" : row("Dein Plan", cur.dep, cur.arr, esc(cur.label), gapTag(cur.minGap, t.minT || 3), tr.status === "WATCH" ? "" : `<span class="late">gefährdet</span>`)}
-    ${tr.alt.map((a, ai) => row(tag(a), a.dep, a.arr || a.dep, `${esc(a.label)} · ab ${esc(a.at)}${a.depPl ? `, Gl. ${esc(a.depPl)}` : ""}`, gapTag(a.minGap, t.minT || 3),
-      a.reach ? `<b class="ok-t">${esc(a.reach)}</b>` : delta(a),
-      `<button class="btn ${ai ? "sec" : ""} small-btn" data-adopt="${t.id}|${k}|${ai}">Übernehmen</button>`)).join("")}
-  </section>`;
+  const curArr = Date.parse(t.plan.arr);
+  const tone = g => (g < need ? "late" : g < need + 3 ? "warn-t" : "ok-t");
+  const point = p => p ? `<div class="cmp-point">${esc(p.at)}: an <b>${hm(p.arr)}</b> → weiter <b>${hm(p.dep)}</b> · <span class="${tone(p.gap)}"><b>${p.gap} Min.</b></span></div>`
+    : `<div class="cmp-point">ohne Umstieg</div>`;
+  const goal = (arr, d) => `<div class="cmp-goal">Ziel <b>${hm(arr)}</b>${d}</div>`;
+  const delta = a => { const d = Math.round((Date.parse(a.arr) - curArr) / MIN); return lost ? "" : d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · gleich"; };
+  const tag = a => a.legs?.length === 1 && a.label === curLeg.label ? "Sitzen bleiben" : ({ safer: "Sicherer", faster: "Schneller", later: "Später", must: "Rechtzeitig" }[a.kind] || "Möglichkeit");
+  // Dein Plan: der knappste offene Umstieg mit Echtzeit
+  const cur = t.transfers.filter(x => x.status !== "DONE").sort((a, b) => a.gap - b.gap)[0];
+  const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">
+      ${cur ? point({ at: cur.at, arr: cur.arrRt, dep: cur.depRt, gap: cur.gap }) : point(null)}${goal(t.plan.arr, "")}</div></div>`;
+  const rows = tr.alt.map((a, ai) => {
+    const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
+    return `<div class="cmp-row"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
+      ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : point(tightest(a.legs || []))}
+      ${goal(a.arr || a.dep, a.reach ? "" : delta(a))}
+      ${isOpen ? `<div class="small muted cmp-more">Los: ${hm(a.dep)} ab ${esc(a.at)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""}<br>${esc(a.label)}</div>` : ""}
+      <div class="row cmp-act"><button class="btn ${ai ? "sec" : ""} small-btn" data-adopt="${t.id}|${k}|${ai}">Übernehmen</button>
+        <button class="btn quiet small-btn" data-cmp="${id}">${isOpen ? "Weniger" : "Details"}</button></div>
+    </div></div>`; }).join("");
+  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${curRow}${rows}</section>`;
 }
 
 // Kompakter Verlauf: eine Zeile pro Zug, Umstiege als schmale Zeile, Details auf Antippen
@@ -179,6 +197,7 @@ function renderTrip(t, many) {
     ${pushCard()}
     ${many ? "" : `<button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`}`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
+  $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
