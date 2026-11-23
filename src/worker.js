@@ -4,7 +4,7 @@ import { searchStations, byEva, nearby } from "./stations.js";
 import { connections, resolveConnection, geocodeStop } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
-import { evaluate, changesFV } from "./engine.js";
+import { evaluate, changesFV, isFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
 import { vapid, b64u } from "./push.js";
 
@@ -35,11 +35,18 @@ function view(trip, now = Date.now()) {
     minGap: open.length ? Math.min(...open.map(t => t.gap)) : null, label: v.legs.map(l => l.label).join(" → ") };
   const canUndo = !!st.undo?.legs?.length && now - (st.undo.at || 0) < 3 * 3600e3 && v.phase !== "done";
   const undoZb = canUndo && changesFV(st.undo.legs, trip.legs);       // nur dann betrifft die Änderung die Zugbindung
-  const here = st.here && now - st.here.at < 30 * MIN ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
+  // Zugbindung je Möglichkeit immer frisch bewerten (auch für früher gespeicherte Ergebnisse)
+  const hasFV = trip.legs.some(isFV);
+  const hereRaw = st.here && now - st.here.at < 30 * MIN ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
+  const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = hasFV && changesFV(trip.legs, a.legs || []);
+    return { ...a, zb, kind: a.kind === "asplanned" ? a.kind : hasFV && !zb ? "samefv" : "here" }; }) } : null;
+  const altZb = (a, k) => { if (!hasFV || !a.legs) return false;
+    const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
+    return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, undoZb, here, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
-    transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [], altChecked: !!st.altAt?.[k] })) };
+    transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
 }
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
