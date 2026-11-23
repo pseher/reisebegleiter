@@ -246,7 +246,7 @@ function renderTrip(t, many) {
     <div class="trip-head"><h1>${route(t)}</h1><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
-    ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
+    ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted ? " Achtung: Dein Sparpreis gilt nur für die gebuchten Züge, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
     ${t.status === "WATCH" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
@@ -333,7 +333,7 @@ const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffse
 function stationField(id, label, val) {
   return val
     ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
-    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search"><ul class="list" id="${id}Res"></ul>`;
+    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}"><ul class="list" id="${id}Res"></ul>`;
 }
 
 function connList(list) {
@@ -341,7 +341,7 @@ function connList(list) {
   return `<ul class="list">${list.map((c, i) => {
     const late = Math.round((Date.parse(c.legs[0].from.rt || c.dep) - Date.parse(c.legs[0].from.plan)) / MIN);
     return `<li><button data-c="${i}"><div class="train" style="grid-template-columns:1fr auto">
-      <span class="t">${hm(c.legs[0].from.plan)} → ${hm(c.legs[c.legs.length - 1].to.plan)}${late >= 1 ? ` <span class="late">+${late}</span>` : ""}</span>
+      <span class="t">${hm(c.legs[0].from.rt || c.legs[0].from.plan)}${late >= 1 ? ` <span class="late">+${late}</span>` : ""} → ${hm(c.legs[c.legs.length - 1].to.rt || c.legs[c.legs.length - 1].to.plan)}</span>
       <span class="pl">${dur(c.minutes)}</span>
       <span class="d" style="grid-column:1/3">${c.transfers ? `${c.transfers} Umstieg${c.transfers > 1 ? "e" : ""} · ` : "direkt · "}${c.legs.map(l => esc(l.label)).join(" → ")}${c.legs.some(l => l.cancelled) ? ` <span class="late">Ausfall</span>` : ""}</span>
     </div></button></li>`; }).join("")}</ul>`;
@@ -375,7 +375,9 @@ function renderWizard() {
       <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
-      inp.oninput = () => { clearTimeout(t); t = setTimeout(() => searchInto(inp.value, `${id}Res`, st => { W[k] = st; render(); }), 250); };
+      const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); });
+      inp.oninput = () => { (W.typed ||= {})[id] = inp.value; saveW(); clearTimeout(t); t = setTimeout(find, 250); };
+      if (inp.value.trim().length >= 2) find();          // nach dem Neuzeichnen die Treffer wieder zeigen
     }
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });

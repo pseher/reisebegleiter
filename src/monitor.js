@@ -199,7 +199,9 @@ export async function deliver(env, sub, msg) {
 export async function adopt(env, trip, k, idx) {
   const a = trip.state?.alt?.[k]?.[idx];
   if (!a?.legs?.length) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
-  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now() };
+  const st0 = trip.state || {};
+  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null };
+  const origArr = st0.origArr || trip.legs[trip.legs.length - 1].to.plan;   // ursprünglich gebuchte Ankunft merken
   const fresh = (await resolveConnection(env, a.legs)).map(l => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
   const tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
@@ -223,7 +225,7 @@ export async function adopt(env, trip, k, idx) {
   const depKeep = a.kind === "stay" ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
@@ -231,10 +233,10 @@ export async function adopt(env, trip, k, idx) {
 // Übernommenen Plan B zurücknehmen
 export function undoAdopt(trip) {
   const u = trip.state?.undo;
-  if (!u?.legs?.length) throw Object.assign(new Error("Hier gibt es nichts mehr zurückzunehmen."), { user: true });
+  if (!u?.legs?.length || Date.now() - (u.at || 0) > 3 * 3600e3) throw Object.assign(new Error("Hier gibt es nichts mehr zurückzunehmen."), { user: true });
   trip.legs = u.legs; trip.obs = u.obs || [];
   const { undo, ...st } = trip.state;
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: {}, pl: {} };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: u.legC || {}, pl: u.pl || {}, rem: u.rem || {}, origArr: u.origArr || undefined };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }

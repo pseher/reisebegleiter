@@ -64,7 +64,7 @@ test("Gefährdet-Meldung: kurz, mit Vorschlag und Minutenunterschied", () => {
   for (const m of [40, 41]) { const n = T0 + m * MIN, d = diff(t, evaluate(t, n), st, n); st = { ...d.state, alt: { 0: alt } }; msgs.push(...d.msgs); }
   const w = msgs.find(m => /gefährdet/.test(m.title));
   assert.ok(w, JSON.stringify(msgs));
-  assert.match(w.body, /sitzen bleiben/); assert.match(w.body, /4 Min\. früher/); assert.match(w.body, /Sparpreis/);
+  assert.match(w.body, /Sitzen bleiben/); assert.match(w.body, /4 Min\. früher/); assert.match(w.body, /Sparpreis/);
 });
 
 // Testdaten: ICE 5xx fährt Berlin → Leipzig → … → München, ICE 16xx ab Leipzig
@@ -97,4 +97,17 @@ test("Sitzen bleiben übernehmen verlängert den Zug; Meldungsstand zurückgeset
   assert.deepEqual(t.state.pl, { d0: "14" }); assert.deepEqual(t.state.legC, {});
   undoAdopt(t);
   assert.equal(t.legs.length, 2); assert.equal(t.legs[1].label, `ICE ${1600 + hh}`);
+});
+
+test("Ausfall einer Reise ohne Umstieg: nie „Angekommen“", () => {
+  const t = { id: "s", ticket: "flex", legs: [trip().legs[0]], obs: [{ dep: { c: true, t: 1, live: true }, arr: { c: true, t: 1, live: true } }] };
+  const v = evaluate(t, T0 + 200 * MIN);
+  assert.notEqual(v.phase, "done"); assert.match(v.title, /fällt aus/);
+});
+
+test("nach „Sitzen bleiben“ zählt die ursprünglich gebuchte Ankunft", () => {
+  const t = { id: "s", ticket: "spar", legs: [{ ...trip().legs[0], to: { eva: "8000261", name: "München Hbf", plan: iso(281), platform: "18" } }],
+    obs: [{ dep: { rt: iso(13), t: 1 }, arr: {} }], state: { origArr: iso(285) } };
+  const v = evaluate(t, T0 + 100 * MIN);
+  assert.equal(v.finalDelay, 9); assert.equal(v.status, "OK");
 });

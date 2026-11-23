@@ -172,7 +172,7 @@ async function api(req, env, url) {
     // Halt nicht auf der Strecke des Zugs: gar nicht erst suchen
     if (b.onRoute === false) return fail(400, `${b.label} hält laut Fahrplan nicht in ${b.toName || "diesem Bahnhof"}. Wähle einen Halt aus der Liste – oder suche die ganze Verbindung über „Neue Reise → Von / Nach“.`);
     const start = Date.parse(b.from.plan) + 10 * MIN;
-    const hit = await findJourney(env, "arr", b.toEva, b.jid, start, { windows: 8, label: b.label, after: Date.parse(b.from.plan) });
+    const hit = await findJourney(env, "arr", b.toEva, b.jid, start, { windows: 14, label: b.label, after: Date.parse(b.from.plan) });   // bis ca. 6 Std. Fahrzeit
     if (!hit) return fail(404, b.onRoute === false
       ? `${b.label} hält laut Fahrplan nicht in ${b.toName || "diesem Bahnhof"}. Wähle einen Halt aus der Liste und füge danach einen Umstieg hinzu.`
       : `Die Ankunft von ${b.label} in ${b.toName || "diesem Bahnhof"} wurde nicht gefunden. Bitte einen anderen Halt wählen oder es gleich noch einmal versuchen.`);
@@ -245,6 +245,12 @@ async function api(req, env, url) {
       if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) await db.update(env, "rb_trips", t.id, { ticket: b.ticket });
       if ("mustLeg" in b) { const mi = b.mustLeg == null ? -1 : +b.mustLeg; await db.update(env, "rb_trips", t.id, { legs: t.legs.map((l, i) => ({ ...l, must: i === mi })), state: { ...(t.state || {}), alt: {}, altAt: {} } }); }
       if (b.minT != null) { const m = Math.min(30, Math.max(0, +b.minT || 0)); await db.update(env, "rb_trips", t.id, { legs: t.legs.map(l => ({ ...l, minT: m })) }); }
+      // Pflichtzug oder Umstiegszeit geändert: gleich neu bewerten, damit Möglichkeiten sofort da sind
+      if ("mustLeg" in b || b.minT != null) {
+        const u = await db.get(env, "rb_trips", t.id), now = Date.now();
+        await assess(env, u, now, new Map()).catch(e => console.log("Neu bewerten:", e.message));
+        await db.update(env, "rb_trips", u.id, { state: u.state });
+      }
       return json({ ok: true });
     }
   }

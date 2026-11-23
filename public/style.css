@@ -156,4 +156,6 @@ textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; 
   .cmp-act { flex-wrap: wrap; }
   .next .big { font-size: 26px; }
 }
-main { overflow-wrap: anywhere; }
+main { overflow-wrap: break-word; }
+.small-btn, .chip, .gl { white-space: nowrap; }
+.banner a { color: var(--accent); font-weight: 600; }

@@ -72,18 +72,19 @@ export function evaluate(trip, now = Date.now()) {
       fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
   }
   const openTransfers = transfers.filter(t => t.status !== "DONE");
-  const lostAny = openTransfers.find(t => t.status === "LOST");
+  const lostAny = openTransfers.find(t => t.status === "LOST") || legs.find(l => l.dep.cancelled || l.arr.cancelled);
   // Nach einem verpassten Anschluss ist die Reise nicht „angekommen“, nur weil der verpasste Zug sein Ziel erreicht hat
   const phase = now < first.dep.rt ? "before" : now > last.arr.rt + 2 * MIN && !lostAny ? "done" : "enroute";
   const current = legs.findIndex(l => now < l.arr.rt + MIN);
-  const legCancel = legs.find(l => (l.dep.cancelled || l.arr.cancelled) && l.arr.rt > now - MIN);
+  const legCancel = legs.find(l => (l.dep.cancelled || l.arr.cancelled) && (l.arr.rt > now - MIN || phase !== "done"));
   let status = openTransfers.reduce((s, t) => (SEV[t.status] > SEV[s] ? t.status : s), phase === "done" ? "DONE" : "OK");
   if (legCancel && phase !== "done") status = "LOST";
   const lostTransfer = openTransfers.find(t => t.status === "LOST");
-  const finalDelay = lostTransfer || legCancel ? null : last.arr.delay;
+  const bookedArr = Date.parse(trip.state?.origArr || "") || last.arr.plan;   // nach „Übernehmen“: ursprünglich gebuchte Ankunft
+  const finalDelay = lostTransfer || legCancel ? null : Math.round((last.arr.rt - bookedArr) / MIN);
   if (status === "OK" && phase !== "done" && (finalDelay ?? 0) >= 10) status = "WATCH";   // deutlich später am Ziel: nicht grün
   const zbLifted = trip.ticket === "spar" && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
-  const v = { status, phase, legs, transfers, current, finalDelay, zbLifted, legCancel: legCancel ? legCancel.i : null };
+  const v = { status, phase, legs, transfers, current, finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null };
   Object.assign(v, headline(v, trip, now));
   v.next = nextStep(v, now);
   return v;
@@ -132,8 +133,8 @@ export function headline(v, trip, now = Date.now()) {
   if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${next.at}: noch ${mins(next.gap)} Zeit, Gleis ${next.arrPl || "?"} → ${next.depPl || "?"}. Ich behalte das im Blick.` };
   // Kein Umstiegsproblem – aber ehrlich sagen, wenn es am Ziel später wird
   const d = v.finalDelay ?? 0;
-  const title = d >= 10 ? `Ca. ${d} Min. später am Ziel` : d >= 3 ? `Läuft – ca. ${d} Min. später` : "Alles läuft nach Plan";
-  const late = d >= 3 ? `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)} statt ${hm(last.arr.plan)}.` : "";
+  const title = d >= 10 ? `Ca. ${d} Min. später am Ziel` : d >= 3 ? `Läuft – ca. ${d} Min. später` : d <= -3 ? `Läuft – ca. ${-d} Min. früher am Ziel` : "Alles läuft nach Plan";
+  const late = d >= 3 || d <= -3 ? `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)} statt ${hm(v.bookedArr)}.` : "";
   if (phase === "before") { const f = legs[0].dep; return { title, sub: `Abfahrt ${f.name} ${at(f, f.rt)}${f.delay >= 3 ? ` (${f.delay} Min. später)` : ""}. ${next ? `Umstieg in ${next.at} mit ${mins(next.gap)} Zeit.` : ""} ${late}`.replace(/\s+/g, " ").trim() }; }
   if (next) return { title, sub: `${late} Dein Umstieg in ${next.at} klappt, ${mins(next.gap)} Zeit.`.trim() };
   return { title, sub: late || arrive || `Ziel ${last.arr.name}.` };
@@ -144,7 +145,7 @@ export function headline(v, trip, now = Date.now()) {
 export function diff(trip, v, prev = {}, now = Date.now()) {
   const st = { tr: [], legC: { ...(prev.legC || {}) }, pl: { ...(prev.pl || {}) }, start: prev.start ?? null, rem: { ...(prev.rem || {}) }, zb: !!prev.zb, alt: prev.alt || {} };
   const msgs = [], tag = k => `${trip.id}-${k}`;
-  const ref = v.legs[v.legs.length - 1].arr.plan, spar = trip.ticket === "spar" && !v.zbLifted;
+  const ref = v.legs[v.legs.length - 1].arr.rt, spar = trip.ticket === "spar" && !v.zbLifted;
   // Zugbindung höchstens einmal erwähnen – zusammen mit dem Grund
   const zbNote = () => (trip.ticket === "spar" && v.zbLifted && !st.zb ? ((st.zb = true), " Deine Zugbindung ist damit voraussichtlich aufgehoben.") : "");
   const lostK = v.transfers.findIndex(t => t.status === "LOST");
@@ -154,7 +155,8 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     if ((l.dep.cancelled || l.arr.cancelled) && !st.legC[l.i] && l.arr.rt > now - 5 * MIN) {
       st.legC[l.i] = true;
       const alt = altText(st.alt[l.i] || st.alt[l.i - 1], ref, spar);
-      msgs.push({ title: `❌ ${l.label} fällt aus`, body: `${l.dep.name} → ${l.arr.name}.${alt || " Ich suche eine andere Verbindung – schau gleich in die App."}${zbNote()}`, tag: tag(`c${l.i}`), urgent: true });
+      const none = v.legs.length > 1 ? " Ich suche eine andere Verbindung – schau gleich in die App." : " Die nächste Verbindung findest du in der App unter „Reise hinzufügen“ oder im DB Navigator.";
+      msgs.push({ title: `❌ ${l.label} fällt aus`, body: `${l.dep.name} → ${l.arr.name}.${alt || none}${zbNote()}`, tag: tag(`c${l.i}`), urgent: true });
     }
   });
 
@@ -227,8 +229,8 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
 export function altText(alts, refArr, spar = false) {
   if (!alts?.length) return "";
   const a = alts[0], d = Number.isFinite(refArr) && a.arr ? Math.round((T(a.arr) - refArr) / MIN) : null;
-  const delta = d == null ? "" : d <= -2 ? ` – ${d * -1} Min. früher als geplant` : d >= 2 ? ` – ${d} Min. später als geplant` : " – wie geplant";
-  const what = a.kind === "stay" ? `in ${a.label} sitzen bleiben` : a.reach ? `ab ${a.at} ${hm(T(a.dep))} mit ${a.label.split(" → ")[0]}, so erreichst du ${a.label.split(" → ").pop()}`
+  const delta = d == null ? "" : d <= -2 ? ` – ${d * -1} Min. früher` : d >= 2 ? ` – ${d} Min. später` : " – etwa gleich";
+  const what = a.kind === "stay" ? `Sitzen bleiben in ${a.label}` : a.reach ? `ab ${a.at} ${hm(T(a.dep))} mit ${a.label.split(" → ")[0]}, so erreichst du ${a.label.split(" → ").pop()}`
     : `ab ${a.at} ${hm(T(a.dep))}${a.depPl ? ` (Gleis ${a.depPl})` : ""} mit ${a.label}`;
   return ` Vorschlag: ${what}${a.arr && !a.reach ? `, Ziel ca. ${hm(T(a.arr))}${delta}` : ""}.${spar ? " Mit Sparpreis nur, wenn die Zugbindung aufgehoben ist." : ""}`;
 }
