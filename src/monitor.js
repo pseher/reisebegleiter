@@ -12,6 +12,7 @@ export const intervalFor = dist => (dist <= 45 * MIN ? 1 : dist <= 150 * MIN ? 4
 export function dueChecks(trip, now, force = false) {
   const out = [];
   trip.legs.forEach((leg, i) => {
+    if (!leg.jid || !leg.from.eva || !leg.to.eva) return;     // Bus/U-Bahn/Tram: vorerst nur Fahrplan
     for (const side of ["dep", "arr"]) {
       const s = side === "dep" ? leg.from : leg.to, o = trip.obs?.[i]?.[side] || {};
       const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;

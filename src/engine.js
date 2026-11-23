@@ -39,13 +39,14 @@ function carryDelay(dep, arr) {
 export function evaluate(trip, now = Date.now()) {
   const legs = trip.legs.map((l, i) => {
     const dep = stop(l, trip.obs?.[i], "from");
-    return { i, label: l.label, jid: l.jid, dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
+    return { i, label: l.label, jid: l.jid, mode: l.mode || "", live: !!l.jid, dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
   });
   const n = legs.length, first = legs[0], last = legs[n - 1];
   const transfers = [];
   for (let i = 0; i < n - 1; i++) {
     const a = legs[i].arr, d = legs[i + 1].dep;
-    const gap = Math.round((d.rt - a.rt) / MIN), need = transferMinutes(a.eva, a.platform, d.eva, d.platform);
+    const walk = trip.legs[i].walk || 0;                     // Gehzeit aus der Verbindungssuche, falls bekannt
+    const gap = Math.round((d.rt - a.rt) / MIN), need = walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform);
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until), spare = gap - need;
     let status, reason = "";
     if (d.rt < now - MIN && !d.cancelled && !legs[i].arr.cancelled) status = "DONE";

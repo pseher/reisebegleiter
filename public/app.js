@@ -64,7 +64,7 @@ function tripCard(t) {
   legs.forEach((l, i) => {
     if (i === 0) items.push(`<li class="${Date.parse(l.dep.rt) < now ? "past" : ""}"><span class="dot"></span>
       <div class="stop">${esc(l.dep.name)}</div><div class="when">ab ${when(l.dep)}${platform(l.dep)}</div>
-      <div class="leg">${esc(l.label)}${l.dep.messages?.length ? ` · ${esc(l.dep.messages[0])}` : ""}</div></li>`);
+      <div class="leg">${esc(l.label)}${l.live ? "" : " · nur Fahrplan"}${l.dep.messages?.length ? ` · ${esc(l.dep.messages[0])}` : ""}</div></li>`);
     const tr = t.transfers[i];
     if (tr) {
       const n = legs[i + 1], alt = tr.alt?.[0];
@@ -73,7 +73,7 @@ function tripCard(t) {
         <div class="when">an ${when(l.arr)}${platform(l.arr)}</div>
         <div class="when">ab ${when(n.dep)}${platform(n.dep)}</div>
         ${tr.status !== "DONE" ? `<div class="tr s-${tr.status}">${transferText(tr)}${alt ? `<div class="alt"><b>Plan B:</b> ${esc(alt.label)} um ${hm(alt.dep)}${alt.depPl ? `, Gleis ${esc(alt.depPl)}` : ""}${alt.arr ? ` – an ${esc(alt.toName)} ${hm(alt.arr)}` : ""}</div>` : ""}</div>` : ""}
-        <div class="leg">${esc(n.label)}</div></li>`);
+        <div class="leg">${esc(n.label)}${n.live ? "" : " · nur Fahrplan"}</div></li>`);
     }
   });
   items.push(`<li class="${t.phase === "done" ? "past" : ""}"><span class="dot"></span><div class="stop">${esc(last.arr.name)}</div>
@@ -139,7 +139,26 @@ function bindHome() {
 
 // ---------- Reise anlegen (Assistent) ----------
 // W = { step, legs: [], station, from (Zeit), list, train, error }
-function startWizard() { W = { step: "station", legs: [], station: null, from: Date.now(), list: null }; }
+function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
+const dur = m => (m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60} Min.` : `${m} Min.`);
+const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
+
+function stationField(id, label, val) {
+  return val
+    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
+    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search"><ul class="list" id="${id}Res"></ul>`;
+}
+
+function connList(list) {
+  if (!list.length) return `<p class="muted">Keine Verbindung gefunden. Probier eine andere Zeit.</p>`;
+  return `<ul class="list">${list.map((c, i) => {
+    const late = Math.round((Date.parse(c.legs[0].from.rt || c.dep) - Date.parse(c.legs[0].from.plan)) / MIN);
+    return `<li><button data-c="${i}"><div class="train" style="grid-template-columns:1fr auto">
+      <span class="t">${hm(c.legs[0].from.plan)} → ${hm(c.legs[c.legs.length - 1].to.plan)}${late >= 1 ? ` <span class="late">+${late}</span>` : ""}</span>
+      <span class="pl">${dur(c.minutes)}</span>
+      <span class="d" style="grid-column:1/3">${c.transfers ? `${c.transfers} Umstieg${c.transfers > 1 ? "e" : ""} · ` : "direkt · "}${c.legs.map(l => esc(l.label)).join(" → ")}${c.legs.some(l => l.cancelled) ? ` <span class="late">Ausfall</span>` : ""}</span>
+    </div></button></li>`; }).join("")}</ul>`;
+}
 
 function renderWizard() {
   if (!W) startWizard();
@@ -148,7 +167,39 @@ function renderWizard() {
   if (W.busy) { $app.innerHTML = `${head}<h1>${esc(W.busy)}</h1><div class="spinner"></div>`; return; }
   const err = W.error ? `<p class="err">${esc(W.error)}</p>` : "";
 
-  if (W.step === "station") {
+  if (W.step === "route") {
+    const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
+    $app.innerHTML = `<p class="steps">Neue Reise</p><h1>Wohin geht es?</h1>
+      ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
+      <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
+      <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
+      <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
+      ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
+      <button class="btn quiet" id="byTrain">Ich sitze schon im Zug / Zug für Zug anlegen</button>${back}`;
+    for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
+      const inp = document.getElementById(id); if (!inp) continue; let t;
+      inp.oninput = () => { clearTimeout(t); t = setTimeout(() => searchInto(inp.value, `${id}Res`, st => { W[k] = st; render(); }), 250); };
+    }
+    if (!W.rFrom) document.getElementById("rf")?.focus(); else if (!W.rTo) document.getElementById("rt")?.focus();
+    $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
+    $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
+    document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
+    document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
+    document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
+  }
+
+  else if (W.step === "conns") {
+    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
+      ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
+      ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
+    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+      .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
+    const lc = document.getElementById("laterC");
+    if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
+    $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
+  }
+
+  else if (W.step === "station") {
     $app.innerHTML = `${head}<h1>Wo steigst du ein?</h1>
       <input type="search" id="q" placeholder="Bahnhof, z. B. Berlin Hbf" autocomplete="off" enterkeyhint="search" value="${esc(W.q || "")}">
       ${err}<ul class="list" id="res"></ul>${back}`;
@@ -190,13 +241,14 @@ function renderWizard() {
   else if (W.step === "leg") {
     $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>
       <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
-        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div></li>`).join("")}</ol></div>
+        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
+        ${l.jid ? "" : `<div class="small muted">${l.mode && !/RAIL|SUBURBAN|LONG/.test(l.mode) ? "Bus/U-Bahn/Tram: " : ""}ohne Echtzeit, nur Fahrplan</div>`}</li>`).join("")}</ol></div>
       <button class="btn" id="done">Fertig – weiter</button>
-      <button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>
-      <button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`;
+      ${W.mode === "route" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
+      ${W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
     document.getElementById("done").onclick = () => { W.step = "ticket"; render(); };
-    document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
-    document.getElementById("undo").onclick = () => { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; render(); };
+    if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
+    document.getElementById("undo").onclick = () => { if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
   }
 
@@ -211,10 +263,44 @@ function renderWizard() {
   const bk = document.getElementById("wBack");
   if (bk) bk.onclick = () => {
     W.error = "";
-    if (W.step === "station") { W = null; go("home"); }
+    if (W.step === "route") {
+    const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
+    $app.innerHTML = `<p class="steps">Neue Reise</p><h1>Wohin geht es?</h1>
+      ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
+      <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
+      <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
+      <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
+      ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
+      <button class="btn quiet" id="byTrain">Ich sitze schon im Zug / Zug für Zug anlegen</button>${back}`;
+    for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
+      const inp = document.getElementById(id); if (!inp) continue; let t;
+      inp.oninput = () => { clearTimeout(t); t = setTimeout(() => searchInto(inp.value, `${id}Res`, st => { W[k] = st; render(); }), 250); };
+    }
+    if (!W.rFrom) document.getElementById("rf")?.focus(); else if (!W.rTo) document.getElementById("rt")?.focus();
+    $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
+    $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
+    document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
+    document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
+    document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
+  }
+
+  else if (W.step === "conns") {
+    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
+      ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
+      ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
+    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+      .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
+    const lc = document.getElementById("laterC");
+    if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
+    $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
+  }
+
+  else if (W.step === "station") { W = null; go("home"); }
+    else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
     else if (W.step === "ticket") W.step = "leg";
+    else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
     render();
   };
 }
@@ -236,6 +322,13 @@ async function searchInto(q, id, onPick) {
     el.innerHTML = res.length ? res.map((s, i) => `<li><button data-i="${i}">${esc(s.name)}</button></li>`).join("") : `<li><p class="muted small">Kein Bahnhof gefunden.</p></li>`;
     el.querySelectorAll("[data-i]").forEach(b => b.onclick = () => onPick(res[+b.dataset.i]));
   } catch (e) { el.innerHTML = `<li><p class="err">${esc(e.message)}</p></li>`; }
+}
+
+async function pickConnection(c) {
+  W.busy = "Verbindung wird vorbereitet …"; render();
+  try { W.legs = await api("/api/resolve", { method: "POST", body: { legs: c.legs } }); W.step = "leg"; W.error = ""; }
+  catch (e) { W.error = e.message; }
+  W.busy = null; render();
 }
 
 async function resolveLeg(stop, onRoute = true) {

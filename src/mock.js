@@ -57,3 +57,33 @@ export function mockBoard(kind, body) {
     messages: { attributes: [], delays: [{ messageID: 1, descriptions: [{ language: "deu", text: "Verzögerungen im Betriebsablauf" }] }] },
   };
 }
+
+// Verbindungssuche im MOTIS-Format (nur Testdaten): direkt auf einer Linie oder mit Umstieg in Leipzig
+const COORD = { "8011160": [52.52559, 13.36955], "8010050": [51.62367, 12.31803], "8010205": [51.34497, 12.38207],
+  "8010101": [50.97257, 11.03796], "8000284": [49.44593, 11.08278], "8000261": [48.14031, 11.55827] };
+export function mockPlan(params) {
+  const from = params.fromEva, to = params.toEva, t = Date.parse(params.time || new Date().toISOString());
+  const js = journeys(t).filter(j => j.stops[0].d ? true : true);
+  const pl = (eva, ms, pltf) => ({ name: NAME[eva], lat: COORD[eva][0], lon: COORD[eva][1], scheduledDeparture: new Date(ms).toISOString(), scheduledArrival: new Date(ms).toISOString(), track: pltf });
+  const leg = (j, a, b) => {
+    const sa = j.stops.find(s => s.eva === a), sb = j.stops.find(s => s.eva === b);
+    return { mode: "HIGHSPEED_RAIL", routeShortName: j.cat, tripShortName: String(j.num), headsign: NAME[j.stops[j.stops.length - 1].eva],
+      from: pl(a, sa.d, sa.pl), to: pl(b, sb.a, sb.pl), scheduledStartTime: new Date(sa.d).toISOString(), scheduledEndTime: new Date(sb.a).toISOString(),
+      startTime: new Date(sa.d + j.delay * 60e3).toISOString(), endTime: new Date(sb.a + j.delay * 60e3).toISOString(), duration: (sb.a - sa.d) / 1e3 };
+  };
+  const on = (j, a, b) => { const i = j.stops.findIndex(s => s.eva === a), k = j.stops.findIndex(s => s.eva === b); return i >= 0 && k > i && j.stops[i].d && j.stops[k].a; };
+  const its = [];
+  for (const j of js) {
+    if (on(j, from, to) && j.stops.find(s => s.eva === from).d >= t) its.push([leg(j, from, to)]);
+    if (to !== "8010205" && on(j, from, "8010205") && j.stops.find(s => s.eva === from).d >= t) {
+      const arr = j.stops.find(s => s.eva === "8010205").a;
+      const j2 = js.filter(x => x !== j && on(x, "8010205", to) && x.stops.find(s => s.eva === "8010205").d >= arr + 5 * 60e3)
+        .sort((x, y) => x.stops.find(s => s.eva === "8010205").d - y.stops.find(s => s.eva === "8010205").d)[0];
+      if (j2) its.push([leg(j, from, "8010205"), { mode: "WALK", duration: 360 }, leg(j2, "8010205", to)]);
+    }
+  }
+  return { itineraries: its.sort((a, b) => Date.parse(a[0].scheduledStartTime) - Date.parse(b[0].scheduledStartTime)).slice(0, 6).map(legs => {
+    const tr = legs.filter(l => l.mode !== "WALK");
+    return { startTime: tr[0].startTime, endTime: tr[tr.length - 1].endTime, duration: (Date.parse(tr[tr.length - 1].endTime) - Date.parse(tr[0].startTime)) / 1e3, legs };
+  }) };
+}

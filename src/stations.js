@@ -9,9 +9,9 @@ export const fold = s => String(s).toLowerCase().normalize("NFD").replace(/[̀-�
 
 let INDEX = null;
 function index() {
-  if (!INDEX) INDEX = DATA.map(([eva, name, weight, city]) => {
+  if (!INDEX) INDEX = DATA.map(([eva, name, weight, lat, lon, city]) => {
     const n = fold(name), all = city ? `${n} ${fold(city)}` : n;
-    return { eva, name: name.replace(/\s*Hauptbahnhof$/, " Hbf"), city: city || "", weight, n, words: all.split(" ") };
+    return { eva, name: name.replace(/\s*Hauptbahnhof$/, " Hbf"), city: city || "", weight, lat, lon, n, words: all.split(" ") };
   });
   return INDEX;
 }
@@ -26,7 +26,21 @@ export function search(q, list = index(), limit = 8) {
     hits.push({ s, score });
   }
   return hits.sort((a, b) => b.score - a.score).slice(0, limit)
-    .map(({ s }) => ({ eva: s.eva, name: s.city && !s.name.includes(s.city) ? `${s.name} (${s.city})` : s.name }));
+    .map(({ s }) => ({ eva: s.eva, name: displayName(s), lat: s.lat, lon: s.lon }));
+}
+const displayName = s => (s.city && !s.name.includes(s.city) ? `${s.name} (${s.city})` : s.name);
+
+export const byEva = eva => { const s = index().find(x => x.eva === String(eva)); return s ? { eva: s.eva, name: displayName(s), lat: s.lat, lon: s.lon } : null; };
+
+// Nächster DB-Bahnhof zu Koordinaten (für Haltestellen aus der Verbindungssuche)
+export function nearest(lat, lon, maxM = 600) {
+  let best = null, bd = Infinity;
+  const kx = Math.cos(lat * Math.PI / 180) * 111320, ky = 110540;
+  for (const s of index()) {
+    const dx = (s.lon - lon) * kx, dy = (s.lat - lat) * ky, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best && Math.sqrt(bd) <= maxM ? { eva: best.eva, name: displayName(best), dist: Math.round(Math.sqrt(bd)) } : null;
 }
 
 export async function searchStations(env, q) {

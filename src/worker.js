@@ -1,6 +1,7 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations } from "./stations.js";
+import { connections, resolveConnection } from "./routing.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, altText } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver } from "./monitor.js";
@@ -48,10 +49,10 @@ async function departures(env, eva, fromMs) {
 }
 
 function validLeg(l) {
-  const ok = s => s && /^\d{6,9}$/.test(String(s.eva)) && typeof s.name === "string" && !Number.isNaN(Date.parse(s.plan));
-  return l && typeof l.jid === "string" && l.jid && typeof l.label === "string" && ok(l.from) && ok(l.to) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
+  const ok = s => s && (l.jid ? /^\d{6,9}$/.test(String(s.eva)) : true) && typeof s.name === "string" && !Number.isNaN(Date.parse(s.plan));
+  return l && typeof l.jid === "string" && typeof l.label === "string" && ok(l.from) && ok(l.to) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
 }
-const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40),
+const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)),
   from: { eva: String(l.from.eva), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8) },
   to: { eva: String(l.to.eva), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8) } });
 
@@ -67,6 +68,17 @@ async function api(req, env, url) {
             out.stations = (await searchStations(env, "München")).slice(0, 2).map(x => `${x.name} ${x.eva}`).join(", ");
       try { const d = await rawBoard(env, "dep", "8000261", isoBerlin(Date.now()), 1); out.openboards = `ok: ${(d.departures || []).length} Abfahrten`; }
       catch (e) { out.openboards = e.message; }
+    }
+    // Verbindungssuche mit echten Daten: ?route=Start>Ziel
+    const rq = url.searchParams.get("route");
+    if (rq && rq.includes(">")) {
+      const [a, b] = rq.split(">"), [sa] = await searchStations(env, a), [sb] = await searchStations(env, b);
+      out.route = { from: sa, to: sb };
+      try {
+        const cs = await connections(env, sa.eva, sb.eva, Date.now());
+        out.connections = cs.slice(0, 4).map(c => `${c.dep} ${c.transfers} Umst.: ${c.legs.map(l => `${l.label} [${l.mode}] ${l.from.name}→${l.to.name}`).join(" | ")}`);
+        if (cs[0]) out.resolved = (await resolveConnection(env, cs[0].legs)).map(l => `${l.label} jid=${l.jid ? "ok" : "–"} ${l.from.name}(${l.from.eva}) ${l.from.plan} Gl.${l.from.platform} → ${l.to.name}(${l.to.eva}) ${l.to.plan}`);
+      } catch (e) { out.routeError = e.message; }
     }
     // Ablauf „Zug wählen → Ankunft am Ausstieg suchen“ mit echten Daten: ?from=Name&to=Name
     const fq = url.searchParams.get("from"), tq = url.searchParams.get("to");
@@ -115,6 +127,20 @@ async function api(req, env, url) {
     const eva = url.searchParams.get("eva"), t = Date.parse(url.searchParams.get("time") || "") || Date.now();
     if (!/^\d{6,9}$/.test(eva || "")) return fail(400, "Bahnhof fehlt");
     return json(await departures(env, eva, t));
+  }
+
+  // Verbindungssuche Von → Nach
+  if (p === "/api/connections") {
+    const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+    if (!/^\d{6,9}$/.test(from || "") || !/^\d{6,9}$/.test(to || "")) return fail(400, "Start oder Ziel fehlt");
+    const t = Date.parse((url.searchParams.get("time") || "").replace(" ", "+")) || Date.now();
+    return json(await connections(env, from, to, t));
+  }
+  // Gewählte Verbindung → Teilstrecken mit DB-Fahrtkennungen
+  if (p === "/api/resolve" && method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    if (!Array.isArray(b.legs) || !b.legs.length) return fail(400, "Verbindung fehlt");
+    return json(await resolveConnection(env, b.legs));
   }
 
   // Ankunft eines gewählten Zugs am Ausstiegsbahnhof ermitteln → fertige Teilstrecke
