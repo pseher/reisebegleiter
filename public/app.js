@@ -181,7 +181,7 @@ function renderWizard() {
       ${err}<ul class="list">${stops.map((s, i) => `<li><button data-s="${i}">${esc(s.name)}</button></li>`).join("") || `<li><p class="muted">Keine Halte bekannt.</p></li>`}</ul>
       <p class="small muted">Dein Bahnhof fehlt? Suche ihn:</p>
       <input type="search" id="q2" placeholder="Ausstiegsbahnhof" autocomplete="off"><ul class="list" id="res2"></ul>${back}`;
-    const pick = s => resolveLeg(s);
+    const pick = s => resolveLeg(s, stops.some(x => x.eva === s.eva));
     $app.querySelectorAll("[data-s]").forEach(b => b.onclick = () => pick(stops[+b.dataset.s]));
     const q2 = document.getElementById("q2"); let t;
     q2.oninput = () => { clearTimeout(t); t = setTimeout(() => searchInto(q2.value, "res2", pick), 250); };
@@ -238,11 +238,11 @@ async function searchInto(q, id, onPick) {
   } catch (e) { el.innerHTML = `<li><p class="err">${esc(e.message)}</p></li>`; }
 }
 
-async function resolveLeg(stop) {
+async function resolveLeg(stop, onRoute = true) {
   const tr = W.train;
   W.busy = `Suche die Ankunft in ${stop.name} …`; render();
   try {
-    const leg = await api("/api/leg", { method: "POST", body: { jid: tr.jid, label: tr.label, toEva: stop.eva, toName: stop.name,
+    const leg = await api("/api/leg", { method: "POST", body: { jid: tr.jid, label: tr.label, toEva: stop.eva, toName: stop.name, onRoute,
       from: { eva: tr.eva || W.station.eva, name: W.station.name, plan: tr.plan, platform: tr.platformPlan || tr.platform } } });
     if (!leg.to.name) leg.to.name = stop.name;
     W.legs.push(leg); W.step = "leg"; W.error = "";

@@ -95,16 +95,19 @@ export function isoBerlin(ms, roundMin = 5) {
 }
 
 // Eine bestimmte Fahrt an einem Bahnhof finden: erst um die Prognose herum, dann um die Sollzeit, dann weitere Fenster
-export async function findJourney(env, kind, eva, jid, aroundMs, { planMs, windows = 2, cache, maxVia = 3 } = {}) {
+export async function findJourney(env, kind, eva, jid, aroundMs, { planMs, windows = 2, cache, maxVia = 3, label, after } = {}) {
   const starts = [];
   const add = ms => { const s = isoBerlin(ms - 10 * 60e3); if (!starts.includes(s)) starts.push(s); };
   add(aroundMs);
   if (planMs && Math.abs(planMs - aroundMs) > 15 * 60e3) add(planMs);
   for (let i = 1; starts.length < windows + (planMs ? 1 : 0) && i < 20; i++) add(aroundMs + i * (WINDOW_MIN - 5) * 60e3);
+  let twin = null;
   for (const s of starts) {
     const list = await board(env, kind, eva, s, { cache, maxVia });
     const hit = list.find(x => x.jid === jid);
     if (hit) return hit;
+    // Rückfall: gleiche Linie, erste passende Zeit nach der Abfahrt (z. B. gekoppelte S-Bahn-Zugteile mit eigener Kennung)
+    if (!twin && label && after) twin = list.filter(x => x.label === label && Date.parse(x.plan) > after).sort((a, b) => Date.parse(a.plan) - Date.parse(b.plan))[0] || null;
   }
-  return null;
+  return twin ? { ...twin, jid, twin: true } : null;
 }

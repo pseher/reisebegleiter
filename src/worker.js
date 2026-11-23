@@ -122,8 +122,10 @@ async function api(req, env, url) {
     const b = await req.json().catch(() => ({}));
     if (!b.jid || !/^\d{6,9}$/.test(b.toEva || "") || !b.from?.plan) return fail(400, "Angaben unvollständig");
     const start = Date.parse(b.from.plan) + 10 * MIN;
-    const hit = await findJourney(env, "arr", b.toEva, b.jid, start, { windows: 12 });
-    if (!hit) return fail(404, "Ankunft dieses Zugs am gewählten Bahnhof nicht gefunden");
+    const hit = await findJourney(env, "arr", b.toEva, b.jid, start, { windows: 12, label: b.label, after: Date.parse(b.from.plan) });
+    if (!hit) return fail(404, b.onRoute === false
+      ? `${b.label} hält laut Fahrplan nicht in ${b.toName || "diesem Bahnhof"}. Wähle einen Halt aus der Liste und füge danach einen Umstieg hinzu.`
+      : `Die Ankunft von ${b.label} in ${b.toName || "diesem Bahnhof"} wurde nicht gefunden. Bitte einen anderen Halt wählen oder es gleich noch einmal versuchen.`);
     return json({ jid: b.jid, label: b.label, from: b.from,
       to: { eva: b.toEva, name: hit.name || b.toName || "", plan: hit.plan, platform: hit.platformPlan || hit.platform } });
   }
