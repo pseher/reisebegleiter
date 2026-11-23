@@ -187,16 +187,16 @@ function planBCard(t) {
       <div class="cmp-live">${liveOf(a)}${zbOn && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
       <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb === false ? "" : "1"}" data-adopt-text="${esc(tag(a))}: Los ${hm(a.dep)}, Ziel ca. ${hm(a.arr || a.dep)}\n${esc(a.label)}">Übernehmen</button></div>
     </div></div>`; }).join("");
-  const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn"><b>Sparpreis:</b> Bei Möglichkeiten mit „anderer Fernzug“ gilt dein Ticket erst, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge sind frei wählbar.</p>` : "";
+  const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn tile-note"><b>Sparpreis:</b> Bei Möglichkeiten mit „anderer Fernzug“ gilt dein Ticket erst, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge sind frei wählbar.</p>` : "";
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
     // Plan ist knapp, aber gerade in Ordnung: ruhig zeigen, dass es Ausweichmöglichkeiten gibt
     const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && !a.watch.legs.some(l => l.delay >= 3)).length, open = openCmp === `calm:${t.id}`;
     const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Ich prüfe sie ab 3 Std. vor der Abfahrt live mit.`;
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
-      ${open ? `${zb}${curRow}${rows}` : ""}<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px"><button class="btn quiet small-btn" data-cmp="calm:${t.id}" style="flex:1">${open ? "Weniger" : "Möglichkeiten zeigen"}</button></div></section>`;
+      <button class="btn quiet small-btn" data-cmp="calm:${t.id}">${open ? "Weniger" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
   }
-  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}</section>`;
+  return `<h3 class="sec-h">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</h3><div class="tiles">${zb}${curRow}${rows}</div>`;
 }
 
 // Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
@@ -263,8 +263,8 @@ function hereCard(t) {
   // Auswahl der Suche oben, darunter die Ergebnisse
   return `<section class="card"><div class="k">Andere Verbindungen</div>
     ${searchSeg(t, mode)}
-    <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span><button class="link" data-here="${t.id}" data-mode="${mode}">↻ neu suchen</button></div>
-    ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}</section>`;
+    <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span><button class="link" data-here="${t.id}" data-mode="${mode}">↻ neu suchen</button></div></section>
+    <div class="tiles">${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Keine Verbindung gefunden.</p></div>`}</div>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps

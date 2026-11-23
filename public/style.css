@@ -220,3 +220,17 @@ main { overflow-wrap: break-word; }
 .seg button[aria-pressed=true] span { color: inherit; opacity: .85; }
 .seg-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 button.link { background: none; border: 0; color: var(--accent); font: inherit; font-weight: 600; padding: 6px 0; cursor: pointer; }
+
+/* Einzelne Kacheln mit runden Ecken für Plan, Möglichkeiten und Hinweise */
+.tiles { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
+.tiles .cmp-row, .tiles .cmp-row.cur { background: var(--card); border-radius: var(--r); padding: 14px 16px; margin: 0; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  border: 0; border-left: 0; display: grid; grid-template-columns: 1fr; gap: 2px; position: relative; overflow: hidden; }
+.tiles .cmp-row + .cmp-row { border-top: 0; margin-top: 0; }
+.tiles .cmp-row.cur { box-shadow: inset 0 0 0 1.5px var(--line); }
+.tiles .cmp-row.arr-ok, .tiles .cmp-row.arr-late, .tiles .cmp-row.arr-much { padding-left: 20px; }
+.tiles .cmp-row.arr-ok::before, .tiles .cmp-row.arr-late::before, .tiles .cmp-row.arr-much::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; }
+.tiles .cmp-row.arr-ok { background: color-mix(in srgb, var(--ok-bg) 60%, var(--card)); } .tiles .cmp-row.arr-ok::before { background: var(--ok); }
+.tiles .cmp-row.arr-late { background: color-mix(in srgb, var(--watch-bg) 60%, var(--card)); } .tiles .cmp-row.arr-late::before { background: var(--watch); }
+.tiles .cmp-row.arr-much { background: color-mix(in srgb, var(--risk-bg) 50%, var(--card)); } .tiles .cmp-row.arr-much::before { background: var(--risk); }
+.tiles .tile-note { margin: 0; border-radius: var(--r); padding: 12px 14px; }
+.tiles .cmp-act .btn { background: var(--card); }
