@@ -551,7 +551,7 @@ function favDays(f) {
   const [h, m] = f.time.split(":").map(Number), days = [];
   for (let k = 0; k < 8 && days.length < 7; k++) { const d = new Date(); d.setDate(d.getDate() + k); d.setHours(h, m, 0, 0); if (d.getTime() > Date.now() - 2 * MIN) days.push(d.getTime()); }
   const lbl = ms => sameDay(ms, Date.now()) ? "Heute" : sameDay(ms, Date.now() + 864e5) ? "Morgen" : new Date(ms).toLocaleDateString("de-DE", { weekday: "short", day: "numeric" }).replace(",", "");
-  return `<div class="fav-days"><p class="small" style="margin:6px 0"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b> um ${esc(f.time)} – an welchem Tag?</p><div class="day-grid">${days.map(ms => `<button class="chip" data-favday="${ms}">${lbl(ms)}</button>`).join("")}
+  return `<div class="fav-days"><p class="small muted" style="margin:6px 0">An welchem Tag? Ich suche die Fahrt um ${esc(f.time)}.</p><div class="day-grid">${days.map(ms => `<button class="chip" data-favday="${ms}">${lbl(ms)}</button>`).join("")}
       <button class="chip" data-favcal aria-pressed="${W.cal === "favwhen"}">${CAL_ICON.replace("margin-right:8px", "margin-right:3px")}Mehr</button></div>
     ${W.cal === "favwhen" ? whenPicker("favwhen").replace(/^[\s\S]*?<\/div>\s*<div class="when-row">[\s\S]*?<\/div>/, "") : ""}</div>`;
 }
@@ -579,10 +579,11 @@ function renderWizard() {
 
   if (W.step === "route") {
     $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : "Neue Reise"}</p>
-      ${!W.editId && FAVS.length ? `<section class="card favs"><div class="k">★ Favoriten</div><ul class="list">${FAVS.map((f, i) => `<li class="fav-row"><button data-fav="${i}"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><br>
-        <span class="small muted">${esc(f.time)} · ${esc(f.trains.join(" → "))}</span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen" aria-expanded="${W.favOpen === i}">✕</button></li>`).join("")}</ul>
-        ${W.favOpen != null && FAVS[W.favOpen] ? favDays(FAVS[W.favOpen]) : ""}
-        <p class="small muted" style="margin:4px 0 0">Antippen, Tag wählen – ich suche die Fahrt zu deiner üblichen Uhrzeit.</p></section>` : ""}
+      ${!W.editId && FAVS.length ? `<section class="card favs"><div class="k">★ Favoriten</div><ul class="fav-list">${FAVS.map((f, i) => (i >= 3 && !W.favAll && W.favOpen !== i) ? "" : `<li class="fav-row ${W.favOpen === i ? "open" : ""}"><button data-fav="${i}" aria-expanded="${W.favOpen === i}">
+        <span class="fav-time">${esc(f.time)}</span><span class="fav-main"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><span class="fav-sub">${esc(f.trains.join(" → "))}</span></span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>${W.favOpen === i ? `<li class="fav-days-li">${favDays(f)}</li>` : ""}`).join("")}</ul>
+        ${FAVS.length > 3 && !W.favAll ? `<button class="link small" data-favall>Alle ${FAVS.length} Favoriten zeigen</button>` : ""}
+
+</section>` : ""}
       ${W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
@@ -633,6 +634,7 @@ function renderWizard() {
     $app.querySelectorAll(".fav-days [data-day]").forEach(b => b.onclick = () => {
       const f = FAVS[W.favOpen], [h, m] = f.time.split(":").map(Number), d = new Date(+b.dataset.day); d.setHours(h, m, 0, 0); favSearch(f, d.getTime()); });
     $app.querySelectorAll(".fav-days [data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
+    $app.querySelector("[data-favall]")?.addEventListener("click", () => { W.favAll = true; render(); });
     $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = () => { if (!confirm("Favorit entfernen?")) return; FAVS.splice(+b.dataset.favdel, 1); saveFavs(); render(); });
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
     document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));
