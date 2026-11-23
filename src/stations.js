@@ -12,11 +12,12 @@ export async function searchStations(env, q) {
   if (q.length < 2) return [];
   if (env.MOCK === "1") return MOCK_STATIONS.filter(s => fold(s.name).includes(fold(q))).slice(0, 8);
   if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new Error("DB-Schlüssel fehlen");
-  const found = [];
+  const found = []; let err = "";
   for (const pattern of [q, `${q}*`]) {
     const r = await fetch(`${TT}/station/${encodeURIComponent(pattern)}`, {
       headers: { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, Accept: "application/xml" },
-    }).catch(() => null);
+    }).catch(e => { err = `Netzwerk: ${e.message}`; return null; });
+    if (r && !r.ok) err = `HTTP ${r.status}`;
     if (!r || !r.ok) continue;
     const xml = await r.text();
     for (const m of xml.matchAll(/<station\b([^>]*?)\/?>/g)) {
@@ -24,6 +25,10 @@ export async function searchStations(env, q) {
       if (a.eva && !found.some(f => f.eva === a.eva)) found.push({ eva: a.eva, name: a.name || a.eva });
     }
     if (found.length >= 3) break;
+  }
+  if (!found.length && err) {
+    const hint = /HTTP (401|403)/.test(err) ? " – Schlüssel falsch oder Timetables in dieser Anwendung nicht abonniert" : "";
+    throw new Error(`Bahnhofssuche: DB-Schnittstelle meldet ${err}${hint}`);
   }
   // Hauptbahnhöfe und exakte Treffer zuerst
   const f = fold(q);
