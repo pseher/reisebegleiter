@@ -123,8 +123,14 @@ function renderList(active) {
 }
 
 // Der nächste Schritt – groß und eindeutig
-function nextCard(n) {
+function nextCard(n, t) {
   if (!n) return "";
+  if (n.kind === "missed") return `<section class="card next"><div class="k">Zug verpasst</div>
+      <div><b>${esc(n.label)}</b> ab ${esc(cleanStop(n.station))} hast du nicht bekommen.</div>
+      <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
+  // „Zug verpasst?“ – vor der Abfahrt und bis 15 Min. danach (falls man doch nicht eingestiegen ist)
+  const missBtn = t && n.i != null && (n.kind === "board" || n.kind === "change" || ((n.kind === "ride-change" || n.kind === "ride-arrive") && Date.now() - Date.parse(n.depAt) < 15 * MIN))
+    ? `<button class="link small miss" data-missed="${t.id}|${n.i}">${n.kind.startsWith("ride") ? "Doch nicht eingestiegen?" : "Zug verpasst?"}</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b> – oben siehst du, wie du weiterkommst.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
@@ -139,7 +145,7 @@ function nextCard(n) {
       ${n.then && n.then.station && cleanStop(n.then.station) !== cleanStop(n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
       ${n.then ? (n.then.lost ? `<div class="small"><span class="late">Anschluss ${esc(n.then.label)} ${n.then.cancelled ? "fällt aus" : "nicht zu schaffen"}</span></div>`
         : `<div class="then">Dann <b>${esc(n.then.label)}</b> um ${hm(n.then.at)}${n.then.platform ? `, Gleis ${esc(n.then.platform)}` : ""}${n.then.platformChanged ? ` <span class="late">Gleiswechsel (statt ${esc(n.then.platformPlan)})</span>` : ""} · ${Math.max(0, n.then.gap)} Min. Zeit</div>`) : `<div class="muted small">${inMin(n.at)}</div>`}`;
-  return `<section class="card next"><div class="k">${head}</div>${body}</section>`;
+  return `<section class="card next"><div class="k">${head}</div>${body}${missBtn}</section>`;
 }
 
 // Vergleich: pro Option nur das Entscheidende – der knappste Umstieg (an → weiter) und die Ankunft am Ziel.
@@ -255,11 +261,12 @@ function hereCard(t) {
   // unterwegs: dein Plan ab dem nächsten Halt (der Zug, in dem du sitzt, ist schon gesetzt)
   const ci = Math.max(0, t.current), fromIdx = mode === "next" ? Math.min(ci + 1, t.legs.length - 1) : 0;
   const mine = { ...t, legs: t.legs.slice(fromIdx), transfers: t.transfers.slice(fromIdx) };
-  const planTile = `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, t.plan.arr)}${stepsHtml(planSteps(mine))}</div></div>`;
+  const isMissed = mode === "missed";
+  const planTile = isMissed ? "" : `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, t.plan.arr)}${stepsHtml(planSteps(mine))}</div></div>`;
   const rows = t.here.list.map((a, i) => { if (a.kind === "asplanned") return "";
     const d = Math.round((Date.parse(a.arr) - ref) / MIN);
     return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${mode === "next" && a.legs?.[0] && a.legs[0].label.replace(/\s/g, "") === t.legs[ci].label.replace(/\s/g, "") ? "Sitzen bleiben" : a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
-      ${losZiel(a.dep, a.arr, mode === "now" ? null : mine.legs[0].dep.rt, t.plan.arr)}
+      ${losZiel(a.dep, a.arr, mode === "now" || isMissed ? null : mine.legs[0].dep.rt, isMissed ? t.planArr : t.plan.arr)}
       ${a.walkStart > 2 && mode !== "start" && mode !== "next" ? `<div class="small muted">Vorher ${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}</div>` : ""}
       ${stepsHtml(altSteps(a))}
       <div class="cmp-live">${liveBadge(a)}</div>
@@ -268,6 +275,9 @@ function hereCard(t) {
     </div></div>`; }).join("");
   const title = mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · zur Reisezeit (${day(t.legs[0].dep.plan)})` : mode === "now" ? "Ab deinem Standort · ab jetzt" : `Ab deinem Standort · zur Reisezeit (${day(t.legs[0].dep.plan)})`;
   // Auswahl der Suche oben, darunter die Ergebnisse
+  if (isMissed) return `<h3 class="sec-h">So kommst du jetzt weiter</h3>
+    <div class="seg-info small muted"><span>ab ${esc(cleanStop(t.legs[t.missed ?? 0].dep.name))} · ab jetzt</span><button class="link" data-missed="${t.id}|${t.missed ?? 0}">↻ neu suchen</button></div>
+    <div class="tiles">${rows.trim() || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine Verbindung gefunden.</p></div>`}</div>`;
   return `<section class="card"><div class="k">Andere Verbindungen</div>
     ${searchSeg(t, mode)}
     <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : mode === "next" ? `ab ${esc(cleanStop(mine.legs[0].arr.name))}, Ankunft ${hm(mine.legs[0].arr.rt)}` : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span>
@@ -338,7 +348,7 @@ function renderTrip(t, many) {
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Das ist ein anderer Fernzug – mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
-    ${t.status === "WATCH" || t.status === "OK" ? nextCard(t.next) + hereCard(t) + planBCard(t) : hereCard(t) + planBCard(t) + nextCard(t.next)}
+    ${t.missed != null ? nextCard(t.next, t) + hereCard(t) : t.status === "WATCH" || t.status === "OK" ? nextCard(t.next, t) + hereCard(t) + planBCard(t) : hereCard(t) + planBCard(t) + nextCard(t.next, t)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
     <div class="card flat">${timeline(t)}</div>
@@ -407,6 +417,18 @@ function bindCommon() {
     b.disabled = true; b.textContent = "Wird umgestellt …";
     await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
+  });
+  $app.querySelectorAll("[data-missed]").forEach(b => b.onclick = async () => {
+    const [id, i] = b.dataset.missed.split("|");
+    if (!b.closest(".seg-info") && !confirm("Zug verpasst bzw. nicht eingestiegen?\n\nIch suche dir sofort die nächsten Verbindungen ab diesem Bahnhof.")) return;
+    hereBusy = id; render();
+    try { const v = await api(`/api/trips/${id}/missed`, { method: "POST", body: { i: +i } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
+    hereBusy = null; render(); scrollTo(0, 0);
+  });
+  $app.querySelectorAll("[data-caught]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.caught; b.disabled = true;
+    try { const v = await api(`/api/trips/${id}/missed`, { method: "DELETE" }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
+    render();
   });
   $app.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => {
     const id = b.dataset.hide; trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();

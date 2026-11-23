@@ -92,13 +92,15 @@ export function evaluate(trip, now = Date.now()) {
   let status = openTransfers.reduce((s, t) => (SEV[t.status] > SEV[s] ? t.status : s), phase === "done" ? "DONE" : "OK");
   if (legCancel && phase !== "done") status = "LOST";
   const lostTransfer = openTransfers.find(t => t.status === "LOST");
+  const missed = trip.state?.missed && legs[trip.state.missed.i] ? trip.state.missed.i : null;   // vom Reisenden gemeldet: Zug verpasst
+  if (missed != null && phase !== "done") status = "LOST";
   const bookedArr = Date.parse(trip.state?.origArr || "") || last.arr.plan;   // nach „Übernehmen“: ursprünglich gebuchte Ankunft
   const finalDelay = lostTransfer || legCancel ? null : Math.round((last.arr.rt - bookedArr) / MIN);
   if (status === "OK" && phase !== "done" && (finalDelay ?? 0) >= 10) status = "WATCH";   // deutlich später am Ziel: nicht grün
   const zbLifted = trip.ticket === "spar" && legs.some(isFV) && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
-  const v = { status, phase, legs, transfers, current, finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null };
+  const v = { status, phase: missed != null && phase === "done" ? "enroute" : phase, legs, transfers, current, finalDelay: missed != null ? null : finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null, missed };
   Object.assign(v, headline(v, trip, now));
-  v.next = nextStep(v, now);
+  v.next = missed != null ? { kind: "missed", label: legs[missed].label, station: legs[missed].dep.name, at: legs[missed].dep.rt, i: missed } : nextStep(v, now);
   return v;
 }
 
@@ -113,7 +115,7 @@ export function nextStep(v, now = Date.now()) {
       return { kind: "lost", at: before.arrRt, station: before.at, label: before.toLabel, cancelled: before.reason === "cancel", lat: legs[i - 1].arr.lat, lon: legs[i - 1].arr.lon };
     }
     if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
-      return { kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
+      return { i, kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
         platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform), platformPlan: l.dep.platformPlan,
         cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap, name: legs[i - 1].arr.name, lat: legs[i - 1].arr.lat, lon: legs[i - 1].arr.lon } : null,
         dest: l.arr.name, lat: l.dep.lat, lon: l.dep.lon };
@@ -121,7 +123,7 @@ export function nextStep(v, now = Date.now()) {
     if (now < l.arr.rt + MIN) {                            // unterwegs in diesem Zug
       const t = transfers[i];
       const nx = legs[i + 1];
-      return { kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name, lat: l.arr.lat, lon: l.arr.lon,
+      return { i, depAt: l.dep.rt, kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name, lat: l.arr.lat, lon: l.arr.lon,
         platform: l.arr.platform, cancelled: l.arr.cancelled, then: t ? { label: t.toLabel, at: t.depRt, delay: nx.dep.delay, platform: t.depPl, gap: t.gap, station: nx.dep.name, lat: nx.dep.lat, lon: nx.dep.lon,
           platformChanged: !!(nx.dep.platformPlan && nx.dep.platform && nx.dep.platformPlan !== nx.dep.platform), platformPlan: nx.dep.platformPlan, lost: t.status === "LOST", cancelled: nx.dep.cancelled } : null };
     }
@@ -143,6 +145,7 @@ export function headline(v, trip, now = Date.now()) {
   const { legs, transfers, phase } = v, last = legs[legs.length - 1];
   const next = transfers.find(t => t.status !== "DONE");
   const arrive = v.finalDelay == null ? "" : `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)}${v.finalDelay >= 3 ? ` (+${v.finalDelay})` : ""}.`;
+  if (v.missed != null) { const l = legs[v.missed]; return { title: `${l.label} verpasst`, sub: `Ab ${cleanName(l.dep.name)}: Unten siehst du, wie du jetzt weiterkommst.` }; }
   if (phase === "done") return { title: "Angekommen", sub: `${last.arr.name} um ${hm(last.arr.rt)}.` };
   if (v.legCancel != null) { const l = legs[v.legCancel]; return { title: `${l.label} fällt aus`, sub: `Zwischen ${l.dep.name} und ${l.arr.name}. ${legs.length > 1 ? "Ich suche dir eine andere Verbindung." : "Die nächste Verbindung findest du über „Reise hinzufügen“ oder im DB Navigator."}` }; }
   if (next?.status === "LOST" && next.toMust) return { title: `Pflichtzug ${next.toLabel} in Gefahr`, sub: next.reason === "cancel" ? `${next.toLabel} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };

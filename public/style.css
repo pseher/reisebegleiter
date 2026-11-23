@@ -234,3 +234,4 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 .tiles .cmp-row.arr-much { background: color-mix(in srgb, var(--risk-bg) 50%, var(--card)); } .tiles .cmp-row.arr-much::before { background: var(--risk); }
 .tiles .tile-note { margin: 0; border-radius: var(--r); padding: 12px 14px; }
 .tiles .cmp-act .btn { background: var(--card); }
+.next .miss { display: block; margin-top: 8px; font-size: 14px; color: var(--muted); text-decoration: underline; }

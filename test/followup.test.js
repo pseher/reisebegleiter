@@ -137,3 +137,10 @@ test("gleicher ICE, anderer Zustiegsbahnhof ist kein anderer Fernzug", () => {
   const L = (label, plan) => ({ label, from: { plan } });
   assert.equal(changesFV([L("ICE 1540", "2026-11-23T22:42:00Z")], [L("Bus 115", "2026-11-23T22:23:00Z"), L("S 1", "2026-11-23T22:30:00Z"), L("ICE 1540", "2026-11-23T22:20:00Z")]), false);
 });
+
+test("„Zug verpasst“: Status Handeln, kein Umsteigen-Hinweis, keine Meldungen zur alten Verbindung", () => {
+  const t = { ...trip(), state: { missed: { i: 0, at: T0 } } };
+  const v = evaluate(t, T0 + 2 * MIN);
+  assert.equal(v.status, "LOST"); assert.match(v.title, /verpasst/); assert.equal(v.next.kind, "missed");
+  assert.equal(evaluate(t, T0 + 400 * MIN).phase, "enroute");   // nie „Angekommen“ mit dem verpassten Zug
+});

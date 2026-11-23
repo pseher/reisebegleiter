@@ -37,15 +37,15 @@ function view(trip, now = Date.now()) {
   const undoZb = canUndo && changesFV(st.undo.legs, trip.legs);       // nur dann betrifft die Änderung die Zugbindung
   // Zugbindung je Möglichkeit immer frisch bewerten (auch für früher gespeicherte Ergebnisse)
   const hasFV = trip.legs.some(isFV);
-  const hereRaw = st.here && now - st.here.at < 30 * MIN ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
-  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : trip.legs, restFV = restLegs.some(isFV);
+  const hereRaw = st.here && now - st.here.at < (st.here.mode === "missed" ? 3 * 3600e3 : 30 * MIN) ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
+  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : hereRaw?.mode === "missed" ? trip.legs.slice(st.missed?.i || 0) : trip.legs, restFV = restLegs.some(isFV);
   const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = restFV && changesFV(restLegs, a.legs || []);
-    return { ...a, zb, kind: a.kind === "asplanned" ? a.kind : restFV && !zb ? "samefv" : "here" }; }) } : null;
+    return { ...a, zb, kind: a.kind === "asplanned" && hereRaw.mode !== "missed" ? a.kind : restFV && !zb ? "samefv" : "here" }; }) } : null;
   const altZb = (a, k) => { if (!hasFV || !a.legs) return false;
     const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
-  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, undoZb, here, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
-    status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
+  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, undoZb, here, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+    status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
 }
@@ -242,6 +242,25 @@ async function api(req, env, url) {
     trip.state = { ...trip.state, rem: {}, start: null, pl: {}, zb: false };
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
     return json(view(trip, now), 201);
+  }
+
+  // „Zug verpasst / nicht eingestiegen“: sofort ab dem Abfahrtsbahnhof dieses Zugs suchen (ab jetzt)
+  const mm = /^\/api\/trips\/([0-9a-f-]{36})\/missed$/i.exec(p);
+  if (mm && (method === "POST" || method === "DELETE")) {
+    const t = await ownTrip(env, dev, mm[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const now = Date.now();
+    if (method === "DELETE") { t.state = { ...(t.state || {}), missed: null, here: null }; await db.update(env, "rb_trips", t.id, { state: t.state }); return json(view(t, now)); }
+    const b = await req.json().catch(() => ({}));
+    const i = Math.max(0, Math.min(t.legs.length - 1, +b.i || 0));
+    const f = withCoords(t.legs[i].from);
+    if (f.lat == null && !f.eva) return fail(400, "Für diesen Halt kenne ich keinen Ort.");
+    const place = f.eva ? { eva: f.eva, lat: f.lat, lon: f.lon } : { lat: f.lat, lon: f.lon };
+    t.state = { ...(t.state || {}), missed: { i, at: now } };
+    const list = await planFromHere(env, t, evaluate(t, now), place, now, "missed", i);
+    t.state = { ...t.state, here: { at: now, mode: "missed", list } };
+    await db.update(env, "rb_trips", t.id, { state: t.state });
+    return json(view(t, now));
   }
 
   // Alternativen ab dem aktuellen Standort (Koordinaten kommen nur auf Knopfdruck aus der App, werden nicht dauerhaft gespeichert)
