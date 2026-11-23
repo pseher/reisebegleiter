@@ -111,3 +111,15 @@ test("nach „Sitzen bleiben“ zählt die ursprünglich gebuchte Ankunft", () =
   const v = evaluate(t, T0 + 100 * MIN);
   assert.equal(v.finalDelay, 9); assert.equal(v.status, "OK");
 });
+
+test("Plan B vor der Abfahrt auch, wenn die Reise an einer Haltestelle ohne DB-Nummer beginnt", async () => {
+  const t = mockTrip();
+  // Start „Haltestelle“ nahe Berlin Hbf, ohne eva; Umstieg mit eigener Umstiegszeit 15 → knapp
+  t.legs[0] = { ...t.legs[0], jid: "", from: { eva: "", name: "Bushaltestelle", plan: at(5), lat: 52.526, lon: 13.37 } };
+  t.legs.forEach(l => (l.minT = 15));
+  const now = H - 9 * 3600e3, v = evaluate(t, now);
+  assert.ok(["RISK", "WATCH"].includes(v.transfers[0].status), v.transfers[0].status);
+  const alts = await planB(env, t, v, 0, now);
+  assert.ok(alts.length > 0, "keine Alternativen");
+  assert.ok(alts.every(a => a.from === "start"));
+});

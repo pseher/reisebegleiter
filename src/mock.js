@@ -62,7 +62,9 @@ export function mockBoard(kind, body) {
 const COORD = { "8011160": [52.52559, 13.36955], "8010050": [51.62367, 12.31803], "8010205": [51.34497, 12.38207],
   "8010101": [50.97257, 11.03796], "8000284": [49.44593, 11.08278], "8000261": [48.14031, 11.55827] };
 export function mockPlan(params) {
-  const from = params.fromEva, to = params.toEva, t = Date.parse(params.time || new Date().toISOString());
+  // Ohne DB-Nummer (z. B. Bus-Haltestelle): nächstgelegener Testbahnhof zu den Koordinaten
+  const near = pl => { const [la, lo] = String(pl || "").split(",").map(Number); return Object.entries(COORD).sort(([, a], [, b]) => Math.hypot(a[0] - la, a[1] - lo) - Math.hypot(b[0] - la, b[1] - lo))[0][0]; };
+  const from = params.fromEva || near(params.fromPlace), to = params.toEva || near(params.toPlace), t = Date.parse(params.time || new Date().toISOString());
   const js = journeys(t).filter(j => j.stops[0].d ? true : true);
   const pl = (eva, ms, pltf) => ({ name: NAME[eva], lat: COORD[eva][0], lon: COORD[eva][1], scheduledDeparture: new Date(ms).toISOString(), scheduledArrival: new Date(ms).toISOString(), track: pltf });
   const leg = (j, a, b) => {

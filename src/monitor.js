@@ -53,10 +53,11 @@ export async function planB(env, trip, v, k, now) {
   // Pflichtzug hinter dem gefährdeten Umstieg? Dann gezielt rechtzeitig dorthin.
   const mi = trip.legs.findIndex(l => l.must);
   if (mi > k && trip.legs[mi].from.eva) return planToMust(env, trip, v, k, mi, now, own);
-  const finalEva = last.to.eva || nearestEvaByName(last.to.name);
+  // Start/Ziel als Ort: DB-Bahnhof oder – z. B. bei Bus-Haltestellen ohne DB-Nummer – über die Koordinaten
+  const finalEva = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!finalEva) return [];
   const before = now < v.legs[0].dep.rt - MIN;
-  const fromEva = before ? trip.legs[0].from.eva : t.eva;
+  const fromEva = before ? placeOf(trip.legs[0].from) : placeOf(trip.legs[k].to);
   if (!fromEva) return [];
   // Vor der Abfahrt auch frühere Abfahrten zulassen (bis 75 Min. vor Plan) – „ein paar Minuten eher los“
   const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 75 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
@@ -139,8 +140,8 @@ const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) |
 
 async function planToMust(env, trip, v, k, mi, now, own) {
   const must = trip.legs[mi], before = now < v.legs[0].dep.rt - MIN;
-  const fromEva = before ? trip.legs[0].from.eva : v.transfers[k].eva;
-  if (!fromEva || fromEva === must.from.eva) return [];
+  const fromEva = before ? placeOf(trip.legs[0].from) : placeOf(trip.legs[k].to);
+  if (!fromEva || (fromEva.eva && fromEva.eva === must.from.eva)) return [];
   const deadline = v.legs[mi].dep.rt - Math.max(own, 3) * MIN;             // spätestens hier am Bahnsteig des Pflichtzugs
   const startMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 60 * MIN) : Math.max(now, v.transfers[k].arrRt + 3 * MIN);
   const current = trip.legs.slice(before ? 0 : k + 1, mi).map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
@@ -153,6 +154,7 @@ async function planToMust(env, trip, v, k, mi, now, own) {
       toName: (trip.legs[trip.legs.length - 1].to.name || "").replace(/\s*\(tief\)$/i, ""), reach: `${must.label} in ${must.from.name} erreicht`, legs: c.legs }));
 }
 const nearestEvaByName = name => searchStationsSync(name)?.[0]?.eva || "";
+const placeOf = s => (s?.eva ? { eva: s.eva, lat: s.lat, lon: s.lon } : s?.lat != null && s?.lon != null ? { lat: s.lat, lon: s.lon } : null);
 
 // Bewertung + Plan B + Meldungen für eine Reise (nach dem Beobachten)
 export async function assess(env, trip, now, cache) {

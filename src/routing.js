@@ -58,9 +58,12 @@ export function simplify(data) {
   }).filter(c => c.legs.length);
 }
 
-export async function connections(env, fromEva, toEva, timeMs, minT = 0, arriveBy = false) {
-  const a = byEva(fromEva), b = byEva(toEva);
+// from/to: DB-Bahnhofsnummer oder ein Ort { eva?, lat, lon } (z. B. Bus-Haltestelle ohne DB-Nummer)
+const pointOf = x => (x && typeof x === "object" ? (x.eva && byEva(x.eva)) || (x.lat != null && x.lon != null ? { eva: "", lat: +x.lat, lon: +x.lon } : null) : byEva(x));
+export async function connections(env, from, to, timeMs, minT = 0, arriveBy = false) {
+  const a = pointOf(from), b = pointOf(to);
   if (!a || !b) throw new Error("Bahnhof unbekannt");
+  const fromEva = a.eva || "", toEva = b.eva || "";
   const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
     numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, minT | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
   const seen = new Set();

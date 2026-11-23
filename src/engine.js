@@ -71,7 +71,7 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
     transfers.push({ i, at: a.name, eva: a.eva, gap, planGap, tightPlan, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
-      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
+      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depAt: d.name, walk, depRt: d.rt, arrRt: a.rt });
   }
   const openTransfers = transfers.filter(t => t.status !== "DONE");
   const lostAny = openTransfers.find(t => t.status === "LOST") || legs.find(l => l.dep.cancelled || l.arr.cancelled);
@@ -120,6 +120,13 @@ export function nextStep(v, now = Date.now()) {
 }
 
 const mins = m => (m === 1 ? "1 Min." : `${m} Min.`);
+// „In Leipzig Hbf nur 4 Min. zum Umsteigen (Gleis 12 → 10).“ bzw. mit Fußweg zu einem anderen Halt
+function xferText(t, amount) {
+  const other = t.depAt && cleanName(t.depAt) !== t.at;
+  const pl = t.arrPl && t.depPl ? ` (Gleis ${t.arrPl} → ${t.depPl})` : t.depPl ? ` (weiter von Gleis ${t.depPl})` : "";
+  return other ? `Von ${t.at} zu ${cleanName(t.depAt)}: ${amount} für Fußweg und Umstieg${t.walk ? `, davon ca. ${mins(t.walk)} zu Fuß` : ""}${pl}.`
+    : `In ${t.at} ${amount} zum Umsteigen${pl}.`;
+}
 const at = (s, ms) => `${hm(ms)}${s.platform ? `, Gleis ${s.platform}` : ""}`;
 
 export function headline(v, trip, now = Date.now()) {
@@ -131,8 +138,8 @@ export function headline(v, trip, now = Date.now()) {
   if (next?.status === "LOST" && next.toMust) return { title: `Pflichtzug ${next.toLabel} in Gefahr`, sub: next.reason === "cancel" ? `${next.toLabel} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
   if (next?.status === "LOST" && now > next.depRt && next.reason !== "cancel") return { title: `Anschluss in ${next.at} verpasst`, sub: `${next.toLabel} ist schon weg. Unten siehst du, wie du weiterkommst.` };
   if (next?.status === "LOST") return { title: "Anschluss nicht zu schaffen", sub: next.reason === "cancel" ? `${next.toLabel} in ${next.at} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
-  if (next?.status === "RISK") return { title: next.toMust ? `Pflichtzug ${next.toLabel} gefährdet` : "Anschluss gefährdet", sub: `${next.at}: ${next.gap >= 0 ? `nur ${mins(next.gap)} zum Umsteigen` : "Ankunft nach der Abfahrt"} (${next.arrPl || "?"} → ${next.depPl || "?"}). Ich behalte das im Blick.` };
-  if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${next.at}: noch ${mins(next.gap)} Zeit, Gleis ${next.arrPl || "?"} → ${next.depPl || "?"}. Ich behalte das im Blick.` };
+  if (next?.status === "RISK") return { title: next.toMust ? `Pflichtzug ${next.toLabel} gefährdet` : "Anschluss gefährdet", sub: `${xferText(next, next.gap >= 0 ? `nur ${mins(next.gap)}` : "keine Zeit")} Ich behalte das im Blick.` };
+  if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${xferText(next, `noch ${mins(next.gap)}`)} Ich behalte das im Blick.` };
   // Kein Umstiegsproblem – aber ehrlich sagen, wenn es am Ziel später wird
   const d = v.finalDelay ?? 0;
   const title = d >= 10 ? `Ca. ${d} Min. später am Ziel` : d >= 3 ? `Läuft – ca. ${d} Min. später` : d <= -3 ? `Läuft – ca. ${-d} Min. früher am Ziel` : "Alles läuft nach Plan";
