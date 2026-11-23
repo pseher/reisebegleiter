@@ -330,8 +330,7 @@ function renderTrip(t, many) {
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Das ist ein anderer Fernzug – mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
-    ${t.status === "WATCH" || t.status === "OK" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
-    ${hereCard(t)}
+    ${t.status === "WATCH" || t.status === "OK" ? nextCard(t.next) + hereCard(t) + planBCard(t) : hereCard(t) + planBCard(t) + nextCard(t.next)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
     <div class="card flat">${timeline(t)}</div>
