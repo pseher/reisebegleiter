@@ -1,7 +1,7 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations } from "./stations.js";
-import { board, findJourney, isoBerlin, rawBoard, WINDOW_MIN } from "./openboards.js";
+import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, altText } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver } from "./monitor.js";
 import { vapid, b64u } from "./push.js";
@@ -67,6 +67,32 @@ async function api(req, env, url) {
             out.stations = (await searchStations(env, "München")).slice(0, 2).map(x => `${x.name} ${x.eva}`).join(", ");
       try { const d = await rawBoard(env, "dep", "8000261", isoBerlin(Date.now()), 1); out.openboards = `ok: ${(d.departures || []).length} Abfahrten`; }
       catch (e) { out.openboards = e.message; }
+    }
+    // Ablauf „Zug wählen → Ankunft am Ausstieg suchen“ mit echten Daten: ?from=Name&to=Name
+    const fq = url.searchParams.get("from"), tq = url.searchParams.get("to");
+    if (fq && tq && out.dbKeys) {
+      const [from] = await searchStations(env, fq), [to] = await searchStations(env, tq);
+      out.from = from; out.to = to;
+      if (from && to) {
+        const deps = await departures(env, from.eva, Date.now());
+        const hit = deps.find(e => e.via.some(v => v.eva === to.eva) || e.direction.some(d => d.eva === to.eva));
+        const viaNamed = deps.find(e => e.via.some(v => v.name && v.name.toLowerCase().includes(tq.toLowerCase())));
+        out.train = hit ? { label: hit.label, jid: hit.jid, plan: hit.plan, via: hit.via.map(v => `${v.name}=${v.eva}`).join(" | ") } : null;
+        if (!hit && viaNamed) out.trainByName = { label: viaNamed.label, jid: viaNamed.jid, via: viaNamed.via.map(v => `${v.name}=${v.eva}`).join(" | ") };
+        const t = hit || viaNamed;
+        if (t) {
+          const viaEva = (t.via.find(v => v.eva === to.eva) || t.via.find(v => v.name.toLowerCase().includes(tq.toLowerCase())) || {}).eva || to.eva;
+          out.arrEva = viaEva;
+          const start = Date.parse(t.plan);
+          for (let w = 0; w < 3; w++) {
+            const raw = await rawBoard(env, "arr", viaEva, isoBerlin(start + w * 25 * MIN), 2);
+            const list = normalize(raw, "arr");
+            out[`arr window ${w}`] = { keys: Object.keys(raw).join(","), count: list.length, considered: raw.meta?.consideredStopPlaces?.slice(0, 12),
+              match: list.find(x => x.jid === t.jid) ? "JA" : "nein",
+              sample: list.filter(x => x.label === t.label).slice(0, 4).map(x => `${x.label} ${x.jid} ${x.plan}`) };
+          }
+        }
+      }
     }
     return json(out);
   }
