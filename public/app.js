@@ -201,7 +201,7 @@ function planBCard(t) {
 
 // Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
 function stepsHtml(steps) {
-  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${hm(x.dep)}</span><span class="st-b"><b>${esc(x.label)}</b>${x.pl ? ` <span class="muted">Gl. ${esc(x.pl)}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${hm(x.arr)}</span></span></li>
+  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${hm(x.dep)}</span><span class="st-b"><b>${esc(x.label)}</b>${x.pl ? ` <span class="muted">${/^\d/.test(x.pl) ? "Gl. " : ""}${esc(x.pl)}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${hm(x.arr)}</span></span></li>
     ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
       const walk = cleanStop(x.to) !== cleanStop(steps[i + 1].from);
       if (g < 0) return `<span class="late">Umstieg geht nicht – ${-g} Min. zu spät</span>`;
@@ -237,15 +237,16 @@ function liveBadge(a) {
 
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
 let hereBusy = null;
-function searchChips(t, cur) {
-  const start = cleanStop(t.legs[0].dep.name);
-  const opts = [["start", `Ab ${start} · ${day(t.legs[0].dep.plan)}`], ["trip", `${PIN}Ab meinem Standort · zur Reisezeit`], ["now", `${PIN}Ab meinem Standort · jetzt`]];
-  return `<div class="chips search-chips">${opts.filter(([m]) => m !== cur).map(([m, l]) => `<button class="chip" data-here="${t.id}" data-mode="${m}">${l}</button>`).join("")}</div>`;
+// Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
+function searchSeg(t, cur) {
+  const opts = [["start", "Ab Start", cleanStop(t.legs[0].dep.name)], ["trip", "Standort", "zur Reisezeit"], ["now", "Standort", "jetzt"]];
+  return `<div class="seg" role="group" aria-label="Andere Verbindungen suchen">${opts.map(([m, a, b]) =>
+    `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "start" ? "" : PIN}${a}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
 }
 function hereCard(t) {
   if (t.phase === "done") return "";
   if (hereBusy === t.id) return `<section class="card"><div class="k">Andere Verbindungen</div><div class="spinner"></div></section>`;
-  if (!t.here) return `<section class="card flat-s"><div class="k">Andere Verbindungen suchen</div>${searchChips(t, null)}</section>`;
+  if (!t.here) return `<section class="card"><div class="k">Andere Verbindungen suchen</div>${searchSeg(t, null)}</section>`;
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
@@ -261,8 +262,8 @@ function hereCard(t) {
   const title = mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · zur Reisezeit (${day(t.legs[0].dep.plan)})` : mode === "now" ? "Ab deinem Standort · ab jetzt" : `Ab deinem Standort · zur Reisezeit (${day(t.legs[0].dep.plan)})`;
   // Auswahl der Suche oben, darunter die Ergebnisse
   return `<section class="card"><div class="k">Andere Verbindungen</div>
-    <div class="chips search-chips"><button class="chip" aria-pressed="true" data-here="${t.id}" data-mode="${mode}" title="Neu suchen">${mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · ${day(t.legs[0].dep.plan)}` : `${PIN}Ab meinem Standort · ${mode === "now" ? "jetzt" : "zur Reisezeit"}`} ↻</button></div>
-    ${searchChips(t, mode)}
+    ${searchSeg(t, mode)}
+    <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span><button class="link" data-here="${t.id}" data-mode="${mode}">↻ neu suchen</button></div>
     ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}</section>`;
 }
 
