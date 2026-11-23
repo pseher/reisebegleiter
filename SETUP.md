@@ -9,7 +9,7 @@ Legt nur `rb_devices` und `rb_trips` an, PlanFlink bleibt unberührt.
 
 ## 2 · DB API Marketplace (2 Min.)
 In der Anwendung, die PlanFlink nutzt, zusätzlich **OpenBoards** (Free) abonnieren.
-Timetables bleibt abonniert – darüber läuft vorerst die Bahnhofssuche.
+Die Bahnhofssuche braucht keine DB-Abfrage (eingebaute Stationsliste, Quelle DB StaDa, CC BY 4.0).
 
 ## 3 · Worker anlegen (10 Min.)
 1. Cloudflare → **Workers & Pages** → **Erstellen** → **Worker importieren / Mit Git verbinden** → Repo `pseher/reisebegleiter`

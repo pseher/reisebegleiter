@@ -60,15 +60,11 @@ async function api(req, env, url) {
 
   if (p === "/api/config") { const v = await vapid(env).catch(() => null); return json({ vapid: v?.pub || null, mock: env.MOCK === "1" }); }
 
-  // Diagnose (ohne Gerät): Version und eine Testabfrage an Timetables und OpenBoards – zeigt keine Schlüssel
+  // Diagnose (ohne Gerät): Version und eine Testabfrage an OpenBoards – zeigt keine Schlüssel
   if (p === "/api/health") {
-    const out = { version: "ee05f62+diag", dbKeys: !!(env.DB_CLIENT_ID && env.DB_API_KEY), supabase: !!env.SUPABASE_SERVICE_KEY, vapid: !!env.VAPID_JWK };
+    const out = { version: "stationsliste", dbKeys: !!(env.DB_CLIENT_ID && env.DB_API_KEY), supabase: !!env.SUPABASE_SERVICE_KEY, vapid: !!env.VAPID_JWK };
     if (url.searchParams.get("probe") === "1" && out.dbKeys) {
-      const h = { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY };
-      for (const q of ["München Hbf", "München*", "Berlin Hbf"]) {
-        const r = await fetch(`https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/station/${encodeURIComponent(q)}`, { headers: { ...h, Accept: "application/xml" } }).catch(e => ({ status: 0, text: async () => e.message }));
-        out[`tt ${q}`] = `${r.status}: ${(await r.text()).slice(0, 300)}`;
-      }
+            out.stations = (await searchStations(env, "München")).slice(0, 2).map(x => `${x.name} ${x.eva}`).join(", ");
       try { const d = await rawBoard(env, "dep", "8000261", isoBerlin(Date.now()), 1); out.openboards = `ok: ${(d.departures || []).length} Abfahrten`; }
       catch (e) { out.openboards = e.message; }
     }
