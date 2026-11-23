@@ -59,9 +59,11 @@ export function berlinIso(date, time) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !/^\d{1,2}:\d{2}$/.test(time || "")) return null;
   const [h, m] = time.split(":").map(Number), [Y, M, D] = date.split("-").map(Number);
   const guess = Date.UTC(Y, M - 1, D, h, m);
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Berlin", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(guess)).map(x => [x.type, x.value]));
-  const off = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - guess;
-  return new Date(guess - off).toISOString();
+  const offAt = ms => { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Berlin", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(ms)).map(x => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - ms; };
+  // Zweimal rechnen: der Versatz muss zur Zielzeit passen, nicht zur geratenen (Zeitumstellung in der Nacht)
+  const off1 = offAt(guess), off2 = offAt(guess - off1);
+  return new Date(guess - off2).toISOString();
 }
 
 const NON_RAIL = /^(bus|sev|str|tram|u\s?\d|u-bahn|fähre|ferry|ast|ruf)/i;
@@ -131,13 +133,15 @@ export async function importTrip(env, { text = "", files = [] }) {
 
 // Testdaten: Berlin Hbf → Leipzig → München mit den Zügen der nächsten Stunde
 function mockExtraction(text = "") {
-  const d = new Date(Date.now() + 3600e3), h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", hourCycle: "h23" }).format(d));
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(d), hu = new Date(d).getUTCHours();
-  const pad = n => String(n).padStart(2, "0"), hh = n => pad(((h + n) % 24 + 24) % 24);
+  const d = new Date(Date.now() + 3600e3), hu = new Date(d).getUTCHours();
+  // Datum und Uhrzeit je Versatz in Stunden (über Mitternacht hinweg korrekt)
+  const at = n => { const x = new Date(d.getTime() + n * 3600e3);
+    return { date: new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(x),
+      hh: new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", hourCycle: "h23" }).format(x) }; };
   return { ticket: "spar", trips: [{ label: "Hinfahrt", legs: [
-    { train: `ICE ${500 + hu}`, from: "Berlin Hbf", dep_date: date, dep_time: `${hh(0)}:05`, to: "Leipzig Hbf", arr_time: `${hh(1)}:10`, from_platform: "14" },
-    { train: `ICE ${1600 + hu}`, from: "Leipzig Hbf", dep_date: date, dep_time: `${hh(1)}:27`, to: "München Hbf", arr_time: `${hh(4)}:20` },
+    { train: `ICE ${500 + hu}`, from: "Berlin Hbf", dep_date: at(0).date, dep_time: `${at(0).hh}:05`, to: "Leipzig Hbf", arr_time: `${at(1).hh}:10`, from_platform: "14" },
+    { train: `ICE ${1600 + hu}`, from: "Leipzig Hbf", dep_date: at(1).date, dep_time: `${at(1).hh}:27`, to: "München Hbf", arr_time: `${at(4).hh}:20` },
   ] }, ...(/zwei/i.test(text) ? [{ label: "Rückfahrt", legs: [
-    { train: `ICE ${1601 + hu}`, from: "Leipzig Hbf", dep_date: date, dep_time: `${hh(2)}:27`, to: "München Hbf" },
+    { train: `ICE ${1601 + hu}`, from: "Leipzig Hbf", dep_date: at(2).date, dep_time: `${at(2).hh}:27`, to: "München Hbf" },
   ] }] : [])] };
 }

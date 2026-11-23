@@ -38,3 +38,8 @@ Cron sofort auslösen, auch mit Zeitsprung: `curl "localhost:8787/api/mock/tick?
 ## Grenzen im kostenlosen Cloudflare-Tarif
 50 externe Abfragen pro Lauf und 10 ms Rechenzeit. Für den Familientest reicht das; bei vielen Reisen
 den Workers-Paid-Tarif (5 $/Monat) nehmen.
+
+## Diagnose
+`/api/health` und `/api/debug/board` geben ihre Details nur noch mit Schlüssel aus:
+in Cloudflare unter Settings → Variables and Secrets ein Secret `DIAG_KEY` anlegen (beliebiger langer Text)
+und dann `/api/health?probe=1&key=<DIAG_KEY>` aufrufen. Ohne Schlüssel antwortet `/api/health` nur `{"ok":true}`.

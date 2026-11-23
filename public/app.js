@@ -15,10 +15,14 @@ async function register() {
   AUTH = await r.json();
   try { localStorage.setItem("rb_auth", JSON.stringify(AUTH)); } catch {}
 }
-async function api(path, { method = "GET", body } = {}, retry = true) {
+async function api(path, opts = {}, retry = true) {
+  try { return await api0(path, opts, retry); }
+  catch (e) { if (e instanceof TypeError) throw new Error("Keine Verbindung zum Internet. Bitte gleich noch einmal versuchen."); throw e; }
+}
+async function api0(path, { method = "GET", body } = {}, retry = true) {
   if (!AUTH) await register();
   const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401 && retry) { AUTH = null; return api(path, { method, body }, false); }
+  if (r.status === 401 && retry) { AUTH = null; return api0(path, { method, body }, false); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Fehler ${r.status}`);
   return data;
@@ -53,10 +57,31 @@ function schedule() {
 }
 document.addEventListener("visibilitychange", async () => { if (document.visibilityState === "visible" && view === "home" && Date.now() - loadedAt > 30e3) { await loadTrips().catch(() => {}); render(); } });
 
+// ---------- Zurück-Taste (Handy/Browser) ----------
+// Solange man nicht auf der Startseite ist, liegt ein Eintrag im Verlauf. „Zurück“ macht dann einen Schritt in der App.
+let guard = false, skipPop = false;
+const atRoot = () => view === "home" && (!openId || trips.filter(t => t.active !== false).length <= 1);
+function syncHistory() {
+  if (!atRoot() && !guard) { history.pushState({ rb: 1 }, ""); guard = true; }
+  else if (atRoot() && guard) { guard = false; skipPop = true; history.back(); }
+}
+addEventListener("popstate", () => {
+  if (skipPop) { skipPop = false; return; }
+  guard = false;
+  if (view === "add" && W) { const bk = document.getElementById("wBack"); if (bk) return bk.click(); W = null; return go("home"); }
+  if (view !== "home") return go("home");
+  if (openId) { openId = null; sheetId = null; }
+  render();
+});
+// Assistent übersteht Neuladen (nur in diesem Tab)
+const saveW = () => { try { if (view === "add" && W && !W.busy) sessionStorage.setItem("rb_w", JSON.stringify(W)); else sessionStorage.removeItem("rb_w"); } catch {} };
+
 // ---------- Darstellung ----------
-let openId = null, sheetId = null, openLeg = null;
-function render() {
-  if (view === "add") return renderWizard();
+let openId = null, sheetId = null, openLeg = null, flash = "";
+function render() { render0(); syncHistory(); saveW(); }
+const flashBox = () => { if (!flash) return ""; const f = flash; flash = ""; return `<div class="banner ok small" role="status">${esc(f)}</div>`; };
+function render0() {
+  if (view === "add") { if (!W) startWizard(); return renderWizard(); }
   if (view === "settings") return renderSettings();
   const active = trips.filter(t => t.active !== false);
   if (openId && !active.some(t => t.id === openId)) openId = null;
@@ -66,10 +91,14 @@ function render() {
 }
 
 const KICKER = { OK: "Alles im Plan", WATCH: "Knapp", RISK: "Achtung", LOST: "Handeln", DONE: "Angekommen" };
+const listState = t => (t.status === "WATCH" && !t.transfers.some(x => x.status === "WATCH") && t.finalDelay >= 3 ? `${t.finalDelay} Min. später` : KICKER[t.status] || "");
+const heroKicker = t => (t.phase === "before" ? "Vor der Abfahrt" : t.phase === "done" ? "Reise beendet" : "Unterwegs");
 const day = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
 const inMin = iso => { const m = Math.round((Date.parse(iso) - Date.now()) / MIN); return m <= 0 ? "jetzt" : m < 60 ? `in ${m} Min.` : `in ${Math.floor(m / 60)} Std. ${m % 60} Min.`; };
-const lateTag = d => (d >= 1 ? ` <span class="late">+${d}</span>` : "");
-const gl = p => (p ? `<span class="gl">Gl. ${esc(p)}</span>` : "");
+const lateTag = d => (d >= 1 ? ` <span class="late" title="${d} Min. später">+${d}</span>` : "");
+// Im großen „nächster Schritt“: neue Zeit groß, darunter in Worten „13 Min. später, geplant 22:10“
+const lateLine = (d, plan) => (d >= 1 ? `<div class="small"><span class="late">${d} Min. später</span> <span class="muted">· geplant ${hm(plan)}</span></div>` : "");
+const gl = p => (p ? `<span class="gl">Gleis ${esc(p)}</span>` : "");
 const route = t => `${esc(t.legs[0].dep.name)} → ${esc(t.legs[t.legs.length - 1].arr.name)}`;
 
 // Liste bei mehreren Reisen
@@ -77,14 +106,15 @@ function renderList(active) {
   if (!active.length) {
     $app.innerHTML = `<h1>Bahnfahren ohne Stress</h1>
       <p class="muted">Lege deine Reise an. Ich prüfe unterwegs Verspätungen, Gleise und Anschlüsse und melde mich nur, wenn du etwas tun solltest.</p>
+      <p class="muted">Wird ein Umstieg knapp, siehst du sofort deinen Plan neben den Möglichkeiten – sitzen bleiben, einen Zug früher oder später – und wann du jeweils ankommst.</p>
       <button class="btn" data-go="add">Reise hinzufügen</button>${pushCard()}`;
     return bindCommon();
   }
-  $app.innerHTML = `<h1>Deine Reisen</h1>
+  $app.innerHTML = `${flashBox()}<h1>Deine Reisen</h1>
     <ul class="trips">${active.map(t => `<li><button data-open="${t.id}">
       <span class="sdot d-${t.status}"></span>
       <span class="tr-main"><b>${route(t)}</b><span class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}</span></span>
-      <span class="tr-state small">${esc(KICKER[t.status] || "")}</span></button></li>`).join("")}</ul>
+      <span class="tr-state small">${esc(listState(t))}</span></button></li>`).join("")}</ul>
     <button class="btn sec" data-go="add">Reise hinzufügen</button>${pushCard()}`;
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   bindCommon();
@@ -93,17 +123,20 @@ function renderList(active) {
 // Der nächste Schritt – groß und eindeutig
 function nextCard(n) {
   if (!n) return "";
-  const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
+  if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
+      <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b> – oben siehst du, wie du weiterkommst.</div></section>`;
+  const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
   const pc = n.platformChanged ? ` <span class="late">Gleiswechsel</span>` : "";
   let body;
-  if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}${pc}</div>
+  if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)} ${gl(n.platform)}${pc}</div>${lateLine(n.delay, n.plan)}
       <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
       <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>
       ${n.from && cleanStop(n.from.name) !== cleanStop(n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
-  else body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}</div>
+  else body = `<div class="big">${hm(n.at)} ${gl(n.platform)}</div>${lateLine(n.delay, n.plan)}
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(n.station)}</b></div>
       ${n.then && n.then.station && cleanStop(n.then.station) !== cleanStop(n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
-      ${n.then ? `<div class="muted small">dann ${esc(n.then.label)} um ${hm(n.then.at)}${n.then.platform ? `, Gleis ${esc(n.then.platform)}` : ""} · ${Math.max(0, n.then.gap)} Min. Zeit</div>` : `<div class="muted small">${inMin(n.at)}</div>`}`;
+      ${n.then ? (n.then.lost ? `<div class="small"><span class="late">Anschluss ${esc(n.then.label)} ${n.then.cancelled ? "fällt aus" : "nicht zu schaffen"}</span></div>`
+        : `<div class="then">Dann <b>${esc(n.then.label)}</b> um ${hm(n.then.at)}${n.then.platform ? `, Gleis ${esc(n.then.platform)}` : ""}${n.then.platformChanged ? ` <span class="late">Gleiswechsel (statt ${esc(n.then.platformPlan)})</span>` : ""} · ${Math.max(0, n.then.gap)} Min. Zeit</div>`) : `<div class="muted small">${inMin(n.at)}</div>`}`;
   return `<section class="card next"><div class="k">${head}</div>${body}</section>`;
 }
 
@@ -133,7 +166,7 @@ function planBCard(t) {
     : `<div class="cmp-point">ohne Umstieg</div>`;
   const goal = (arr, d) => `<div class="cmp-goal">Ziel <b>${hm(arr)}</b>${d}</div>`;
   const delta = a => { const d = Math.round((Date.parse(a.arr) - curArr) / MIN); return lost ? "" : d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · gleich"; };
-  const tag = a => a.legs?.length === 1 && a.label === curLeg.label ? "Sitzen bleiben" : ({ safer: "Sicherer", faster: "Schneller", later: "Später", must: "Rechtzeitig" }[a.kind] || "Möglichkeit");
+  const tag = a => a.kind === "stay" || (a.legs?.length === 1 && a.label === curLeg.label) ? "Sitzen bleiben" : ({ safer: "Sicherer", faster: "Schneller", later: "Später", must: "Rechtzeitig" }[a.kind] || "Möglichkeit");
   // Dein Plan: der knappste offene Umstieg mit Echtzeit
   const cur = t.transfers.filter(x => x.status !== "DONE").sort((a, b) => a.gap - b.gap)[0];
   const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">
@@ -143,11 +176,12 @@ function planBCard(t) {
     return `<div class="cmp-row"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
       ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : point(tightest(a.legs || []))}
       ${goal(a.arr || a.dep, a.reach ? "" : delta(a))}
-      ${isOpen ? `<div class="small muted cmp-more">Los: ${hm(a.dep)} ab ${esc(a.at)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""}<br>${esc(a.label)}</div>` : ""}
-      <div class="row cmp-act"><button class="btn ${ai ? "sec" : ""} small-btn" data-adopt="${t.id}|${k}|${ai}">Übernehmen</button>
+      ${isOpen ? `<div class="small muted cmp-more">Abfahrt ${hm(a.dep)} in ${esc(a.at)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""}<br>${esc(a.label)}</div>` : ""}
+      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-adopt-text="${esc(tag(a))}: ${esc(a.label)}, Ziel ca. ${hm(a.arr || a.dep)}">Übernehmen</button>
         <button class="btn quiet small-btn" data-cmp="${id}">${isOpen ? "Weniger" : "Details"}</button></div>
     </div></div>`; }).join("");
-  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${curRow}${rows}</section>`;
+  const zb = t.ticket === "spar" && !t.zbLifted ? `<p class="small zb-warn"><b>Sparpreis:</b> Er gilt nur für deine gebuchten Züge. Einen anderen Zug darfst du erst nehmen, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden.</p>` : "";
+  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}</section>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
@@ -173,9 +207,9 @@ function timeline(t) {
     const past = Date.parse(l.arr.rt) < Date.now(), open = openLeg === `${t.id}:${i}`;
     rows.push(`<li class="leg-row ${past ? "past" : ""}"><button data-leg="${t.id}:${i}" aria-expanded="${open}">
       <span class="tm">${hm(l.dep.rt)}${lateTag(l.dep.delay)}<br><span class="muted">${hm(l.arr.rt)}${lateTag(l.arr.delay)}</span></span>
-      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">Pflichtzug</span>` : ""}${l.live ? "" : ` <span class="muted small">Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
+      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">Pflichtzug</span>` : ""}${l.live ? "" : ` <span class="muted small">ohne Live-Daten</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
         <span class="small">${esc(l.dep.name)} → ${esc(l.arr.name)}</span></span>
-      <span class="pl small">${l.dep.platform ? `Gl. ${esc(l.dep.platform)}` : ""}</span></button>
+      <span class="pl small">${l.dep.platform ? `Gleis ${esc(l.dep.platform)}` : ""}</span></button>
       ${open ? `<div class="detail small">
         <div>Ab ${esc(l.dep.name)}: plan ${hm(l.dep.plan)}${l.dep.delay ? `, jetzt ${hm(l.dep.rt)}` : ""}${l.dep.platform ? `, Gleis ${esc(l.dep.platform)}` : ""}${l.dep.platformPlan && l.dep.platform !== l.dep.platformPlan ? ` (statt ${esc(l.dep.platformPlan)})` : ""}</div>
         <div>An ${esc(l.arr.name)}: plan ${hm(l.arr.plan)}${l.arr.delay ? `, jetzt ${hm(l.arr.rt)}${l.arr.estimated ? " (geschätzt)" : ""}` : ""}${l.arr.platform ? `, Gleis ${esc(l.arr.platform)}` : ""}</div>
@@ -193,7 +227,7 @@ function timeline(t) {
 }
 
 function transferText(tr) {
-  const pl = tr.arrPl && tr.depPl ? ` · Gl. ${esc(tr.arrPl)} → ${esc(tr.depPl)}` : tr.depPl ? ` · weiter von Gl. ${esc(tr.depPl)}` : "";
+  const pl = tr.arrPl && tr.depPl ? ` · Gleis ${esc(tr.arrPl)} → ${esc(tr.depPl)}` : tr.depPl ? ` · weiter von Gleis ${esc(tr.depPl)}` : "";
   if (tr.status === "DONE") return `erledigt`;
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus</b>` : `<b>nicht zu schaffen</b>${pl}`;
   if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>Pflichtzug in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;
@@ -207,11 +241,12 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
-  $app.innerHTML = `
+  $app.innerHTML = `${flashBox()}
     ${many ? `<button class="back" data-list>← Alle Reisen</button>` : ""}
     <div class="trip-head"><h1>${route(t)}</h1><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
-    <section class="hero s-${t.status}"><div class="k">${KICKER[t.status] || ""}</div><h2>${esc(t.title)}</h2>
-      ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ Plan B:.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
+    <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
+      ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
+    ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
     ${t.status === "WATCH" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
@@ -225,13 +260,13 @@ function renderTrip(t, many) {
       <div class="chips">${[["spar", "Sparpreis"], ["flex", "Flexpreis"], ["dticket", "Deutschlandticket"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-tk="${k}" aria-pressed="${t.ticket === k}">${l}</button>`).join("")}</div>
       <button class="btn quiet" data-del="${t.id}">Reise beenden</button></section>` : ""}
     ${pushCard()}
-    ${many ? "" : `<button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`}`;
+    <button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
-  $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.tmt); patch({ minT: +b.dataset.tmt }); });
+  $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => patch({ minT: +b.dataset.tmt }));   // nur diese Reise
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindCommon();
@@ -273,9 +308,16 @@ function bindCommon() {
     openId = null; sheetId = null; await loadTrips().catch(() => {}); render();
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
-    const [id, k, idx] = b.dataset.adopt.split("|");
+    const [id, k, idx] = b.dataset.adopt.split("|"), t = trips.find(x => x.id === id);
+    const zbWarn = t && t.ticket === "spar" && !t.zbLifted ? "\n\nAchtung Sparpreis: Die Zugbindung ist noch nicht aufgehoben. Mit einem anderen Zug kann ein neues Ticket fällig werden." : "";
+    if (!confirm(`Diese Verbindung übernehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nIch überwache dann die neue Verbindung. Du kannst das rückgängig machen.`)) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
     await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx } }).catch(e => alert(e.message));
+    await loadTrips().catch(() => {}); render();
+  });
+  $app.querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    await api(`/api/trips/${b.dataset.undo}/undo`, { method: "POST" }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
   });
   const p = document.getElementById("pushOn");
@@ -318,7 +360,7 @@ function renderWizard() {
       <section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
-        <div class="row"><label class="btn" style="margin:4px 0">Screenshot / PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
+        <div class="row"><label class="btn" style="margin:4px 0">Foto, Screenshot oder PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
           <button class="btn sec" id="impTextBtn" style="margin:4px 0">Text einfügen</button></div>
         ${W.showText ? `<textarea id="impText" rows="5" placeholder="Hier den geteilten Text oder die Buchungsbestätigung einfügen">${esc(W.impText || "")}</textarea>
           <div class="row"><button class="btn sec" id="impPaste" style="margin:4px 0">Aus Zwischenablage</button><button class="btn" id="impGo" style="margin:4px 0">Einlesen</button></div>` : ""}
@@ -361,14 +403,17 @@ function renderWizard() {
   }
 
   else if (W.step === "pickTrip") {
+    const past = t => Date.parse(t.legs[t.legs.length - 1].to.plan) < Date.now();
+    const future = W.imported.filter(t => !past(t));
     $app.innerHTML = `<p class="steps">Eingelesen</p><h1>${W.savedOne ? `${esc(W.savedOne)} ist angelegt. Auch die ${W.imported.length === 1 ? "andere Fahrt" : "anderen Fahrten"}?` : "Welche Fahrt?"}</h1>${W.note && !W.savedOne ? `<p class="small muted">${esc(W.note)}</p>` : ""}
-      <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
+      <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}" ${past(t) ? "disabled" : ""}><b>${esc(t.label || `Fahrt ${i + 1}`)}</b>${past(t) ? ` <span class="late">schon vorbei</span>` : ""}<br>
         <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>
-      <button class="btn" id="allTrips">${W.imported.length === 1 ? "Auch anlegen" : `Alle ${W.imported.length} anlegen`}</button>
+      ${future.length > 1 || (W.savedOne && future.length) ? `<button class="btn" id="allTrips">${future.length === 1 ? "Auch anlegen" : `Alle ${future.length} anlegen`}</button>` : ""}
       ${W.savedOne ? `<button class="btn quiet" id="doneImp">Nein, fertig</button>` : back}`;
     document.getElementById("doneImp")?.addEventListener("click", () => { W = null; go("home"); });
     $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.multi = null; W.pickedIdx = +b.dataset.it; W.legs = W.imported[W.pickedIdx].legs; W.step = "leg"; render(); });
-    document.getElementById("allTrips").onclick = () => { W.multi = W.imported.map(t => t.legs); W.legs = W.multi[0]; W.step = "ticket"; render(); };
+    const at = document.getElementById("allTrips");
+    if (at) at.onclick = () => { W.multi = future.map(t => t.legs); W.legs = W.multi[0]; W.step = "ticket"; render(); };
   }
 
   else if (W.step === "station") {
@@ -417,7 +462,7 @@ function renderWizard() {
         ${l.jid ? "" : `<div class="small muted">${l.mode && !/RAIL|SUBURBAN|LONG/.test(l.mode) ? "Bus/U-Bahn/Tram: " : ""}ohne Echtzeit, nur Fahrplan</div>`}</li>`).join("")}</ol></div>
       <button class="btn" id="done">Fertig – weiter</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
-      ${W.mode === "import" ? `<button class="btn quiet" id="undo">Verwerfen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
+      ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
     document.getElementById("done").onclick = () => { W.step = "ticket"; render(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
@@ -452,7 +497,7 @@ function trainList(list) {
   if (!list.length) return `<p class="muted">Keine Abfahrten in diesem Zeitraum gefunden.</p>`;
   return `<ul class="list">${list.map((e, i) => `<li><button data-j="${i}" ${e.cancelled ? "disabled" : ""}><div class="train">
     <span class="t">${hm(e.rt)}</span><span class="l">${esc(e.label)}${e.cancelled ? ` <span class="late">fällt aus</span>` : ""}</span>
-    <span class="pl">${e.platform ? `Gl. ${esc(e.platform)}` : ""}</span>
+    <span class="pl">${e.platform ? `Gleis ${esc(e.platform)}` : ""}</span>
     <span class="d">${e.rt !== e.plan && Date.parse(e.rt) - Date.parse(e.plan) >= MIN ? `<span class="late">+${Math.round((Date.parse(e.rt) - Date.parse(e.plan)) / MIN)}</span> · ` : ""}nach ${esc(e.direction.map(d => d.name).filter(Boolean).join(" / ") || "?")}</span>
   </div></button></li>`).join("")}</ul>`;
 }
@@ -527,7 +572,9 @@ async function saveTrip(ticket) {
       W.pickedIdx = null; W.ticketGuess = ticket; W.busy = null; W.step = "pickTrip";
       await loadTrips().catch(() => {}); return render();
     }
-    W = null; await loadTrips(); openId = trips[0]?.id || null; go("home");
+    const n = (W.multi || [W.legs]).length;
+    flash = n > 1 ? `${n} Reisen angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Reise angelegt. Ich melde mich, wenn du etwas tun solltest.";
+    W = null; await loadTrips(); openId = n > 1 ? null : trips[0]?.id || null; go("home");
   } catch (e) { W.busy = null; W.error = e.message; render(); }
 }
 
@@ -563,4 +610,5 @@ async function takeShared() {
     if (files.length) { W.impText = text; importFiles(files); } else if (text) runImport({ text });
   } catch {}
 }
-loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p>`; throw e; }).then(() => { render(); schedule(); takeShared(); });
+try { const w = JSON.parse(sessionStorage.getItem("rb_w") || "null"); if (w?.step) { W = w; view = "add"; } } catch {}
+loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; throw e; }).then(() => { render(); schedule(); takeShared(); });

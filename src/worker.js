@@ -4,8 +4,8 @@ import { searchStations, byEva } from "./stations.js";
 import { connections, resolveConnection, geocodeStop } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
-import { evaluate, altText } from "./engine.js";
-import { runMonitor, dueChecks, observe, assess, deliver, adopt } from "./monitor.js";
+import { evaluate } from "./engine.js";
+import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt } from "./monitor.js";
 import { vapid, b64u } from "./push.js";
 
 const MIN = 60e3;
@@ -30,12 +30,11 @@ const withCoords = s => { if (s.lat != null || !s.eva) return s; const b = byEva
 function view(trip, now = Date.now()) {
   trip = { ...trip, legs: trip.legs.map(l => ({ ...l, from: withCoords(l.from), to: withCoords(l.to) })) };
   const v = evaluate(trip, now), st = trip.state || {};
-  const nextK = v.transfers.findIndex(t => t.status === "RISK" || t.status === "LOST");
-  if (nextK >= 0 && st.alt?.[nextK]?.length) v.sub = v.sub.replace(" Ich behalte das im Blick.", "") + altText(st.alt[nextK]);
   const open = v.transfers.filter(t => t.status !== "DONE");
   const current = { dep: iso(v.legs[0].dep.rt), arr: iso(v.legs[v.legs.length - 1].arr.rt), transfers: v.transfers.length,
     minGap: open.length ? Math.min(...open.map(t => t.gap)) : null, label: v.legs.map(l => l.label).join(" → ") };
-  return { id: trip.id, ticket: trip.ticket, plan: current, minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  const canUndo = !!st.undo?.legs?.length && now - (st.undo.at || 0) < 3 * 3600e3 && v.phase !== "done";
+  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [], altChecked: !!st.altAt?.[k] })) };
@@ -61,8 +60,8 @@ function validLeg(l) {
 }
 const coord = s => (Number.isFinite(+s.lat) && Number.isFinite(+s.lon) && s.lat != null ? { lat: +(+s.lat).toFixed(5), lon: +(+s.lon).toFixed(5) } : {});
 const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)), minT: Math.min(30, Math.max(0, +l.minT || 0)),
-  from: { eva: String(l.from.eva), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8), ...coord(l.from) },
-  to: { eva: String(l.to.eva), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...(l.to.estimated ? { estimated: true } : {}) }, ...(l.must ? { must: true } : {}) });
+  from: { eva: String(l.from.eva || ""), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8), ...coord(l.from) },
+  to: { eva: String(l.to.eva || ""), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...(l.to.estimated ? { estimated: true } : {}) }, ...(l.must ? { must: true } : {}) });
 
 async function api(req, env, url) {
   const p = url.pathname, method = req.method;
@@ -71,6 +70,8 @@ async function api(req, env, url) {
 
   // Diagnose (ohne Gerät): Version und eine Testabfrage an OpenBoards – zeigt keine Schlüssel
   if (p === "/api/health") {
+    const diag = env.MOCK === "1" || (env.DIAG_KEY && url.searchParams.get("key") === env.DIAG_KEY);
+    if (!diag) return json({ ok: true });
     const out = { version: "stationsliste", dbKeys: !!(env.DB_CLIENT_ID && env.DB_API_KEY), supabase: !!env.SUPABASE_SERVICE_KEY, vapid: !!env.VAPID_JWK };
     if (url.searchParams.get("probe") === "1" && out.dbKeys) {
             out.stations = (await searchStations(env, "München")).slice(0, 2).map(x => `${x.name} ${x.eva}`).join(", ");
@@ -124,7 +125,8 @@ async function api(req, env, url) {
   }
 
   // Nur lokal: Cron sofort auslösen
-  if (p === "/api/mock/tick" && env.MOCK === "1") return json(await runMonitor(env, Date.now() + (+url.searchParams.get("plus") || 0) * MIN));
+  // plus=N verschiebt auch die Testdaten (Verspätungen/Ausfälle gelten dann für diese Uhrzeit)
+  if (p === "/api/mock/tick" && env.MOCK === "1") { const sh = (+url.searchParams.get("plus") || 0) * MIN; globalThis.RB_MOCK_SHIFT = sh; return json(await runMonitor(env, Date.now() + sh)); }
 
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
@@ -206,24 +208,26 @@ async function api(req, env, url) {
     const legs = Array.isArray(b.legs) ? b.legs : [];
     if (!legs.length || legs.length > 6 || !legs.every(validLeg)) return fail(400, "Reise ungültig");
     if (legs.some((l, i) => i > 0 && Date.parse(l.from.plan) < Date.parse(legs[i - 1].to.plan) - MIN)) return fail(400, "Anschluss fährt vor der Ankunft ab");
+    if (Date.parse(legs[legs.length - 1].to.plan) < Date.now() - 30 * MIN) return fail(400, "Diese Fahrt ist schon vorbei. Bitte prüfe Datum und Uhrzeit.");
     const ticket = ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex";
     const clean = legs.map(cleanLeg);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache);
     await assess(env, trip, now, cache);
-    trip.state = { ...trip.state, rem: {}, start: null };          // Meldungen beginnen mit dem ersten Cron-Lauf
+    // Meldungen beginnen mit dem ersten Cron-Lauf – auch für Gleiswechsel oder Zugbindung, die schon beim Anlegen bestehen
+    trip.state = { ...trip.state, rem: {}, start: null, pl: {}, zb: false };
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
     return json(view(trip, now), 201);
   }
 
-  // Plan B übernehmen
-  const ma = /^\/api\/trips\/([0-9a-f-]{36})\/adopt$/i.exec(p);
+  // Plan B übernehmen / zurücknehmen
+  const ma = /^\/api\/trips\/([0-9a-f-]{36})\/(adopt|undo)$/i.exec(p);
   if (ma && method === "POST") {
     const t = await ownTrip(env, dev, ma[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({}));
-    await adopt(env, t, +b.k || 0, +b.idx || 0);
+    if (ma[2] === "undo") undoAdopt(t); else await adopt(env, t, +b.k || 0, +b.idx || 0);
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
     await assess(env, t, now, cache);
@@ -259,7 +263,7 @@ async function api(req, env, url) {
   }
 
   // Fehlersuche: Rohantwort von OpenBoards ansehen
-  if (p === "/api/debug/board") {
+  if (p === "/api/debug/board" && (env.MOCK === "1" || (env.DIAG_KEY && url.searchParams.get("key") === env.DIAG_KEY))) {
     const eva = url.searchParams.get("eva"), kind = url.searchParams.get("kind") === "arr" ? "arr" : "dep";
     if (!/^\d{6,9}$/.test(eva || "")) return fail(400, "eva fehlt");
     return json(await rawBoard(env, kind, eva, isoBerlin(Date.parse(url.searchParams.get("time") || "") || Date.now()), 10));
@@ -273,7 +277,7 @@ export default {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/")) {
       try { return await api(req, env, url); }
-      catch (e) { console.log("API-Fehler:", e.stack || e.message); return fail(502, e.message || "Fehler"); }
+      catch (e) { console.log("API-Fehler:", e.stack || e.message); return fail(502, e.user ? e.message : "Da ist gerade etwas schiefgelaufen. Bitte gleich noch einmal versuchen."); }
     }
     return env.ASSETS.fetch(req);
   },

@@ -30,7 +30,7 @@ function journeys(fromMs) {
 
 export function mockBoard(kind, body) {
   const eva = String(body?.stopPlaceOrStation?.evaNumbers?.[0] || ""), start = Date.parse(body?.timeWindow?.timeStart || new Date().toISOString());
-  const end = start + 30 * 60e3, now = Date.now(), maxVia = body?.maxViaStops ?? 3, list = [], evas = new Set([eva]);
+  const end = start + 30 * 60e3, now = Date.now() + (globalThis.RB_MOCK_SHIFT || 0), maxVia = body?.maxViaStops ?? 3, list = [], evas = new Set([eva]);
   for (const j of journeys(start)) {
     const i = j.stops.findIndex(s => s.eva === eva); if (i < 0) continue;
     const s = j.stops[i], plan = kind === "arr" ? s.a : s.d; if (plan == null) continue;
