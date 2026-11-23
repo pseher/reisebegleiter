@@ -32,7 +32,7 @@ function view(trip, now = Date.now()) {
   return { id: trip.id, ticket: trip.ticket, minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
-    transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [] })) };
+    transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [], altChecked: !!st.altAt?.[k] })) };
 }
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
@@ -55,7 +55,7 @@ function validLeg(l) {
 }
 const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)), minT: Math.min(30, Math.max(0, +l.minT || 0)),
   from: { eva: String(l.from.eva), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8) },
-  to: { eva: String(l.to.eva), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8) } });
+  to: { eva: String(l.to.eva), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8) }, ...(l.must ? { must: true } : {}) });
 
 async function api(req, env, url) {
   const p = url.pathname, method = req.method;
@@ -218,6 +218,7 @@ async function api(req, env, url) {
     if (method === "PATCH") {
       const b = await req.json().catch(() => ({}));
       if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) await db.update(env, "rb_trips", t.id, { ticket: b.ticket });
+      if ("mustLeg" in b) { const mi = b.mustLeg == null ? -1 : +b.mustLeg; await db.update(env, "rb_trips", t.id, { legs: t.legs.map((l, i) => ({ ...l, must: i === mi })), state: { ...(t.state || {}), alt: {}, altAt: {} } }); }
       if (b.minT != null) { const m = Math.min(30, Math.max(0, +b.minT || 0)); await db.update(env, "rb_trips", t.id, { legs: t.legs.map(l => ({ ...l, minT: m })) }); }
       return json({ ok: true });
     }

@@ -47,6 +47,9 @@ export async function observe(env, checks, now, cache) {
 // Vor der Abfahrt ab dem Startbahnhof, unterwegs ab dem gefährdeten Umsteigebahnhof.
 export async function planB(env, trip, v, k, now) {
   const t = v.transfers[k], last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
+  // Pflichtzug hinter dem gefährdeten Umstieg? Dann gezielt rechtzeitig dorthin.
+  const mi = trip.legs.findIndex(l => l.must);
+  if (mi > k && trip.legs[mi].from.eva) return planToMust(env, trip, v, k, mi, now, own);
   const finalEva = last.to.eva || nearestEvaByName(last.to.name);
   if (!finalEva) return [];
   const before = now < v.legs[0].dep.rt - MIN;
@@ -61,6 +64,21 @@ export async function planB(env, trip, v, k, now) {
     .map(c => ({ from: before ? "start" : k, at: before ? v.legs[0].dep.name : t.at, label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers,
       dep: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", arr: c.legs[c.legs.length - 1].to.plan,
       toName: (last.to.name || "").replace(/\s*\(tief\)$/i, ""), legs: c.legs }));
+}
+async function planToMust(env, trip, v, k, mi, now, own) {
+  const must = trip.legs[mi], before = now < v.legs[0].dep.rt - MIN;
+  const fromEva = before ? trip.legs[0].from.eva : v.transfers[k].eva;
+  if (!fromEva || fromEva === must.from.eva) return [];
+  const deadline = v.legs[mi].dep.rt - Math.max(own, 3) * MIN;             // spätestens hier am Bahnsteig des Pflichtzugs
+  const startMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 60 * MIN) : Math.max(now, v.transfers[k].arrRt + 3 * MIN);
+  const current = trip.legs.slice(before ? 0 : k + 1, mi).map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
+  const cs = await connections(env, fromEva, must.from.eva, startMs, own);
+  return cs.filter(c => !c.legs.some(l => l.cancelled) && Date.parse(c.legs[c.legs.length - 1].to.rt || c.arr) <= deadline)
+    .filter(c => c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|") !== current)
+    .sort((x, y) => Date.parse(y.dep) - Date.parse(x.dep)).slice(0, 2)            // möglichst spät los, aber rechtzeitig
+    .map(c => ({ from: before ? "start" : k, until: mi, at: before ? v.legs[0].dep.name : v.transfers[k].at, label: `${c.legs.map(l => l.label).join(" → ")} → ${must.label}`,
+      transfers: c.transfers + 1, dep: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", arr: trip.legs[trip.legs.length - 1].to.plan,
+      toName: (trip.legs[trip.legs.length - 1].to.name || "").replace(/\s*\(tief\)$/i, ""), reach: `${must.label} in ${must.from.name} erreicht`, legs: c.legs }));
 }
 const nearestEvaByName = name => searchStationsSync(name)?.[0]?.eva || "";
 
@@ -123,9 +141,9 @@ export async function adopt(env, trip, k, idx) {
   const a = trip.state?.alt?.[k]?.[idx];
   if (!a?.legs?.length) throw new Error("Plan B nicht mehr verfügbar");
   const fresh = (await resolveConnection(env, a.legs)).map(l => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
-  const keep = a.from === "start" ? 0 : k + 1;
-  trip.legs = [...trip.legs.slice(0, keep), ...fresh];
-  trip.obs = (trip.obs || []).slice(0, keep);
+  const keep = a.from === "start" ? 0 : k + 1, tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
+  trip.legs = [...trip.legs.slice(0, keep), ...fresh, ...tail];
+  trip.obs = [...(trip.obs || []).slice(0, keep), ...fresh.map(() => ({})), ...tailObs];
   trip.state = { ...(trip.state || {}), tr: [], alt: {}, altAt: {}, rem: Object.fromEntries(Object.entries(trip.state?.rem || {}).filter(([i]) => +i < keep)) };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;

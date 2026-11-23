@@ -97,8 +97,10 @@ function nextCard(n) {
 
 function planBCard(t) {
   const k = t.transfers.findIndex(x => (x.status === "RISK" || x.status === "LOST") && x.alt?.length);
-  const waiting = t.transfers.some(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
-  if (k < 0) return waiting ? `<section class="card"><div class="k">Plan B</div><p class="muted small">Ich suche Alternativen …</p></section>` : "";
+  const open = t.transfers.find(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
+  if (k < 0) return !open ? "" : `<section class="card"><div class="k">Plan B</div><p class="muted small">${open.altChecked
+    ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Alternative. Ich prüfe weiter.")
+    : "Ich suche Alternativen …"}</p></section>`;
   const before = Date.now() < Date.parse(t.legs[0].dep.rt), cur = before ? t.legs[0] : t.legs[k];
   const lastArr = Date.parse(t.legs[t.legs.length - 1].arr.rt);
   const cmp = a => { if (!a.arr || t.transfers[k].status === "LOST") return ""; const d = Math.round((Date.parse(a.arr) - lastArr) / MIN);
@@ -109,7 +111,7 @@ function planBCard(t) {
     <div class="alt-row">
       ${stay ? `<div><b>Im ${esc(a.label)} sitzen bleiben</b> bis ${esc(a.toName)}</div>`
         : `<div><b>${hm(a.dep)}</b> ab ${esc(a.at)}${a.depPl ? ` ${gl(a.depPl)}` : ""}</div><div class="small">${esc(a.label)}</div>`}
-      <div class="small muted">an ${esc(a.toName)} ${a.arr ? hm(a.arr) : "?"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : stay ? "" : " · direkt"}${cmp(a)}</div>
+      ${a.reach ? `<div class="small"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}<div class="small muted">an ${esc(a.toName)} ${a.arr ? hm(a.arr) : "?"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : stay ? "" : " · direkt"}${cmp(a)}</div>
       <button class="btn ${ai ? "sec" : ""}" data-adopt="${t.id}|${k}|${ai}">${ai ? "Diese nehmen" : "Plan B übernehmen"}</button>
     </div>`; }).join("")}</section>`;
 }
@@ -121,7 +123,7 @@ function timeline(t) {
     const past = Date.parse(l.arr.rt) < Date.now(), open = openLeg === `${t.id}:${i}`;
     rows.push(`<li class="leg-row ${past ? "past" : ""}"><button data-leg="${t.id}:${i}" aria-expanded="${open}">
       <span class="tm">${hm(l.dep.rt)}${lateTag(l.dep.delay)}<br><span class="muted">${hm(l.arr.rt)}${lateTag(l.arr.delay)}</span></span>
-      <span class="ln"><span class="chip-t">${esc(l.label)}</span>${l.live ? "" : ` <span class="muted small">Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
+      <span class="ln"><span class="chip-t">${esc(l.label)}</span>${l.must ? ` <span class="must">Pflichtzug</span>` : ""}${l.live ? "" : ` <span class="muted small">Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
         <span class="small">${esc(l.dep.name)} → ${esc(l.arr.name)}</span></span>
       <span class="pl small">${l.dep.platform ? `Gl. ${esc(l.dep.platform)}` : ""}</span></button>
       ${open ? `<div class="detail small">
@@ -129,6 +131,7 @@ function timeline(t) {
         <div>An ${esc(l.arr.name)}: plan ${hm(l.arr.plan)}${l.arr.delay ? `, jetzt ${hm(l.arr.rt)}${l.arr.estimated ? " (geschätzt)" : ""}` : ""}${l.arr.platform ? `, Gleis ${esc(l.arr.platform)}` : ""}</div>
         ${[...(l.dep.messages || []), ...(l.arr.messages || [])].slice(0, 3).map(m => `<div class="muted">${esc(m)}</div>`).join("")}
         ${l.live ? "" : `<div class="muted">Für dieses Verkehrsmittel gibt es noch keine Echtzeit.</div>`}
+        ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Kein Pflichtzug mehr" : "Diesen Zug muss ich bekommen"}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];
     if (tr) rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
@@ -141,6 +144,7 @@ function transferText(tr) {
   const pl = tr.arrPl || tr.depPl ? ` · Gl. ${esc(tr.arrPl || "?")} → ${esc(tr.depPl || "?")}` : "";
   if (tr.status === "DONE") return `erledigt`;
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus</b>` : `<b>nicht zu schaffen</b>${pl}`;
+  if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>Pflichtzug in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;
   if (tr.status === "RISK" && tr.own && tr.gap >= 0 && tr.gap < tr.own) return `<b>${tr.gap} Min., zu knapp für dich</b>${pl}`;
   if (tr.status === "RISK") return tr.gap < 0 ? `<b>Ankunft ${-tr.gap} Min. nach Abfahrt</b>${pl}` : `<b>nur ${tr.gap} Min.</b>${pl}`;
   if (tr.status === "WATCH") return `<b>${tr.gap} Min., knapp</b>${pl}`;
@@ -177,6 +181,7 @@ function renderTrip(t, many) {
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
   $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.tmt); patch({ minT: +b.dataset.tmt }); });
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
+  $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindCommon();
 }
 

@@ -52,11 +52,11 @@ export function simplify(data) {
   }).filter(c => c.legs.length);
 }
 
-export async function connections(env, fromEva, toEva, timeMs, minT = 0) {
+export async function connections(env, fromEva, toEva, timeMs, minT = 0, arriveBy = false) {
   const a = byEva(fromEva), b = byEva(toEva);
   if (!a || !b) throw new Error("Bahnhof unbekannt");
   const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
-    numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, minT | 0))), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
+    numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, minT | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
   const seen = new Set();
   return simplify(data).filter(c => !c.legs.some(l => l.mode === "COACH" || l.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
     .filter(c => { const k = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })

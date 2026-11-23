@@ -46,7 +46,7 @@ function carryDelay(dep, arr) {
 export function evaluate(trip, now = Date.now()) {
   const legs = trip.legs.map((l, i) => {
     const dep = stop(l, trip.obs?.[i], "from");
-    return { i, label: l.label, jid: l.jid, mode: l.mode || "", live: !!l.jid, dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
+    return { i, label: l.label, jid: l.jid, mode: l.mode || "", live: !!l.jid, must: !!l.must, dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
   });
   const n = legs.length, first = legs[0], last = legs[n - 1];
   const transfers = [];
@@ -66,7 +66,7 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
-    transfers.push({ i, at: a.name, eva: a.eva, gap, need, own, spare, growth, until, status, reason,
+    transfers.push({ i, at: a.name, eva: a.eva, gap, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
       fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
   }
   const phase = now < first.dep.rt ? "before" : now > last.arr.rt + 2 * MIN ? "done" : "enroute";
@@ -113,8 +113,9 @@ export function headline(v, trip, now = Date.now()) {
   const arrive = v.finalDelay == null ? "" : `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)}${v.finalDelay >= 3 ? ` (+${v.finalDelay})` : ""}.`;
   if (phase === "done") return { title: "Angekommen", sub: `${last.arr.name} um ${hm(last.arr.rt)}.` };
   if (v.legCancel != null) { const l = legs[v.legCancel]; return { title: `${l.label} fällt aus`, sub: `Zwischen ${l.dep.name} und ${l.arr.name}. Prüfe im DB Navigator die nächste Verbindung.` }; }
+  if (next?.status === "LOST" && next.toMust) return { title: `Pflichtzug ${next.toLabel} in Gefahr`, sub: next.reason === "cancel" ? `${next.toLabel} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
   if (next?.status === "LOST") return { title: "Anschluss nicht zu schaffen", sub: next.reason === "cancel" ? `${next.toLabel} in ${next.at} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
-  if (next?.status === "RISK") return { title: "Anschluss gefährdet", sub: `${next.at}: ${next.gap >= 0 ? `nur ${mins(next.gap)} zum Umsteigen` : "Ankunft nach der Abfahrt"} (${next.arrPl || "?"} → ${next.depPl || "?"}). Ich behalte das im Blick.` };
+  if (next?.status === "RISK") return { title: next.toMust ? `Pflichtzug ${next.toLabel} gefährdet` : "Anschluss gefährdet", sub: `${next.at}: ${next.gap >= 0 ? `nur ${mins(next.gap)} zum Umsteigen` : "Ankunft nach der Abfahrt"} (${next.arrPl || "?"} → ${next.depPl || "?"}). Ich behalte das im Blick.` };
   if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${next.at}: noch ${mins(next.gap)} Zeit, Gleis ${next.arrPl || "?"} → ${next.depPl || "?"}. Ich behalte das im Blick.` };
   if (phase === "before") { const f = legs[0].dep; return { title: "Alles läuft nach Plan", sub: `Abfahrt ${f.name} ${at(f, f.rt)}${f.delay >= 3 ? ` (+${f.delay})` : ""}. ${next ? `Umstieg in ${next.at} mit ${mins(next.gap)} Zeit.` : arrive}`.trim() }; }
   if (next) return { title: "Alles läuft nach Plan", sub: `Dein Umstieg in ${next.at} klappt, ${mins(next.gap)} Zeit.` };
@@ -147,8 +148,8 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
       const alt = altText(st.alt[k]);
       if ((s.conf === "RISK" || s.conf === "LOST") && s.sent !== s.conf && !(s.conf === "LOST" && t.reason === "cancel" && (st.legC[k] || st.legC[k + 1]))) {
         msgs.push(s.conf === "LOST"
-          ? { title: `❌ Anschluss in ${t.at} nicht zu schaffen`, body: `${t.toLabel} ${t.reason === "cancel" ? "fällt aus" : `fährt ${hm(t.depRt)}, ${t.fromLabel} kommt erst ${hm(t.arrRt)} an`}.${alt}${trip.ticket === "spar" ? " Zugbindung voraussichtlich aufgehoben." : ""}`, tag: tag(`t${k}`), urgent: true }
-          : { title: `⚠️ Anschluss in ${t.at} gefährdet`, body: `${t.fromLabel} an ca. ${hm(t.arrRt)}${t.arrPl ? ` (Gl. ${t.arrPl})` : ""}, ${t.toLabel} ab ${hm(t.depRt)}${t.depPl ? ` (Gl. ${t.depPl})` : ""}: ${t.gap >= 0 ? `nur ${mins(t.gap)}` : "keine Zeit"}.${alt}`, tag: tag(`t${k}`), urgent: true });
+          ? { title: t.toMust ? `❌ Pflichtzug ${t.toLabel} nicht mehr erreichbar` : `❌ Anschluss in ${t.at} nicht zu schaffen`, body: `${t.toLabel} ${t.reason === "cancel" ? "fällt aus" : `fährt ${hm(t.depRt)}, ${t.fromLabel} kommt erst ${hm(t.arrRt)} an`}.${alt}${trip.ticket === "spar" ? " Zugbindung voraussichtlich aufgehoben." : ""}`, tag: tag(`t${k}`), urgent: true }
+          : { title: t.toMust ? `⚠️ Pflichtzug ${t.toLabel} gefährdet` : `⚠️ Anschluss in ${t.at} gefährdet`, body: `${t.fromLabel} an ca. ${hm(t.arrRt)}${t.arrPl ? ` (Gl. ${t.arrPl})` : ""}, ${t.toLabel} ab ${hm(t.depRt)}${t.depPl ? ` (Gl. ${t.depPl})` : ""}: ${t.gap >= 0 ? `nur ${mins(t.gap)}` : "keine Zeit"}.${alt}`, tag: tag(`t${k}`), urgent: true });
         s.sent = s.conf;
       } else if ((s.conf === "OK" || s.conf === "WATCH") && (p.sent === "RISK" || p.sent === "LOST")) {
         msgs.push({ title: `✅ Anschluss in ${t.at} klappt wieder`, body: `${t.fromLabel} an ca. ${hm(t.arrRt)}, ${t.toLabel} ab ${hm(t.depRt)}${t.depPl ? ` (Gl. ${t.depPl})` : ""}: ${mins(t.gap)} zum Umsteigen.`, tag: tag(`t${k}`) });
