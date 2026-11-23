@@ -103,7 +103,7 @@ export async function resolveExtracted(env, leg, cache) {
 
 export async function importTrip(env, { text = "", files = [] }) {
   let data;
-  if (env.MOCK === "1") data = mockExtraction();
+  if (env.MOCK === "1") data = mockExtraction(text);
   else {
     if (!env.ANTHROPIC_KEY) throw new Error("Import ist auf dem Server noch nicht eingerichtet (ANTHROPIC_KEY fehlt).");
     const content = [];
@@ -130,12 +130,14 @@ export async function importTrip(env, { text = "", files = [] }) {
 }
 
 // Testdaten: Berlin Hbf → Leipzig → München mit den Zügen der nächsten Stunde
-function mockExtraction() {
+function mockExtraction(text = "") {
   const d = new Date(Date.now() + 3600e3), h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", hourCycle: "h23" }).format(d));
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(d), hu = new Date(d).getUTCHours();
   const pad = n => String(n).padStart(2, "0"), hh = n => pad(((h + n) % 24 + 24) % 24);
   return { ticket: "spar", trips: [{ label: "Hinfahrt", legs: [
     { train: `ICE ${500 + hu}`, from: "Berlin Hbf", dep_date: date, dep_time: `${hh(0)}:05`, to: "Leipzig Hbf", arr_time: `${hh(1)}:10`, from_platform: "14" },
     { train: `ICE ${1600 + hu}`, from: "Leipzig Hbf", dep_date: date, dep_time: `${hh(1)}:27`, to: "München Hbf", arr_time: `${hh(4)}:20` },
-  ] }] };
+  ] }, ...(/zwei/i.test(text) ? [{ label: "Rückfahrt", legs: [
+    { train: `ICE ${1601 + hu}`, from: "Leipzig Hbf", dep_date: date, dep_time: `${hh(2)}:27`, to: "München Hbf" },
+  ] }] : [])] };
 }
