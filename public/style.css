@@ -262,3 +262,6 @@ button.fav-hit { box-shadow: inset 3px 0 0 #d49a00; }
 .fav-row.open > button[data-fav] .fav-main b { color: var(--accent); }
 .fav-days { padding: 2px 0 8px; }
 .fav-days-li { list-style: none; }
+.fav-head { display: flex; width: 100%; justify-content: space-between; align-items: center; background: none; border: 0; padding: 2px 0; font: inherit; color: var(--ink); cursor: pointer; min-height: 36px; }
+.fav-head .chev { color: var(--muted); font-size: 16px; }
+.favs .fav-list { margin-top: 6px; }
