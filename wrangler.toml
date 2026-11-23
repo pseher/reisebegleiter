@@ -2,6 +2,8 @@ name = "reisebegleiter"
 main = "src/worker.js"
 compatibility_date = "2026-11-01"
 keep_vars = true                       # im Dashboard gesetzte Werte beim Bereitstellen nicht löschen
+workers_dev = true                     # Adresse reisebegleiter.pseher.workers.dev eingeschaltet lassen
+preview_urls = false
 
 # App (PWA) und Schnittstelle laufen im selben Worker – eine Adresse, kein CORS
 [assets]
