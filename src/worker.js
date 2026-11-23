@@ -1,7 +1,7 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
-import { connections, resolveConnection, geocodeStop } from "./routing.js";
+import { connections, resolveConnection, geocodeStop, searchStops } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
@@ -149,7 +149,15 @@ async function api(req, env, url) {
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
 
-  if (p === "/api/stations") return json(await searchStations(env, url.searchParams.get("q")));
+  if (p === "/api/stations") {
+    const q = url.searchParams.get("q") || "", st = await searchStations(env, q);
+    if (url.searchParams.get("stops") !== "1") return json(st);
+    // zusätzlich Bus-/Tram-/U-Bahn-Haltestellen; Bahnhöfe zuerst, Haltestellen nahe einem Bahnhof gleichen Namens weglassen
+    const stops = await searchStops(env, q).catch(() => []);
+    const near = (a, b) => b.lat != null && Math.hypot((a.lat - b.lat) * 111, (a.lon - b.lon) * 68) < 0.4;
+    const coords = st.map(s => ({ ...s, ...(byEva(s.eva) || {}) }));
+    return json([...st.slice(0, 6), ...stops.filter(x => !coords.some(s => near(x, s)))].slice(0, 10));
+  }
   // Bahnhöfe in der Nähe (für „Von: mein Standort“) – der Standort wird nicht gespeichert
   if (p === "/api/stations/near") {
     const lat = +url.searchParams.get("lat"), lon = +url.searchParams.get("lon");
@@ -178,8 +186,10 @@ async function api(req, env, url) {
 
   // Verbindungssuche Von → Nach
   if (p === "/api/connections") {
-    const from = url.searchParams.get("from"), to = url.searchParams.get("to");
-    if (!/^\d{6,9}$/.test(from || "") || !/^\d{6,9}$/.test(to || "")) return fail(400, "Start oder Ziel fehlt");
+    // Start/Ziel: DB-Bahnhofsnummer oder „@lat,lon“ (Haltestelle)
+    const pt = v => { const m = /^@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)$/.exec(v || ""); return m ? { lat: +m[1], lon: +m[2] } : /^\d{6,9}$/.test(v || "") ? v : null; };
+    const from = pt(url.searchParams.get("from")), to = pt(url.searchParams.get("to"));
+    if (!from || !to) return fail(400, "Start oder Ziel fehlt");
     const t = Date.parse((url.searchParams.get("time") || "").replace(" ", "+")) || Date.now();
     return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0));
   }

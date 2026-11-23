@@ -111,6 +111,22 @@ export async function resolveConnection(env, legs) {
 
 export { trainLabel };
 
+// Haltestellen (Bus, Tram, U-Bahn …) per Name suchen – für Start/Ziel ohne DB-Bahnhof
+export async function searchStops(env, q, limit = 6) {
+  if (!q || q.trim().length < 3) return [];
+  if (env.MOCK === "1") return /halt|platz|str/i.test(q) ? [{ eva: "", name: "Mommsenstraße", area: "Berlin", lat: 52.5045, lon: 13.3066, stop: true }] : [];
+  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+  const qs = new URLSearchParams({ text: q.trim(), type: "STOP", numResults: String(limit + 4), language: "de" });
+  const r = await fetch(`${base}/api/v1/geocode?${qs}`, { headers: { "User-Agent": "Reisebegleiter/0.1 (kontakt@herdzeit.de)", Accept: "application/json" } }).catch(() => null);
+  if (!r || !r.ok) return [];
+  const list = await r.json().catch(() => []);
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).filter(m => m.lat != null && m.lon != null).map(m => {
+    const area = (m.areas || []).find(a => a.default)?.name || (m.areas || []).find(a => a.adminLevel <= 8)?.name || "";
+    return { eva: "", name: m.name, area, lat: +(+m.lat).toFixed(5), lon: +(+m.lon).toFixed(5), stop: true };
+  }).filter(x => { const k = `${x.name}|${x.area}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, limit);
+}
+
 // Haltestelle per Name nachschlagen (MOTIS-Geocoder), bevorzugt nahe einem bekannten Punkt
 export async function geocodeStop(env, name, near) {
   if (env.MOCK === "1" || !name) return null;

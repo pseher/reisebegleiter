@@ -464,7 +464,7 @@ function bindCommon() {
 // Bestehende Reise ändern: Assistent mit Start, Ziel und Zeit der Reise vorbelegt
 async function startEdit(t) {
   const first = t.legs[0].dep, last = t.legs[t.legs.length - 1].arr;
-  const st = async s => s.eva ? { eva: s.eva, name: s.name } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
+  const st = async s => s.eva ? { eva: s.eva, name: s.name } : s.lat != null ? { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
   const [rFrom, rTo] = await Promise.all([st(first), st(last)]);
   W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan)), conns: null,
     editId: t.id, editTicket: t.ticket, minT: t.minT || 0 };
@@ -521,10 +521,11 @@ function bindWhen(key, changed) {
 }
 const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
 
+const placeParam = s => (s.eva ? s.eva : `@${(+s.lat).toFixed(5)},${(+s.lon).toFixed(5)}`);
 function stationField(id, label, val) {
   return val
-    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
-    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}">
+    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}${val.stop ? ` <span class="small muted" style="font-weight:400">Haltestelle${val.area ? ` · ${esc(val.area)}` : ""}</span>` : ""}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
+    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof oder Haltestelle" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}">
       ${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}<ul class="list" id="${id}Res"></ul>`;
 }
 
@@ -565,7 +566,7 @@ function renderWizard() {
       <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
-      const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); });
+      const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); }, true);
       inp.oninput = () => { (W.typed ||= {})[id] = inp.value; saveW(); clearTimeout(t); t = setTimeout(find, 250); };
       if (inp.value.trim().length >= 2) find();          // nach dem Neuzeichnen die Treffer wieder zeigen
     }
@@ -575,8 +576,9 @@ function renderWizard() {
       const ul = document.getElementById(`${b.dataset.near}Res`); ul.innerHTML = `<li><div class="spinner"></div></li>`;
       navigator.geolocation.getCurrentPosition(async pos => {
         try {
-          const list = await api(`/api/stations/near?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
-          ul.innerHTML = list.length ? list.map((st, i) => `<li><button data-ns="${i}"><b>${esc(st.name)}</b><br><span class="small muted">ca. ${st.dist < 1000 ? `${Math.round(st.dist / 10) * 10} m` : `${(st.dist / 1000).toFixed(1).replace(".", ",")} km`} entfernt</span></button></li>`).join("")
+          const list = [{ eva: "", name: "Mein Standort", area: "genau hier", lat: pos.coords.latitude, lon: pos.coords.longitude, stop: true, dist: 0, here: true },
+            ...await api(`/api/stations/near?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`)];
+          ul.innerHTML = list.length ? list.map((st, i) => `<li><button data-ns="${i}"><b>${esc(st.name)}</b><br><span class="small muted">${st.here ? "genau hier – mit Fußweg zur nächsten Haltestelle" : `ca. ${st.dist < 1000 ? `${Math.round(st.dist / 10) * 10} m` : `${(st.dist / 1000).toFixed(1).replace(".", ",")} km`} entfernt`}</span></button></li>`).join("")
             : `<li class="muted small">Kein Bahnhof in der Nähe gefunden – bitte Namen eingeben.</li>`;
           ul.querySelectorAll("[data-ns]").forEach(x => x.onclick = () => { W.rFrom = list[+x.dataset.ns]; if (W.typed) delete W.typed.rf; render(); });
         } catch (e) { ul.innerHTML = `<li class="err">${esc(e.message)}</li>`; }
@@ -600,7 +602,7 @@ function renderWizard() {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
-    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+    if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
@@ -710,12 +712,14 @@ function trainList(list) {
   </div></button></li>`).join("")}</ul>`;
 }
 
-async function searchInto(q, id, onPick) {
+// stops: auch Bus-/Tram-/U-Bahn-Haltestellen anbieten (nur bei „Von – Nach“; die Abfahrtstafel braucht einen DB-Bahnhof)
+async function searchInto(q, id, onPick, stops = false) {
   const el = document.getElementById(id); if (!el) return;
   if (q.trim().length < 2) { el.innerHTML = ""; return; }
   try {
-    const res = await api(`/api/stations?q=${encodeURIComponent(q)}`);
-    el.innerHTML = res.length ? res.map((s, i) => `<li><button data-i="${i}">${esc(s.name)}</button></li>`).join("") : `<li><p class="muted small">Kein Bahnhof gefunden.</p></li>`;
+    const res = await api(`/api/stations?q=${encodeURIComponent(q)}${stops ? "&stops=1" : ""}`);
+    el.innerHTML = res.length ? res.map((s, i) => `<li><button data-i="${i}">${esc(s.name)}${s.stop ? `<br><span class="small muted">Haltestelle${s.area ? ` · ${esc(s.area)}` : ""}</span>` : ""}</button></li>`).join("")
+      : `<li><p class="muted small">${stops ? "Nichts gefunden." : "Kein Bahnhof gefunden."}</p></li>`;
     el.querySelectorAll("[data-i]").forEach(b => b.onclick = () => onPick(res[+b.dataset.i]));
   } catch (e) { el.innerHTML = `<li><p class="err">${esc(e.message)}</p></li>`; }
 }
