@@ -72,8 +72,8 @@ export async function connections(env, fromEva, toEva, timeMs, minT = 0, arriveB
 // Bahn-Teilstrecke → OpenBoards-Fahrt (journeyId) an Abfahrts- und Ankunftsbahnhof
 export async function resolveLeg(env, l, cache = new Map()) {
   const base = { jid: "", label: l.label, mode: l.mode, walk: l.walk || 0,
-    from: { eva: "", name: l.from.name, plan: l.from.plan, platform: l.from.track || "" },
-    to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "" } };
+    from: { eva: "", name: l.from.name, plan: l.from.plan, platform: l.from.track || "", lat: l.from.lat, lon: l.from.lon },
+    to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "", lat: l.to.lat, lon: l.to.lon } };
   if (!l.rail) return base;
   const f = l.from.eva ? byEva(l.from.eva) : nearest(l.from.lat, l.from.lon), t = l.to.eva ? byEva(l.to.eva) : nearest(l.to.lat, l.to.lon);
   if (!f || !t) return base;
@@ -92,8 +92,8 @@ export async function resolveLeg(env, l, cache = new Map()) {
   if (!e) return base;
   const arr = await findJourney(env, "arr", t.eva, e.jid, Date.parse(l.to.plan), { windows: 2, cache, label: e.label, after: dep }).catch(() => null);
   return { ...base, jid: e.jid, label: e.label,
-    from: { eva: f.eva, name: f.name, plan: e.plan, platform: e.platformPlan || e.platform || base.from.platform },
-    to: { eva: t.eva, name: t.name, plan: arr?.plan || l.to.plan, platform: arr ? (arr.platformPlan || arr.platform) : base.to.platform } };
+    from: { eva: f.eva, name: f.name, plan: e.plan, platform: e.platformPlan || e.platform || base.from.platform, lat: l.from.lat ?? byEva(f.eva)?.lat, lon: l.from.lon ?? byEva(f.eva)?.lon },
+    to: { eva: t.eva, name: t.name, plan: arr?.plan || l.to.plan, platform: arr ? (arr.platformPlan || arr.platform) : base.to.platform, lat: l.to.lat ?? byEva(t.eva)?.lat, lon: l.to.lon ?? byEva(t.eva)?.lon } };
 }
 
 export async function resolveConnection(env, legs) {

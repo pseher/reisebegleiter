@@ -32,7 +32,7 @@ export const growthBuffer = (minutesUntilArrival, delay = 0) => (minutesUntilArr
 function stop(leg, o, side) {
   const s = leg[side], ob = o?.[side === "from" ? "dep" : "arr"] || {};
   const plan = T(s.plan), rt = Number.isFinite(T(ob.rt)) ? T(ob.rt) : plan;
-  return { eva: s.eva, name: cleanName(s.name), plan, rt, delay: Math.round((rt - plan) / MIN), platformPlan: s.platform || "",
+  return { eva: s.eva, name: cleanName(s.name), lat: s.lat ?? null, lon: s.lon ?? null, plan, rt, delay: Math.round((rt - plan) / MIN), platformPlan: s.platform || "",
     platform: ob.pl || s.platform || "", cancelled: !!ob.c, live: !!ob.live, checked: ob.t || null, messages: ob.msgs || [] };
 }
 
@@ -93,12 +93,14 @@ export function nextStep(v, now = Date.now()) {
     if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
       return { kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
         platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform),
-        cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap } : null, dest: l.arr.name };
+        cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap, name: legs[i - 1].arr.name, lat: legs[i - 1].arr.lat, lon: legs[i - 1].arr.lon } : null,
+        dest: l.arr.name, lat: l.dep.lat, lon: l.dep.lon };
     }
     if (now < l.arr.rt + MIN) {                            // unterwegs in diesem Zug
       const t = transfers[i];
-      return { kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name,
-        platform: l.arr.platform, cancelled: l.arr.cancelled, then: t ? { label: t.toLabel, at: t.depRt, platform: t.depPl, gap: t.gap } : null };
+      const nx = legs[i + 1];
+      return { kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name, lat: l.arr.lat, lon: l.arr.lon,
+        platform: l.arr.platform, cancelled: l.arr.cancelled, then: t ? { label: t.toLabel, at: t.depRt, platform: t.depPl, gap: t.gap, station: nx.dep.name, lat: nx.dep.lat, lon: nx.dep.lon } : null };
     }
   }
   return null;

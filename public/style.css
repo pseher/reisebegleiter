@@ -133,3 +133,5 @@ textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; 
 .cmp-act { margin-top: 4px; }
 .cmp-act .btn { margin: 4px 0 0; }
 .cmp-row.cur { background: var(--bg); margin: 0 -16px; padding: 10px 16px; border-radius: 0; }
+.walk { display: inline-block; margin-left: auto; flex: 0 0 auto; font-size: 14px; font-weight: 600; color: var(--accent); text-decoration: none; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--card); }
+.walk-box { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bg); font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

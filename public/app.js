@@ -88,9 +88,11 @@ function nextCard(n) {
   let body;
   if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}${pc}</div>
       <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
-      <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>`;
+      <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>
+      ${n.from && cleanStop(n.from.name) !== cleanStop(n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
   else body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}</div>
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(n.station)}</b></div>
+      ${n.then && n.then.station && cleanStop(n.then.station) !== cleanStop(n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
       ${n.then ? `<div class="muted small">dann ${esc(n.then.label)} um ${hm(n.then.at)}${n.then.platform ? `, Gleis ${esc(n.then.platform)}` : ""} · ${Math.max(0, n.then.gap)} Min. Zeit</div>` : `<div class="muted small">${inMin(n.at)}</div>`}`;
   return `<section class="card next"><div class="k">${head}</div>${body}</section>`;
 }
@@ -138,6 +140,14 @@ function planBCard(t) {
   return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${curRow}${rows}</section>`;
 }
 
+// Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
+function walkUrl(a, b) {
+  const pt = x => (x.lat != null && x.lon != null ? `${x.lat},${x.lon}` : `${x.name}`);
+  if (isIOS) return `https://maps.apple.com/?saddr=${encodeURIComponent(pt(a))}&daddr=${encodeURIComponent(pt(b))}&dirflg=w`;
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pt(a))}&destination=${encodeURIComponent(pt(b))}&travelmode=walking`;
+}
+const walkBtn = (a, b) => `<a class="walk" href="${walkUrl(a, b)}" target="_blank" rel="noopener">Weg zeigen ↗</a>`;
+
 // Verkehrsmittel vor reine Liniennummern schreiben (auch für ältere Reisen)
 const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"], FERRY: ["Fähre", "Fähre"], SUBWAY: ["U", "U-Bahn"], METRO: ["U", "U-Bahn"] };
 const nice = l => { const m = MODE[l.mode]; return m && /^\d/.test(l.label) ? `${m[0]} ${l.label}` : l.label; };
@@ -163,7 +173,8 @@ function timeline(t) {
     const tr = t.transfers[i];
     if (tr) { const nx = t.legs[i + 1], walk = cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
       rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
-      <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : ""} · ${transferText(tr)}</span></li>`); }
+      <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : ""} · ${transferText(tr)}</span>
+      ${walk && tr.status !== "DONE" ? walkBtn(l.arr, nx.dep) : ""}</li>`); }
   });
   return `<ol class="tl2">${rows.join("")}</ol>`;
 }
