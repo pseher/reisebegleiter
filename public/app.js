@@ -30,13 +30,22 @@ let MINT = 5; try { const v = localStorage.getItem("rb_mint"); if (v != null) MI
 const setMinT = m => { MINT = m; try { localStorage.setItem("rb_mint", String(m)); } catch {} };
 const minTChips = (attr = "data-mt") => `<div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" ${attr}="${m}" aria-pressed="${MINT === m}">${l}</button>`).join("")}</div>`;
 
+// Darstellung: auto | light | dark
+let THEME = "auto"; try { THEME = localStorage.getItem("rb_theme") || "auto"; } catch {}
+function applyTheme() {
+  if (THEME === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", THEME);
+  const dark = THEME === "dark" || (THEME === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#0b1f2d" : "#0f2a3d");
+}
+applyTheme();
+
 // ---------- Zustand ----------
 let trips = [], loadedAt = 0, view = "home", W = null, timer = null;
 const go = v => { view = v; render(); scrollTo(0, 0); };
 document.addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b) { if (b.dataset.go === "home") W = null; go(b.dataset.go); } });
 
 async function loadTrips() {
-  try { trips = await api("/api/trips"); loadedAt = Date.now(); } catch (e) { if (!trips.length) throw e; }
+  try { trips = (await api("/api/trips")).sort((a, b) => Date.parse(a.legs[0].dep.plan) - Date.parse(b.legs[0].dep.plan)); loadedAt = Date.now(); } catch (e) { if (!trips.length) throw e; }
 }
 function schedule() {
   clearTimeout(timer);
@@ -48,6 +57,7 @@ document.addEventListener("visibilitychange", async () => { if (document.visibil
 let openId = null, sheetId = null, openLeg = null;
 function render() {
   if (view === "add") return renderWizard();
+  if (view === "settings") return renderSettings();
   const active = trips.filter(t => t.active !== false);
   if (openId && !active.some(t => t.id === openId)) openId = null;
   if (!openId && active.length === 1) openId = active[0].id;
@@ -227,6 +237,26 @@ function renderTrip(t, many) {
   bindCommon();
 }
 
+function renderSettings() {
+  const perm = "Notification" in window ? Notification.permission : "nicht unterstützt";
+  const on = perm === "granted" && localStorage.getItem("rb_push") === "1";
+  $app.innerHTML = `<button class="back" data-go="home">← Zurück</button><h1>Einstellungen</h1>
+    <section class="card"><div class="k">Darstellung</div>
+      <div class="chips">${[["auto", "Automatisch"], ["light", "Hell"], ["dark", "Dunkel"]].map(([k, l]) => `<button class="chip" data-theme-set="${k}" aria-pressed="${THEME === k}">${l}</button>`).join("")}</div>
+      <p class="small muted">Automatisch folgt der Einstellung deines Handys.</p></section>
+    <section class="card"><div class="k">Meine übliche Umstiegszeit</div>${minTChips()}
+      <p class="small muted">Gilt für neue Reisen. Bei einer Reise änderst du sie unter „Einstellungen dieser Reise“.</p></section>
+    <section class="card"><div class="k">Mitteilungen</div>
+      <p class="small">${on ? "Eingeschaltet auf diesem Gerät." : perm === "denied" ? "Im Browser blockiert." : "Noch nicht eingeschaltet."}</p>
+      ${on ? `<button class="btn sec" id="pushTest">Test-Mitteilung senden</button>` : perm === "denied" ? "" : `<button class="btn" id="pushOn">Mitteilungen erlauben</button>`}
+      ${isIOS && !standalone ? `<p class="small muted">iPhone: erst „Teilen“ → „Zum Home-Bildschirm“, dann von dort öffnen.</p>` : ""}</section>
+    <p class="foot">Echtzeitdaten: DB InfraGO (OpenBoards) · Verbindungen: Transitous/MOTIS · Angaben ohne Gewähr</p>`;
+  $app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { THEME = b.dataset.themeSet; try { localStorage.setItem("rb_theme", THEME); } catch {} applyTheme(); render(); });
+  $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
+  document.getElementById("pushTest")?.addEventListener("click", () => api("/api/push/test", { method: "POST" }).then(r => alert(r.ok ? "Gesendet – kommt gleich an." : "Konnte nicht gesendet werden.")).catch(e => alert(e.message)));
+  bindCommon();
+}
+
 function pushCard() {
   if (!("serviceWorker" in navigator)) return "";
   const perm = "Notification" in window ? Notification.permission : "default";
@@ -300,12 +330,11 @@ function renderWizard() {
       <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
       <p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
-      <button class="btn quiet" id="byTrain">Ich sitze schon im Zug / Zug für Zug anlegen</button>${back}`;
+      <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
       inp.oninput = () => { clearTimeout(t); t = setTimeout(() => searchInto(inp.value, `${id}Res`, st => { W[k] = st; render(); }), 250); };
     }
-    if (!W.rFrom) document.getElementById("rf")?.focus(); else if (!W.rTo) document.getElementById("rt")?.focus();
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
@@ -313,7 +342,7 @@ function renderWizard() {
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
     document.getElementById("impFile").onchange = e => importFiles([...e.target.files]);
-    document.getElementById("impTextBtn").onclick = () => { W.showText = !W.showText; render(); document.getElementById("impText")?.focus(); };
+    document.getElementById("impTextBtn").onclick = () => { W.showText = !W.showText; render(); };
     const it = document.getElementById("impText"); if (it) it.oninput = () => { W.impText = it.value; };
     const ip = document.getElementById("impPaste");
     if (ip) ip.onclick = async () => { try { W.impText = await navigator.clipboard.readText(); render(); } catch { alert("Einfügen bitte per langem Tippen ins Textfeld."); } };
@@ -343,10 +372,10 @@ function renderWizard() {
   }
 
   else if (W.step === "station") {
-    $app.innerHTML = `${head}<h1>Wo steigst du ein?</h1>
+    $app.innerHTML = `${head}<h1>Von welchem Bahnhof fährt dein Zug?</h1><p class="small muted">Du wählst danach den Zug aus der Abfahrtstafel und deinen Ausstieg. Weitere Umstiege kannst du anhängen.</p>
       <input type="search" id="q" placeholder="Bahnhof, z. B. Berlin Hbf" autocomplete="off" enterkeyhint="search" value="${esc(W.q || "")}">
       ${err}<ul class="list" id="res"></ul>${back}`;
-    const q = document.getElementById("q"); q.focus();
+    const q = document.getElementById("q");
     let t; q.oninput = () => { clearTimeout(t); W.q = q.value; t = setTimeout(() => searchInto(q.value, "res", s => { W.station = s; W.from = Date.now(); W.step = "trains"; W.list = null; render(); }), 250); };
     if (W.q) q.oninput();
   }
