@@ -174,17 +174,16 @@ function planBCard(t) {
   const curNext = t.legs.find(l => Date.parse(l.dep.rt) > Date.now() - MIN) || t.legs[0];
   const curState = curNext.dep.cancelled ? `<span class="badge bad">fällt aus</span>` : curNext.dep.delay >= 3 ? `<span class="badge warn">${esc(nice(curNext))} +${curNext.dep.delay}</span>` : curNext.live ? `<span class="badge good">pünktlich</span>` : "";
   const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">
-      ${cur ? point({ at: cur.at, arr: cur.arrRt, dep: cur.depRt, gap: cur.gap }) : point(null)}${goal(t.plan.arr, "")}${curState ? `<div class="cmp-live">${curState}</div>` : ""}</div></div>`;
+      ${losZiel(t.plan.dep, t.plan.arr)}${stepsHtml(planSteps(t))}${curState ? `<div class="cmp-live">${curState}</div>` : ""}</div></div>`;
   const liveOf = liveBadge;
   const rows = tr.alt.map((a, ai) => {
     const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
     return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr)}"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
-      ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : point(a.watch?.point || tightest(a.legs || []))}
-      ${goal(a.arr || a.dep, a.reach ? "" : delta(a))}
-      <div class="cmp-live">${a.kind === "stay" ? "" : `<span class="small muted">ab ${hm(a.dep)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""} · </span>`}${liveOf(a)}${zbOn && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
-      ${isOpen ? `<div class="small muted cmp-more">Abfahrt ${hm(a.dep)} in ${esc(a.at)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""}<br>${esc(a.label)}</div>` : ""}
-      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb === false ? "" : "1"}" data-adopt-text="${esc(tag(a))}: ${esc(a.label)}, Ziel ca. ${hm(a.arr || a.dep)}">Übernehmen</button>
-        <button class="btn quiet small-btn" data-cmp="${id}">${isOpen ? "Weniger" : "Details"}</button></div>
+      ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}
+      ${a.from === "start" ? losZiel(a.dep, a.arr || a.dep, t.plan.dep, lost ? null : t.plan.arr) : losZiel(a.dep, a.arr || a.dep, null, lost ? null : t.plan.arr).replace("Los <b>", `Ab ${esc(cleanStop(a.at))} <b>`)}
+      ${stepsHtml(altSteps(a))}
+      <div class="cmp-live">${liveOf(a)}${zbOn && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
+      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb === false ? "" : "1"}" data-adopt-text="${esc(tag(a))}: Los ${hm(a.dep)}, Ziel ca. ${hm(a.arr || a.dep)}\n${esc(a.label)}">Übernehmen</button></div>
     </div></div>`; }).join("");
   const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn"><b>Sparpreis:</b> Bei Möglichkeiten mit „anderer Fernzug“ gilt dein Ticket erst, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge sind frei wählbar.</p>` : "";
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
@@ -197,6 +196,28 @@ function planBCard(t) {
   }
   return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}${t.here ? "" : `<div style="margin-top:8px">${here}</div>`}</section>`;
 }
+
+// Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
+function stepsHtml(steps) {
+  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${hm(x.dep)}</span><span class="st-b"><b>${esc(x.label)}</b>${x.pl ? ` <span class="muted">Gl. ${esc(x.pl)}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${hm(x.arr)}</span></span></li>
+    ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
+      const walk = cleanStop(x.to) !== cleanStop(steps[i + 1].from);
+      if (g < 0) return `<span class="late">Umstieg geht nicht – ${-g} Min. zu spät</span>`;
+      return `<span class="${g < Math.max(MINT, 3) ? "late" : g < Math.max(MINT, 3) + 3 ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
+}
+// Teilstrecken einer Möglichkeit (MOTIS) mit Echtzeit aus der Beobachtung
+const altSteps = a => (a.legs || []).map((l, i) => { const d = a.watch?.legs?.[i]?.delay || 0, shift = ms => new Date(Date.parse(ms) + Math.max(0, d) * MIN).toISOString();
+  return { label: l.label, from: l.from.name, to: l.to.name, pl: l.from.track || "", walk: l.walk || 0, dep: l.from.rt || shift(l.from.plan), arr: l.to.rt || shift(l.to.plan) }; });
+// Deine Reise in derselben Form
+const planSteps = t => t.legs.map((l, i) => ({ label: nice(l), from: l.dep.name, to: l.arr.name, pl: l.dep.platform, walk: t.transfers[i]?.walk || 0, dep: l.dep.rt, arr: l.arr.rt }));
+// „Los 16:51 → Ziel 18:50“ mit Unterschied zu deinem Plan
+function losZiel(dep, arr, refDep, refArr) {
+  const dd = refDep ? Math.round((Date.parse(dep) - Date.parse(refDep)) / MIN) : 0, da = refArr ? Math.round((Date.parse(arr) - Date.parse(refArr)) / MIN) : 0;
+  const w = (m, a, b) => (Math.abs(m) < 2 ? "" : m < 0 ? `${fmtSpan(-m)} ${a}` : `${fmtSpan(m)} ${b}`);
+  const notes = [refDep && w(dd, "früher los", "später los"), refArr && (Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `<b class="ok-t">${fmtSpan(-da)} früher am Ziel</b>` : `${fmtSpan(da)} später am Ziel`)].filter(Boolean);
+  return `<div class="cmp-times">Los <b>${hm(dep)}</b> <span class="muted">→</span> Ziel <b>${hm(arr)}</b></div>${notes.length ? `<div class="cmp-goal">${notes.join(" · ")}</div>` : ""}`;
+}
+const fmtSpan = m => (m >= 120 ? `${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 60} Min.` : ""}` : `${m} Min.`);
 
 // Dezente Farbe je Möglichkeit: kommt sie (laut Plan bzw. Echtzeit) rechtzeitig an oder später als deine gebuchte Ankunft?
 const arrTone = (arr, planArr) => { const d = Math.round((Date.parse(arr) - Date.parse(planArr)) / MIN);
@@ -223,8 +244,9 @@ function hereCard(t) {
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
     return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr)}"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
-      <div class="cmp-point">${a.walkStart ? `${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}, ` : ""}ab <b>${hm(a.dep)}</b> ${esc(a.label)}</div>
-      <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${span(-d)} früher</b>` : d > 1 ? ` · ${span(d)} später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
+      ${losZiel(a.dep, a.arr, null, t.plan.arr)}
+      ${a.walkStart ? `<div class="small muted">Vorher ${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}</div>` : ""}
+      ${stepsHtml(altSteps(a))}
       <div class="cmp-live">${liveBadge(a)}</div>
       ${zb0 && a.zb ? `<div class="cmp-live"><span class="badge warn">anderer Fernzug</span></div>` : ""}
       ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-zb="${a.zb ? "1" : ""}" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}

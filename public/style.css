@@ -192,3 +192,16 @@ main { overflow-wrap: break-word; }
 .cmp-row.arr-late { border-left-color: var(--watch); background: color-mix(in srgb, var(--watch-bg) 55%, transparent); }
 .cmp-row.arr-much { border-left-color: var(--risk); background: color-mix(in srgb, var(--risk-bg) 45%, transparent); }
 .cmp-row + .cmp-row { margin-top: 6px; }
+
+/* Los → Ziel und kompakte Schrittliste im Vergleich */
+.cmp-times { font-size: 18px; font-variant-numeric: tabular-nums; }
+.cmp-times b { font-size: 20px; }
+.steps-l { list-style: none; margin: 6px 0 2px; padding: 0; font-size: 14px; line-height: 1.35; }
+.steps-l li { display: grid; grid-template-columns: 3.2em 1fr; gap: 6px; padding: 2px 0; }
+.st-t { font-variant-numeric: tabular-nums; font-weight: 700; }
+.st-x .st-b { font-size: 13px; border-left: 2px dotted var(--line); padding-left: 8px; margin-left: -2px; }
+/* Vergleich: Bezeichnung oben, Inhalt in voller Breite */
+.planb .cmp-row, .calm .cmp-row, .card .cmp-row { grid-template-columns: 1fr; gap: 2px; }
+.cmp-tag { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cmp-row.arr-ok .cmp-tag { color: var(--ok); } .cmp-row.arr-late .cmp-tag { color: var(--watch); } .cmp-row.arr-much .cmp-tag { color: var(--risk); }
+.cmp-act .btn { width: auto; padding-left: 22px; padding-right: 22px; }
