@@ -5,6 +5,7 @@ import { connections, resolveConnection, resolveLeg } from "./routing.js";
 import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
+import { busLive } from "./buslive.js";
 
 const MIN = 60e3;
 // Wie oft ein Halt geprüft wird – je näher, desto öfter (Minuten)
@@ -14,7 +15,21 @@ export const intervalFor = dist => (dist <= 45 * MIN ? 1 : dist <= 150 * MIN ? 4
 export function dueChecks(trip, now, force = false) {
   const out = [];
   trip.legs.forEach((leg, i) => {
-    if (!leg.jid || !leg.from.eva || !leg.to.eva) return;     // Bus/U-Bahn/Tram: vorerst nur Fahrplan
+    if (!leg.jid) {
+      // Bus/Tram/U-Bahn: über Transitous (tid) bzw. in Berlin/Brandenburg über die VBB-Auskunft, ab 2 Std. vorher
+      const inVBB = s => s?.lat != null && s.lat > 51.3 && s.lat < 53.6 && s.lon > 11.2 && s.lon < 14.8;
+      if (!leg.tid && !inVBB(leg.from)) return;
+      const o = trip.obs?.[i] || {}, effOf = (s, ob) => (ob?.rt ? Date.parse(ob.rt) : Date.parse(s.plan));
+      const dEff = effOf(leg.from, o.dep), aEff = effOf(leg.to, o.arr);
+      if (aEff < now - 3 * MIN) return;
+      const dist = Math.max(0, (dEff > now ? dEff : aEff) - now);
+      if (dist > 2 * 3600e3) return;
+      const iv = intervalFor(dist) || 15;
+      if (!force && o.bt && now - o.bt < iv * MIN - 20e3) return;
+      out.push({ trip, i, side: "bus", leg, dist });
+      return;
+    }
+    if (!leg.from.eva || !leg.to.eva) return;
     for (const side of ["dep", "arr"]) {
       const s = side === "dep" ? leg.from : leg.to, o = trip.obs?.[i]?.[side] || {};
       const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;
@@ -32,6 +47,14 @@ async function inBatches(items, size, fn) { for (let k = 0; k < items.length; k 
 // Echtzeit holen und in trip.obs eintragen
 export async function observe(env, checks, now, cache) {
   await inBatches(checks, 6, async c => {
+    if (c.side === "bus") {
+      const r = await busLive(env, c.leg, now, cache).catch(e => { console.log("Bus-Echtzeit:", e.message); return {}; });
+      const obs = (c.trip.obs ||= []), o = (obs[c.i] ||= {});
+      if (r.dep) o.dep = r.dep;
+      if (r.arr) o.arr = r.arr;
+      o.bt = now; c.trip._dirty = true;
+      return;
+    }
     const kind = c.side === "dep" ? "dep" : "arr";
     let hit = null;
     try { hit = await findJourney(env, kind, c.eva, c.jid, c.eff, { planMs: c.plan, windows: 1, cache }); } catch (e) { console.log("OpenBoards:", e.message); return; }

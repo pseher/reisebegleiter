@@ -775,9 +775,9 @@ function renderWizard() {
       .then(l => { W.tripStops = l; }).catch(e => { W.tripStops = []; W.error = e.message; }).then(render);
     $app.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => {
       const s = W.tripStops[+b.dataset.ts], st = W.station;
-      W.legs.push({ jid: "", label: tr.label, mode: tr.mode || "",
-        from: { eva: st.eva || "", name: st.name, plan: tr.plan, platform: tr.platform || "", lat: st.lat, lon: st.lon },
-        to: { eva: s.eva || "", name: s.name, plan: s.plan, platform: s.track || "", lat: s.lat, lon: s.lon } });
+      W.legs.push({ jid: "", tid: tr.tripId, label: tr.label, mode: tr.mode || "",
+        from: { eva: st.eva || "", name: st.name, plan: tr.plan, platform: tr.platform || "", lat: st.lat, lon: st.lon, stopId: tr.stopId || st.id || "" },
+        to: { eva: s.eva || "", name: s.name, plan: s.plan, platform: s.track || "", lat: s.lat, lon: s.lon, stopId: s.stopId || "" } });
       W.tripStops = null; W.step = "leg"; W.error = ""; render();
     });
   }

@@ -37,7 +37,7 @@ function rawLabel(l) {
   return spaced(rs || ts || l.mode);
 }
 
-const place = p => ({ name: p.name, lat: p.lat, lon: p.lon, plan: p.scheduledDeparture || p.scheduledArrival || p.departure || p.arrival,
+const place = p => ({ name: p.name, lat: p.lat, lon: p.lon, stopId: p.stopId || "", plan: p.scheduledDeparture || p.scheduledArrival || p.departure || p.arrival,
   rt: p.departure || p.arrival, track: p.track || p.scheduledTrack || "" });
 
 // Antwort → einfache Verbindungen (Fußwege werden als Gehzeit an die vorherige Teilstrecke gehängt)
@@ -49,7 +49,7 @@ export function simplify(data) {
       if (["WALK", "BIKE", "CAR"].includes(l.mode)) { walk += Math.round((l.duration || 0) / 60); continue; }
       if (legs.length && walk) legs[legs.length - 1].walk = walk;
       walk = 0;
-      legs.push({ mode: l.mode, rail: RAIL.has(l.mode), label: legLabel(l), num: l.tripShortName || "", line: l.routeShortName || "",
+      legs.push({ mode: l.mode, rail: RAIL.has(l.mode), label: legLabel(l), num: l.tripShortName || "", line: l.routeShortName || "", tripId: l.tripId || "",
         headsign: l.headsign || "", cancelled: !!l.cancelled,
         from: { ...place(l.from), plan: l.scheduledStartTime || place(l.from).plan, rt: l.startTime },
         to: { ...place(l.to), plan: l.scheduledEndTime || place(l.to).plan, rt: l.endTime } });
@@ -76,9 +76,10 @@ export async function connections(env, from, to, timeMs, minT = 0, arriveBy = fa
 
 // Bahn-Teilstrecke → OpenBoards-Fahrt (journeyId) an Abfahrts- und Ankunftsbahnhof
 export async function resolveLeg(env, l, cache = new Map()) {
-  const base = { jid: "", label: l.label, mode: l.mode, walk: l.walk || 0,
-    from: { eva: "", name: l.from.name, plan: l.from.plan, platform: l.from.track || "", lat: l.from.lat, lon: l.from.lon },
-    to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "", lat: l.to.lat, lon: l.to.lon } };
+  // tid/stopId: Fahrt und Halte bei Transitous – damit auch Bus/Tram/U-Bahn mit Echtzeit überwacht werden können
+  const base = { jid: "", tid: l.tripId || "", label: l.label, mode: l.mode, walk: l.walk || 0,
+    from: { eva: "", name: l.from.name, plan: l.from.plan, platform: l.from.track || "", lat: l.from.lat, lon: l.from.lon, stopId: l.from.stopId || "" },
+    to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "", lat: l.to.lat, lon: l.to.lon, stopId: l.to.stopId || "" } };
   if (!l.rail) return base;
   const f = l.from.eva ? byEva(l.from.eva) : nearest(l.from.lat, l.from.lon), t = l.to.eva ? byEva(l.to.eva) : nearest(l.to.lat, l.to.lon);
   if (!f || !t) return base;
@@ -154,11 +155,12 @@ export async function stopDepartures(env, stop, fromMs) {
   const d = await motisGet(env, "stoptimes", { stopId: stop.id, time: new Date(fromMs).toISOString(), n: "24", arriveBy: "false" });
   return (d.stopTimes || []).map(s => { const p = s.place || {};
     const l = { mode: s.mode, displayName: s.displayName, routeShortName: s.routeShortName, tripShortName: s.tripShortName, category: s.category };
-    return { tripId: s.tripId, label: legLabel(l), mode: s.mode || "", plan: p.scheduledDeparture || p.departure, rt: p.departure || p.scheduledDeparture,
+    return { tripId: s.tripId, stopId: p.stopId || "", label: legLabel(l), mode: s.mode || "", plan: p.scheduledDeparture || p.departure, rt: p.departure || p.scheduledDeparture,
       platform: p.track || p.scheduledTrack || "", cancelled: !!(s.cancelled || p.cancelled), direction: [{ name: s.headsign || s.tripTo?.name || "" }], via: [], realtime: !!s.realTime };
   }).filter(x => x.plan && Date.parse(x.rt) >= fromMs - 2 * 60e3);
 }
 // Halte einer Fahrt nach der Abfahrt an der Haltestelle (für „Wo steigst du aus?“)
+export { motisGet };
 export async function tripStops(env, tripId, afterMs) {
   if (env.MOCK === "1") { const t0 = afterMs; return [["Adenauerplatz", 4, 52.4999, 13.3074], ["Wilmersdorfer Str.", 8, 52.5066, 13.3069], ["Berlin Hbf", 22, 52.52559, 13.36955]]
     .map(([name, m, lat, lon]) => ({ name, plan: new Date(t0 + m * 60e3).toISOString(), rt: new Date(t0 + m * 60e3).toISOString(), lat, lon, eva: name === "Berlin Hbf" ? "8011160" : "" })); }
@@ -167,7 +169,7 @@ export async function tripStops(env, tripId, afterMs) {
   for (const l of d.legs || []) for (const p of [...(l.intermediateStops || []), l.to].filter(Boolean)) {
     const t = p.scheduledArrival || p.arrival; if (!t || Date.parse(t) <= afterMs) continue;
     const st = p.lat != null ? nearest(p.lat, p.lon, 250) : null;   // DB-Bahnhof am selben Ort? (für spätere Echtzeit)
-    out.push({ name: p.name, plan: t, rt: p.arrival || t, track: p.track || "", lat: p.lat, lon: p.lon, eva: st?.eva || "" });
+    out.push({ name: p.name, plan: t, rt: p.arrival || t, track: p.track || "", lat: p.lat, lon: p.lon, eva: st?.eva || "", stopId: p.stopId || "" });
   }
   return out;
 }

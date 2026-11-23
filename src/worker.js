@@ -71,9 +71,10 @@ function validLeg(l) {
   return l && typeof l.jid === "string" && typeof l.label === "string" && ok(l.from) && ok(l.to) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
 }
 const coord = s => (Number.isFinite(+s.lat) && Number.isFinite(+s.lon) && s.lat != null ? { lat: +(+s.lat).toFixed(5), lon: +(+s.lon).toFixed(5) } : {});
-const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)), minT: Math.min(30, Math.max(0, +l.minT || 0)),
-  from: { eva: String(l.from.eva || ""), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8), ...coord(l.from) },
-  to: { eva: String(l.to.eva || ""), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...(l.to.estimated ? { estimated: true } : {}) }, ...(l.must ? { must: true } : {}) });
+const sid = s => (s.stopId ? { stopId: String(s.stopId).slice(0, 120) } : {});
+const cleanLeg = l => ({ jid: l.jid, ...(l.tid ? { tid: String(l.tid).slice(0, 200) } : {}), label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)), minT: Math.min(30, Math.max(0, +l.minT || 0)),
+  from: { eva: String(l.from.eva || ""), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8), ...coord(l.from), ...sid(l.from) },
+  to: { eva: String(l.to.eva || ""), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...sid(l.to), ...(l.to.estimated ? { estimated: true } : {}) }, ...(l.must ? { must: true } : {}) });
 
 // Prüfung neuer Teilstrecken (Anlegen und Ändern)
 function checkLegs(legs) {
