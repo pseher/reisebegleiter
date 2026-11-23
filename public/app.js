@@ -92,7 +92,7 @@ function tripCard(t) {
     <div class="card">
       <ol class="tl">${items.join("")}</ol>
     </div>
-    <p class="foot">${noLive ? "Noch keine Echtzeitdaten – Fahrplanzeiten" : fresh ? `Echtzeit geprüft um ${hm(fresh)}` : ""} · Angaben ohne Gewähr</p>
+    <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · noch keine Prognose der DB, Fahrplanzeiten" : ""} · Angaben ohne Gewähr</p>
     <button class="btn quiet" data-del="${t.id}">Reise beenden</button>`;
 }
 

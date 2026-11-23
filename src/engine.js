@@ -12,9 +12,13 @@ const T = x => (x ? Date.parse(x) : NaN);
 const cleanName = n => String(n || "").replace(/\s*\(tief\)$/i, "");
 
 // Umstiegszeit in Minuten
+// Gleise 1/2, 3/4, 5/6 … liegen meist am selben Bahnsteig (Faustregel)
+const islandOf = pl => { const n = parseInt(pl, 10); return Number.isFinite(n) && /^\d+$/.test(String(pl).trim()) ? Math.ceil(n / 2) : null; };
 export function transferMinutes(arrEva, arrPl, depEva, depPl) {
-  if (arrEva !== depEva) return HUBS.has(arrEva) ? 10 : 8;        // anderer Bahnhofsteil, z. B. Berlin Hbf oben ↔ tief
-  if (arrPl && depPl && arrPl === depPl) return 3;                  // gleiches Gleis
+  if (arrEva && depEva && arrEva !== depEva) return HUBS.has(arrEva) ? 10 : 8;   // anderer Bahnhofsteil, z. B. Berlin Hbf oben ↔ tief
+  if (arrPl && depPl && arrPl === depPl) return 3;                                 // gleiches Gleis
+  const a = islandOf(arrPl), d = islandOf(depPl);
+  if (a != null && a === d) return HUBS.has(arrEva) ? 4 : 3;                        // vermutlich gleicher Bahnsteig
   return HUBS.has(arrEva) ? 8 : 5;
 }
 
@@ -46,7 +50,9 @@ export function evaluate(trip, now = Date.now()) {
   for (let i = 0; i < n - 1; i++) {
     const a = legs[i].arr, d = legs[i + 1].dep;
     const walk = trip.legs[i].walk || 0;                     // Gehzeit aus der Verbindungssuche, falls bekannt
-    const gap = Math.round((d.rt - a.rt) / MIN), need = walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform);
+    const gap = Math.round((d.rt - a.rt) / MIN), planGap = Math.round((d.plan - a.plan) / MIN);
+    // Vom Fahrplan so geplante Umstiege gelten als machbar: höchstens die geplante Zeit verlangen (mind. 2 Min.)
+    const need = Math.max(2, Math.min(walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform), planGap));
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until), spare = gap - need;
     let status, reason = "";
     if (d.rt < now - MIN && !d.cancelled && !legs[i].arr.cancelled) status = "DONE";

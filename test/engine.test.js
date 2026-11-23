@@ -15,6 +15,8 @@ const arrDelay = (d, extra = {}) => [{ dep: { rt: iso(d), t: 1, live: true }, ar
 
 test("Umstiegszeit: Knoten, gleiches Gleis, anderer Bahnhofsteil", () => {
   assert.equal(transferMinutes("8010205", "12", "8010205", "10"), 8);
+  assert.equal(transferMinutes("8011160", "8", "8011160", "7"), 4);   // Berlin Hbf tief, gleicher Bahnsteig
+  assert.equal(transferMinutes("8000001", "3", "8000001", "4"), 3);
   assert.equal(transferMinutes("8000001", "2", "8000001", "2"), 3);
   assert.equal(transferMinutes("8011160", "1", "8098160", "5"), 10);
   assert.equal(growthBuffer(0), 0); assert.equal(growthBuffer(65), 3); assert.equal(growthBuffer(500), 10);
@@ -96,4 +98,14 @@ test("Abfahrt +22 ohne Ankunftsprognose: Verspätung wird mitgenommen", () => {
   const v = evaluate(t, T0 - 60 * 60e3);
   assert.equal(v.legs[0].arr.delay, 22); assert.equal(v.legs[0].arr.estimated, true);
   assert.equal(v.transfers[0].gap, -5); assert.equal(v.status, "RISK");
+});
+
+test("vom Fahrplan geplanter 2-Min.-Umstieg ist knapp, nicht gefährdet – erst Verspätung macht ihn kritisch", () => {
+  const legs = [
+    { jid: "a", label: "S 41", from: { eva: "8089021", name: "Heidelberger Platz", plan: iso(0), platform: "1" }, to: { eva: "8089047", name: "Westkreuz", plan: iso(5), platform: "11" } },
+    { jid: "b", label: "S 7", from: { eva: "8089047", name: "Westkreuz", plan: iso(7), platform: "1" }, to: { eva: "8012666", name: "Potsdam Hbf", plan: iso(29), platform: "6" } },
+  ];
+  assert.equal(evaluate({ id: "w", ticket: "flex", legs, obs: [] }, T0 - 10 * 60e3).transfers[0].status, "WATCH");
+  const late = [{ dep: { rt: iso(2), t: 1, live: true }, arr: { rt: iso(7), t: 1, live: true } }, {}];
+  assert.equal(evaluate({ id: "w", ticket: "flex", legs, obs: late }, T0 - 10 * 60e3).transfers[0].status, "RISK");
 });
