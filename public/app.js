@@ -141,10 +141,13 @@ function planBCard(t) {
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
+// Ziel: genaue Koordinaten des Bahnhofs (sonst Name + „Bahnhof“). Start: Koordinaten der Haltestelle, sonst der eigene Standort.
 function walkUrl(a, b) {
-  const pt = x => (x.lat != null && x.lon != null ? `${x.lat},${x.lon}` : `${x.name}`);
-  if (isIOS) return `https://maps.apple.com/?saddr=${encodeURIComponent(pt(a))}&daddr=${encodeURIComponent(pt(b))}&dirflg=w`;
-  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pt(a))}&destination=${encodeURIComponent(pt(b))}&travelmode=walking`;
+  const has = x => x && x.lat != null && x.lon != null;
+  const dest = has(b) ? `${b.lat},${b.lon}` : `${cleanStop(b.name)} Bahnhof`;
+  const orig = has(a) ? `${a.lat},${a.lon}` : "";
+  if (isIOS) return `https://maps.apple.com/?${orig ? `saddr=${encodeURIComponent(orig)}&` : ""}daddr=${encodeURIComponent(dest)}&dirflg=w`;
+  return `https://www.google.com/maps/dir/?api=1${orig ? `&origin=${encodeURIComponent(orig)}` : ""}&destination=${encodeURIComponent(dest)}&travelmode=walking`;
 }
 const walkBtn = (a, b) => `<a class="walk" href="${walkUrl(a, b)}" target="_blank" rel="noopener">Weg zeigen ↗</a>`;
 

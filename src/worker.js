@@ -1,6 +1,6 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
-import { searchStations } from "./stations.js";
+import { searchStations, byEva } from "./stations.js";
 import { connections, resolveConnection } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
@@ -24,8 +24,11 @@ async function device(env, req) {
 
 const ownTrip = async (env, dev, id) => { const t = await db.get(env, "rb_trips", id); return t && t.device_id === dev.id ? t : null; };
 
+// Fehlende Koordinaten von DB-Bahnhöfen aus der Stationsliste ergänzen (auch für ältere Reisen)
+const withCoords = s => { if (s.lat != null || !s.eva) return s; const b = byEva(s.eva); return b ? { ...s, lat: b.lat, lon: b.lon } : s; };
 // Anzeige-Daten einer Reise
 function view(trip, now = Date.now()) {
+  trip = { ...trip, legs: trip.legs.map(l => ({ ...l, from: withCoords(l.from), to: withCoords(l.to) })) };
   const v = evaluate(trip, now), st = trip.state || {};
   const nextK = v.transfers.findIndex(t => t.status === "RISK" || t.status === "LOST");
   if (nextK >= 0 && st.alt?.[nextK]?.length) v.sub = v.sub.replace(" Ich behalte das im Blick.", "") + altText(st.alt[nextK]);
