@@ -19,7 +19,7 @@ test("Umstiegszeit: Knoten, gleiches Gleis, anderer Bahnhofsteil", () => {
   assert.equal(transferMinutes("8000001", "3", "8000001", "4"), 3);
   assert.equal(transferMinutes("8000001", "2", "8000001", "2"), 3);
   assert.equal(transferMinutes("8011160", "1", "8098160", "5"), 10);
-  assert.equal(growthBuffer(0), 0); assert.equal(growthBuffer(65), 3); assert.equal(growthBuffer(500), 10);
+  assert.equal(growthBuffer(0), 0); assert.equal(growthBuffer(65, 5), 3); assert.equal(growthBuffer(500, 5), 10); assert.equal(growthBuffer(89), 1);
 });
 
 test("pünktlich: alles läuft nach Plan, 17 Min. Umstieg", () => {
@@ -116,4 +116,12 @@ test("eigene Mindest-Umstiegszeit: 9 Min. geplant, ich brauche 10 → zu knapp",
   assert.equal(v.transfers[0].gap, 9); assert.equal(v.transfers[0].need, 10); assert.equal(v.transfers[0].status, "RISK");
   const ok = evaluate(t, T0 + 60 * 60e3);   // 17 Min. geplant
   assert.equal(ok.transfers[0].status, "OK");
+});
+
+test("8 Min. Umstieg, ich brauche 5, 90 Min. vorher, pünktlich: alles im Plan", () => {
+  const legs = [
+    { jid: "a", label: "S 7", from: { eva: "1", name: "A", plan: iso(0), platform: "1" }, to: { eva: "8012666", name: "Potsdam Hbf", plan: iso(90), platform: "6" }, minT: 5 },
+    { jid: "b", label: "ICE 648", from: { eva: "8012666", name: "Potsdam Hbf", plan: iso(98), platform: "3" }, to: { eva: "8010224", name: "Magdeburg Hbf", plan: iso(160), platform: "8" }, minT: 5 },
+  ];
+  assert.equal(evaluate({ id: "p", ticket: "flex", legs, obs: [] }, T0).transfers[0].status, "OK");
 });

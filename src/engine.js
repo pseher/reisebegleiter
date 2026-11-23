@@ -23,7 +23,10 @@ export function transferMinutes(arrEva, arrPl, depEva, depPl) {
 }
 
 // Zusätzlicher Puffer: Verspätungen wachsen eher, als dass sie schrumpfen
-export const growthBuffer = minutesUntilArrival => (minutesUntilArrival <= 0 ? 0 : Math.min(10, Math.floor(minutesUntilArrival / 20)));
+// Ist der Zug schon verspätet, wächst die Verspätung oft weiter → mehr Puffer, je weiter die Ankunft entfernt ist.
+// Ohne Verspätung nur ein kleiner Puffer für weit entfernte Umstiege.
+export const growthBuffer = (minutesUntilArrival, delay = 0) => (minutesUntilArrival <= 0 ? 0
+  : delay >= 3 ? Math.min(10, Math.floor(minutesUntilArrival / 20)) : Math.min(2, Math.floor(minutesUntilArrival / 60)));
 
 // Halt (Abfahrt oder Ankunft) einer Teilstrecke mit Echtzeit zusammenführen
 function stop(leg, o, side) {
@@ -55,13 +58,13 @@ export function evaluate(trip, now = Date.now()) {
     // Eigene Mindest-Umstiegszeit des Reisenden (Einstellung) gilt immer
     const own = +trip.legs[i].minT || 0;
     const need = Math.max(2, own, Math.min(walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform), planGap));
-    const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until), spare = gap - need;
+    const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until, a.delay), spare = gap - need;
     let status, reason = "";
     if (d.rt < now - MIN && !d.cancelled && !legs[i].arr.cancelled) status = "DONE";
     else if (a.cancelled || d.cancelled || legs[i].dep.cancelled) { status = "LOST"; reason = "cancel"; }
     else if (gap < 0 && until <= 45) { status = "LOST"; reason = "late"; }
     else if (spare < growth) status = "RISK";
-    else if (spare < growth + 4) status = "WATCH";
+    else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
     transfers.push({ i, at: a.name, eva: a.eva, gap, need, own, spare, growth, until, status, reason,
       fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
@@ -171,11 +174,11 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     if (!msgs.some(m => /Zugbindung/.test(m.body)))
       msgs.push({ title: "🎫 Zugbindung voraussichtlich aufgehoben", body: `Erwartet: mind. 20 Min. Verspätung am Ziel oder ein verpasster Anschluss. Nach den DB-Regeln darfst du dann einen anderen Zug nehmen. Angaben ohne Gewähr.`, tag: tag("zb") });
   }
-  return { state: st, msgs };
+  return { state: st, msgs: msgs.map(m => ({ ...m, body: m.body.replace(/\.\./g, ".") })) };
 }
 
 export function altText(alts) {
   if (!alts?.length) return "";
   const a = alts[0];
-  return ` Plan B: ${a.label} ab ${hm(T(a.dep))}${a.depPl ? ` (Gl. ${a.depPl})` : ""}${a.arr ? `, an ${a.toName} ${hm(T(a.arr))}` : ""}.`;
+  return ` Plan B: ab ${a.at} ${hm(T(a.dep))}${a.depPl ? ` (Gl. ${a.depPl})` : ""} mit ${a.label}${a.arr ? `, an ${a.toName} ${hm(T(a.arr))}` : ""}.`;
 }

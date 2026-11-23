@@ -73,12 +73,13 @@ function tripCard(t) {
       <div class="leg">${esc(l.label)}${l.live ? "" : " · nur Fahrplan"}${l.dep.messages?.length ? ` · ${esc(l.dep.messages[0])}` : ""}</div></li>`);
     const tr = t.transfers[i];
     if (tr) {
-      const n = legs[i + 1], alt = tr.alt?.[0];
+      const n = legs[i + 1];
       items.push(`<li class="${Date.parse(n.dep.rt) < now ? "past" : ""}"><span class="dot"></span>
         <div class="stop">${esc(l.arr.name)} · Umstieg</div>
         <div class="when">an ${when(l.arr)}${platform(l.arr)}</div>
         <div class="when">ab ${when(n.dep)}${platform(n.dep)}</div>
-        ${tr.status !== "DONE" ? `<div class="tr s-${tr.status}">${transferText(tr)}${alt ? `<div class="alt"><b>Plan B:</b> ${esc(alt.label)} um ${hm(alt.dep)}${alt.depPl ? `, Gleis ${esc(alt.depPl)}` : ""}${alt.arr ? ` – an ${esc(alt.toName)} ${hm(alt.arr)}` : ""}</div>` : ""}</div>` : ""}
+        ${tr.status !== "DONE" ? `<div class="tr s-${tr.status}">${transferText(tr)}${tr.alt?.length ? tr.alt.map((a, ai) => `<div class="alt"><b>${ai ? "Oder" : "Plan B"}:</b> ab ${esc(a.at)} ${hm(a.dep)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""} mit ${esc(a.label)}${a.arr ? ` – an ${esc(a.toName)} ${hm(a.arr)}` : ""}
+          <button class="btn sec" style="margin:8px 0 0;min-height:40px" data-adopt="${t.id}|${i}|${ai}">Übernehmen</button></div>`).join("") : (tr.status === "RISK" || tr.status === "LOST") ? `<div class="alt small">Suche nach Alternativen läuft …</div>` : ""}</div>` : ""}
         <div class="leg">${esc(n.label)}${n.live ? "" : " · nur Fahrplan"}</div></li>`);
     }
   });
@@ -139,6 +140,13 @@ function bindHome() {
   $app.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     if (!confirm("Reise beenden und nicht mehr überwachen?")) return;
     await api(`/api/trips/${b.dataset.del}`, { method: "DELETE" }).catch(e => alert(e.message));
+    await loadTrips().catch(() => {}); render();
+  });
+  $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
+    const [id, k, idx] = b.dataset.adopt.split("|");
+    if (!confirm("Reise auf diesen Plan B umstellen? Die App überwacht dann die neue Verbindung.")) return;
+    b.disabled = true; b.textContent = "Wird umgestellt …";
+    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
   });
   $app.querySelectorAll("[data-mtrip]").forEach(a => a.onclick = async e => {

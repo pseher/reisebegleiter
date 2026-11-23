@@ -4,7 +4,7 @@ import { searchStations } from "./stations.js";
 import { connections, resolveConnection } from "./routing.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, altText } from "./engine.js";
-import { runMonitor, dueChecks, observe, assess, deliver } from "./monitor.js";
+import { runMonitor, dueChecks, observe, assess, deliver, adopt } from "./monitor.js";
 import { vapid, b64u } from "./push.js";
 
 const MIN = 60e3;
@@ -181,6 +181,20 @@ async function api(req, env, url) {
     trip.state = { ...trip.state, rem: {}, start: null };          // Meldungen beginnen mit dem ersten Cron-Lauf
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
     return json(view(trip, now), 201);
+  }
+
+  // Plan B übernehmen
+  const ma = /^\/api\/trips\/([0-9a-f-]{36})\/adopt$/i.exec(p);
+  if (ma && method === "POST") {
+    const t = await ownTrip(env, dev, ma[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const b = await req.json().catch(() => ({}));
+    await adopt(env, t, +b.k || 0, +b.idx || 0);
+    const now = Date.now(), cache = new Map();
+    await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
+    await assess(env, t, now, cache);
+    await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ends_at: t.ends_at, active: true, updated_at: new Date().toISOString() });
+    return json(view(t, now));
   }
 
   const m = /^\/api\/trips\/([0-9a-f-]{36})$/i.exec(p);

@@ -1,6 +1,8 @@
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
 import { evaluate, diff, transferMinutes } from "./engine.js";
-import { board, findJourney, isoBerlin, WINDOW_MIN } from "./openboards.js";
+import { findJourney } from "./openboards.js";
+import { connections, resolveConnection } from "./routing.js";
+import { search as searchStationsSync } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
 
@@ -41,27 +43,26 @@ export async function observe(env, checks, now, cache) {
   });
 }
 
-// Plan B: spätere Züge ab dem Umsteigebahnhof, die das Ziel der nächsten Teilstrecke erreichen
-export async function planB(env, trip, v, k, now, cache) {
-  const t = v.transfers[k], next = trip.legs[k + 1], target = next.to.eva;
-  const from = Math.max(now, t.arrRt + transferMinutes(t.eva, t.arrPl, t.eva, "") * MIN);
-  const dur = Date.parse(next.to.plan) - Date.parse(next.from.plan);
-  const seen = new Set(), cands = [];
-  for (let w = 0; w < 2 && cands.length < 3; w++) {
-    const list = await board(env, "dep", t.eva, isoBerlin(from + w * WINDOW_MIN * MIN), { maxVia: 40, cache });
-    for (const e of list) {
-      if (seen.has(e.jid) || e.jid === next.jid || e.cancelled || Date.parse(e.rt) < from) continue;
-      seen.add(e.jid);
-      if (e.via.some(x => x.eva === target) || e.direction.some(x => x.eva === target)) cands.push(e);
-    }
-  }
-  const alts = [];
-  for (const c of cands.slice(0, 2)) {
-    const a = await findJourney(env, "arr", target, c.jid, Date.parse(c.rt) + dur, { windows: 3, cache }).catch(() => null);
-    alts.push({ label: c.label, jid: c.jid, dep: c.rt, depPl: c.platform, at: t.at, arr: a?.rt || null, arrPl: a?.platform || "", toName: next.to.name.replace(/\s*\(tief\)$/i, "") });
-  }
-  return alts.sort((x, y) => Date.parse(x.arr || "2100-01-01") - Date.parse(y.arr || "2100-01-01"));
+// Plan B: die Restreise bis zum Ziel neu suchen (MOTIS), mit der eigenen Umstiegszeit.
+// Vor der Abfahrt ab dem Startbahnhof, unterwegs ab dem gefährdeten Umsteigebahnhof.
+export async function planB(env, trip, v, k, now) {
+  const t = v.transfers[k], last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
+  const finalEva = last.to.eva || nearestEvaByName(last.to.name);
+  if (!finalEva) return [];
+  const before = now < v.legs[0].dep.rt - MIN;
+  const fromEva = before ? trip.legs[0].from.eva : t.eva;
+  if (!fromEva) return [];
+  const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 20 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
+  const current = trip.legs.slice(before ? 0 : k + 1).map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
+  const cs = await connections(env, fromEva, finalEva, fromMs, own);
+  return cs.filter(c => !c.legs.some(l => l.cancelled))
+    .filter(c => c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|") !== current)
+    .sort((x, y) => Date.parse(x.arr) - Date.parse(y.arr)).slice(0, 2)
+    .map(c => ({ from: before ? "start" : k, at: before ? v.legs[0].dep.name : t.at, label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers,
+      dep: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", arr: c.legs[c.legs.length - 1].to.plan,
+      toName: (last.to.name || "").replace(/\s*\(tief\)$/i, ""), legs: c.legs }));
 }
+const nearestEvaByName = name => searchStationsSync(name)?.[0]?.eva || "";
 
 // Bewertung + Plan B + Meldungen für eine Reise (nach dem Beobachten)
 export async function assess(env, trip, now, cache) {
@@ -70,7 +71,7 @@ export async function assess(env, trip, now, cache) {
   for (const t of v.transfers) {
     const k = v.transfers.indexOf(t);
     if (t.status === "RISK" || t.status === "LOST") {
-      if (!alt[k] || now - (altAt[k] || 0) > 5 * MIN) { try { alt[k] = await planB(env, trip, v, k, now, cache); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
+      if (!alt[k] || now - (altAt[k] || 0) > 5 * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
   }
   const { state, msgs } = diff(trip, v, { ...prev, alt }, now);
@@ -115,4 +116,17 @@ export async function runMonitor(env, now = Date.now()) {
 export async function deliver(env, sub, msg) {
   if (env.MOCK === "1") { console.log("PUSH", msg.title, "–", msg.body); return 201; }
   return sendPush(env, sub, msg);
+}
+
+// Plan B übernehmen: Teilstrecken ab dem Abweichungspunkt ersetzen, Echtzeit und Meldungsstand dafür zurücksetzen
+export async function adopt(env, trip, k, idx) {
+  const a = trip.state?.alt?.[k]?.[idx];
+  if (!a?.legs?.length) throw new Error("Plan B nicht mehr verfügbar");
+  const fresh = (await resolveConnection(env, a.legs)).map(l => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
+  const keep = a.from === "start" ? 0 : k + 1;
+  trip.legs = [...trip.legs.slice(0, keep), ...fresh];
+  trip.obs = (trip.obs || []).slice(0, keep);
+  trip.state = { ...(trip.state || {}), tr: [], alt: {}, altAt: {}, rem: Object.fromEntries(Object.entries(trip.state?.rem || {}).filter(([i]) => +i < keep)) };
+  trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
+  return trip;
 }
