@@ -239,7 +239,9 @@ function liveBadge(a) {
 let hereBusy = null;
 // Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
 function searchSeg(t, cur) {
-  const opts = [["start", "Ab Start", cleanStop(t.legs[0].dep.name)], ["trip", "Standort", "zur Reisezeit"], ["now", "Standort", "jetzt"]];
+  const enroute = t.phase === "enroute", nx = t.legs[Math.max(0, t.current)] || t.legs[0];
+  const opts = enroute ? [["next", "Ab nächstem Halt", cleanStop(nx.arr.name)], ["now", "Standort", "jetzt"]]
+    : [["start", "Ab Start", cleanStop(t.legs[0].dep.name)], ["trip", "Standort", "zur Reisezeit"], ["now", "Standort", "jetzt"]];
   return `<div class="seg" role="group" aria-label="Andere Verbindungen suchen">${opts.map(([m, a, b]) =>
     `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "start" ? "" : PIN}${a}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
 }
@@ -249,22 +251,28 @@ function hereCard(t) {
   if (!t.here) return `<section class="card"><div class="k">Andere Verbindungen suchen</div>${searchSeg(t, null)}</section>`;
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
-  const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
-    return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
-      ${losZiel(a.dep, a.arr, null, t.plan.arr)}
-      ${a.walkStart ? `<div class="small muted">Vorher ${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}</div>` : ""}
+  const mode = t.here.mode || "trip";
+  // unterwegs: dein Plan ab dem nächsten Halt (der Zug, in dem du sitzt, ist schon gesetzt)
+  const ci = Math.max(0, t.current), fromIdx = mode === "next" ? Math.min(ci + 1, t.legs.length - 1) : 0;
+  const mine = { ...t, legs: t.legs.slice(fromIdx), transfers: t.transfers.slice(fromIdx) };
+  const planTile = `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, t.plan.arr)}${stepsHtml(planSteps(mine))}</div></div>`;
+  const rows = t.here.list.map((a, i) => { if (a.kind === "asplanned") return "";
+    const d = Math.round((Date.parse(a.arr) - ref) / MIN);
+    return `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${mode === "next" && a.legs?.[0] && a.legs[0].label.replace(/\s/g, "") === t.legs[ci].label.replace(/\s/g, "") ? "Sitzen bleiben" : a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
+      ${losZiel(a.dep, a.arr, mode === "now" ? null : mine.legs[0].dep.rt, t.plan.arr)}
+      ${a.walkStart > 2 && mode !== "start" && mode !== "next" ? `<div class="small muted">Vorher ${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}</div>` : ""}
       ${stepsHtml(altSteps(a))}
       <div class="cmp-live">${liveBadge(a)}</div>
       ${zb0 && a.zb ? `<div class="cmp-live"><span class="badge warn">anderer Fernzug</span></div>` : ""}
       ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-zb="${a.zb ? "1" : ""}" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}
     </div></div>`; }).join("");
-  const mode = t.here.mode || "trip";
   const title = mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · zur Reisezeit (${day(t.legs[0].dep.plan)})` : mode === "now" ? "Ab deinem Standort · ab jetzt" : `Ab deinem Standort · zur Reisezeit (${day(t.legs[0].dep.plan)})`;
   // Auswahl der Suche oben, darunter die Ergebnisse
   return `<section class="card"><div class="k">Andere Verbindungen</div>
     ${searchSeg(t, mode)}
-    <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span><button class="link" data-here="${t.id}" data-mode="${mode}">↻ neu suchen</button></div></section>
-    <div class="tiles">${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Keine Verbindung gefunden.</p></div>`}</div>`;
+    <div class="seg-info small muted"><span>${mode === "now" ? "ab jetzt" : mode === "next" ? `ab ${esc(cleanStop(mine.legs[0].arr.name))}, Ankunft ${hm(mine.legs[0].arr.rt)}` : `zur Reisezeit · ${day(t.legs[0].dep.plan)}`}</span>
+      <span><button class="link" data-here="${t.id}" data-mode="${mode}">↻ neu</button> · <button class="link" data-hide="${t.id}">✕ ausblenden</button></span></div></section>
+    <div class="tiles">${planTile}${rows.trim() || `<div class="cmp-row"><p class="small muted" style="margin:0">Keine andere Verbindung gefunden.</p></div>`}</div>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
@@ -400,11 +408,15 @@ function bindCommon() {
     await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
   });
+  $app.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.hide; trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();
+    await api(`/api/trips/${id}/here`, { method: "DELETE" }).catch(() => {});
+  });
   $app.querySelectorAll("[data-here]").forEach(b => b.onclick = async () => {
     const id = b.dataset.here;
-    if (b.dataset.mode === "start") {     // ab dem Start der Reise – ohne Standort
+    if (b.dataset.mode === "start" || b.dataset.mode === "next") {     // ab dem Start der Reise – ohne Standort
       hereBusy = id; render();
-      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { mode: "start" } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
+      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { mode: b.dataset.mode } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
       hereBusy = null; return render();
     }
     if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");

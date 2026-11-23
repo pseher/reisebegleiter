@@ -144,7 +144,8 @@ const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) |
 // mode "trip": im Zeitraum der Reise (ab ca. 75 Min. vor der geplanten Abfahrt) – "now": ab sofort
 export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   const last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
-  const from = mode === "now" ? now : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
+  const ci = Math.max(0, v.current);
+  const from = mode === "now" ? now : mode === "next" ? Math.max(now, v.legs[ci].arr.rt) : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
   const to = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!to) return [];
   const [normal, roomy] = await Promise.all([
@@ -153,7 +154,8 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   ]);
   // „Wie geplant“ nur, wenn es genau deine Bahn-Züge sind (Busse/U-Bahn davor dürfen abweichen)
   const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => l.label.replace(/\s/g, "")).join("|");
-  const planSig = sig(trip.legs);
+  const rest = mode === "next" ? trip.legs.slice(ci + 1) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
+  const planSig = sig(rest);
   const seen = new Set(), all = [];
   for (const c of [...normal, ...roomy]) {
     const key = c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
@@ -162,12 +164,14 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   }
   const toName = (last.to.name || "").replace(/\s*\(tief\)$/i, "");
   const out = all.sort((a, b) => rtOf(a.legs[a.legs.length - 1].to) - rtOf(b.legs[b.legs.length - 1].to)).slice(0, 3).map(c => ({
-    kind: sig(c.legs) === planSig ? "asplanned" : !changesFV(trip.legs, c.legs) && trip.legs.some(isFVLeg) ? "samefv" : "here", from: "start", at: "deinem Standort",
+    kind: sig(c.legs) === planSig ? "asplanned" : !changesFV(rest, c.legs) && rest.some(isFVLeg) ? "samefv" : "here",
+    // unterwegs: ab dem nächsten Halt ersetzen; fährt der eigene Zug weiter, ist es „Sitzen bleiben“
+    from: mode === "next" ? ci : "start", stay: mode === "next" && c.legs[0]?.label.replace(/\s/g, "") === trip.legs[ci].label.replace(/\s/g, ""), at: mode === "next" ? trip.legs[ci].to.name : "deinem Standort",
     label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers, walkStart: c.walkStart || 0,
     dep: new Date(rtOf(c.legs[0].from)).toISOString(), depPlan: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", firstStop: c.legs[0].from.name,
     arr: new Date(rtOf(c.legs[c.legs.length - 1].to)).toISOString(), arrPlan: c.legs[c.legs.length - 1].to.plan, minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null,
     toName, legs: c.legs }));
-  for (const a of out) a.zb = changesFV(trip.legs, a.legs);
+  for (const a of out) a.zb = changesFV(rest, a.legs);
   await watchAlts(env, out, now, own).catch(e => console.log("Standort beobachten:", e.message));
   return out;
 }
@@ -274,6 +278,7 @@ export async function deliver(env, sub, msg) {
 // Plan B übernehmen: Teilstrecken ab dem Abweichungspunkt ersetzen, Echtzeit und Meldungsstand dafür zurücksetzen
 export async function adopt(env, trip, k, idx, fromHere = false) {
   const a = fromHere ? trip.state?.here?.list?.[idx] : trip.state?.alt?.[k]?.[idx];
+  if (fromHere && a && a.from !== "start") k = +a.from;
   if (!a?.legs?.length) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
   const st0 = trip.state || {};
   const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null };
@@ -281,7 +286,7 @@ export async function adopt(env, trip, k, idx, fromHere = false) {
   const fresh = (await resolveConnection(env, a.legs)).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
   const tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
-  if (a.kind === "stay" && fresh.length) {
+  if ((a.kind === "stay" || a.stay) && fresh.length) {
     // Im selben Zug weiterfahren: die aktuelle Teilstrecke bis zum neuen Ausstieg verlängern
     const cur = trip.legs[k];
     trip.legs = [...trip.legs.slice(0, k), { ...cur, must: false, to: fresh[0].to }, ...fresh.slice(1)];
@@ -298,7 +303,7 @@ export async function adopt(env, trip, k, idx, fromHere = false) {
   }
   // Meldungsstand nur für die unveränderten Teilstrecken behalten
   // (beim Sitzenbleiben bleibt die Abfahrt der aktuellen Teilstrecke gleich, nur ihre Ankunft ist neu)
-  const depKeep = a.kind === "stay" ? keep + 1 : keep;
+  const depKeep = a.kind === "stay" || a.stay ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
   trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr };

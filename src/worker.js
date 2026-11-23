@@ -38,8 +38,9 @@ function view(trip, now = Date.now()) {
   // Zugbindung je Möglichkeit immer frisch bewerten (auch für früher gespeicherte Ergebnisse)
   const hasFV = trip.legs.some(isFV);
   const hereRaw = st.here && now - st.here.at < 30 * MIN ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
-  const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = hasFV && changesFV(trip.legs, a.legs || []);
-    return { ...a, zb, kind: a.kind === "asplanned" ? a.kind : hasFV && !zb ? "samefv" : "here" }; }) } : null;
+  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : trip.legs, restFV = restLegs.some(isFV);
+  const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = restFV && changesFV(restLegs, a.legs || []);
+    return { ...a, zb, kind: a.kind === "asplanned" ? a.kind : restFV && !zb ? "samefv" : "here" }; }) } : null;
   const altZb = (a, k) => { if (!hasFV || !a.legs) return false;
     const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
@@ -245,15 +246,22 @@ async function api(req, env, url) {
 
   // Alternativen ab dem aktuellen Standort (Koordinaten kommen nur auf Knopfdruck aus der App, werden nicht dauerhaft gespeichert)
   const mh = /^\/api\/trips\/([0-9a-f-]{36})\/here$/i.exec(p);
+  if (mh && method === "DELETE") {
+    const t = await ownTrip(env, dev, mh[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), here: null } });
+    return json({ ok: true });
+  }
   if (mh && method === "POST") {
     const t = await ownTrip(env, dev, mh[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({}));
-    const now = Date.now(), mode = ["now", "start"].includes(b.mode) ? b.mode : "trip";
+    const now = Date.now(), mode = ["now", "start", "next"].includes(b.mode) ? b.mode : "trip";
     let here;
-    if (mode === "start") {
-      // Ohne Standort: ab dem Start der Reise, zur Reisezeit
-      const f = withCoords(t.legs[0].from);
+    if (mode === "start" || mode === "next") {
+      // Ohne Standort: ab dem Start der Reise (zur Reisezeit) bzw. unterwegs ab dem nächsten Halt (zur Ankunftszeit dort)
+      const v0 = evaluate(t, now), ci = Math.max(0, v0.current);
+      const f = withCoords(mode === "next" ? t.legs[ci].to : t.legs[0].from);
       if (f.lat == null && !f.eva) return fail(400, "Für den Start der Reise kenne ich keinen Ort.");
       here = f.eva ? { eva: f.eva, lat: f.lat, lon: f.lon } : { lat: f.lat, lon: f.lon };
     } else {
