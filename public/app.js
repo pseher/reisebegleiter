@@ -344,7 +344,7 @@ function renderTrip(t, many) {
   const sheet = sheetId === t.id;
   $app.innerHTML = `${flashBox()}
     ${many ? `<button class="back" data-list>← Alle Reisen</button>` : ""}
-    <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+    <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}" style="flex:0 0 auto;margin-top:10px">${isFav(t) ? "★" : "☆"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Das ist ein anderer Fernzug – mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
@@ -368,6 +368,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => { b.disabled = true; await startEdit(t); });
+  $app.querySelectorAll("[data-favt]").forEach(b => b.onclick = () => { const was = isFav(t); toggleFav(t); flash = was ? "Aus den Favoriten entfernt." : "Als Favorit gemerkt – du findest ihn unter „Reise hinzufügen“."; render(); });
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
   $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => patch({ minT: +b.dataset.tmt }));   // nur diese Reise
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
@@ -529,11 +530,28 @@ function stationField(id, label, val) {
       ${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}<ul class="list" id="${id}Res"></ul>`;
 }
 
+// ---------- Favoriten: häufige Verbindungen (auf diesem Gerät gespeichert, ohne Anmeldung) ----------
+let FAVS = []; try { FAVS = JSON.parse(localStorage.getItem("rb_favs") || "[]"); } catch {}
+const saveFavs = () => { try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {} };
+const berlinHM = iso => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+const placeOfStop = s => (s.eva ? { eva: s.eva, name: s.name, lat: s.lat, lon: s.lon } : { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true });
+const favKey = (from, to, time) => `${from.eva || `${(+from.lat).toFixed(3)},${(+from.lon).toFixed(3)}`}>${to.eva || `${(+to.lat).toFixed(3)},${(+to.lon).toFixed(3)}`}@${time}`;
+function favOfTrip(t) {
+  const a = t.legs[0].dep, b = t.legs[t.legs.length - 1].arr, time = berlinHM(a.plan);
+  return { id: favKey(a, b, time), from: placeOfStop(a), to: placeOfStop(b), time, trains: t.legs.map(l => nice(l)) };
+}
+const isFav = t => { const f = favOfTrip(t); return FAVS.some(x => x.id === f.id); };
+function toggleFav(t) { const f = favOfTrip(t); FAVS = isFav(t) ? FAVS.filter(x => x.id !== f.id) : [f, ...FAVS].slice(0, 12); saveFavs(); }
+// nächster Termin zur Lieblingsuhrzeit: heute, falls noch nicht vorbei, sonst morgen
+function nextAt(time) { const [h, m] = time.split(":").map(Number), d = new Date(); d.setHours(h, m, 0, 0); if (d.getTime() < Date.now() - 2 * MIN) d.setDate(d.getDate() + 1); return d.getTime(); }
+const sameTrains = (c, fav) => fav && c.legs.map(l => l.label.replace(/\s/g, "")).join(">") === fav.trains.map(x => x.replace(/\s/g, "")).join(">")
+  && Math.abs((Date.parse(c.legs[0].from.plan) - new Date(c.legs[0].from.plan).setHours(...fav.time.split(":").map(Number), 0, 0)) / MIN) <= 5;
+
 function connList(list) {
   if (!list.length) return `<p class="muted">Keine Verbindung gefunden. Probier eine andere Zeit.</p>`;
   return `<ul class="list">${list.map((c, i) => {
-    const late = Math.round((Date.parse(c.legs[0].from.rt || c.dep) - Date.parse(c.legs[0].from.plan)) / MIN);
-    return `<li><button data-c="${i}"><div class="train" style="grid-template-columns:1fr auto">
+    const late = Math.round((Date.parse(c.legs[0].from.rt || c.dep) - Date.parse(c.legs[0].from.plan)) / MIN), mine = sameTrains(c, W?.fav);
+    return `<li><button data-c="${i}" class="${mine ? "fav-hit" : ""}">${mine ? `<span class="small fav-tag">★ Deine übliche Verbindung</span>` : ""}<div class="train" style="grid-template-columns:1fr auto">
       <span class="t">${hm(c.legs[0].from.rt || c.legs[0].from.plan)}${late >= 1 ? ` <span class="late">+${late}</span>` : ""} → ${hm(c.legs[c.legs.length - 1].to.rt || c.legs[c.legs.length - 1].to.plan)}</span>
       <span class="pl">${dur(c.minutes)}</span>
       <span class="d" style="grid-column:1/3">${c.transfers ? `${c.transfers} Umstieg${c.transfers > 1 ? "e" : ""} · ` : "direkt · "}${c.legs.map(l => esc(l.label)).join(" → ")}${c.legs.some(l => l.cancelled) ? ` <span class="late">Ausfall</span>` : ""}</span>
@@ -549,6 +567,9 @@ function renderWizard() {
 
   if (W.step === "route") {
     $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : "Neue Reise"}</p>
+      ${!W.editId && FAVS.length ? `<section class="card favs"><div class="k">★ Favoriten</div><ul class="list">${FAVS.map((f, i) => `<li class="fav-row"><button data-fav="${i}"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><br>
+        <span class="small muted">${esc(f.time)} · ${esc(f.trains.join(" → "))}</span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>`).join("")}</ul>
+        <p class="small muted" style="margin:4px 0 0">Antippen sucht die nächste Fahrt zu dieser Uhrzeit. Anderer Tag: erst unten bei „Abfahrt“ das Datum wählen, dann den Favoriten antippen.</p></section>` : ""}
       ${W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
@@ -558,6 +579,7 @@ function renderWizard() {
           <div class="row"><button class="btn sec" id="impPaste" style="margin:4px 0">Aus Zwischenablage</button><button class="btn" id="impGo" style="margin:4px 0">Einlesen</button></div>` : ""}
       </section>
       <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>`}
+
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       ${whenPicker("when")}
@@ -588,7 +610,15 @@ function renderWizard() {
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
-    document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
+    document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.fav = null; W.step = "conns"; render(); };
+    $app.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => {
+      const f = FAVS[+b.dataset.fav]; if (!f) return;
+      // gewählter Tag (falls oben geändert) + Lieblingsuhrzeit, sonst der nächste passende Termin
+      const [h, m] = f.time.split(":").map(Number), d = new Date(W.when); d.setHours(h, m, 0, 0);
+      W.when = Math.max(Date.now(), (sameDay(W.when, Date.now()) ? nextAt(f.time) : d.getTime()) - 15 * MIN);   // etwas früher suchen, damit die übliche Verbindung sicher dabei ist
+      W.rFrom = f.from; W.rTo = f.to; W.fav = f; W.conns = null; W.error = ""; W.step = "conns"; render();
+    });
+    $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = () => { if (!confirm("Favorit entfernen?")) return; FAVS.splice(+b.dataset.favdel, 1); saveFavs(); render(); });
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
     document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));
     document.getElementById("impTextBtn")?.addEventListener("click", () => { W.showText = !W.showText; render(); });
@@ -603,7 +633,7 @@ function renderWizard() {
       ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
     if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
-      .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
+      .then(c => { W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
