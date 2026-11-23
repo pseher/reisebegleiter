@@ -347,6 +347,52 @@ function bindCommon() {
 // W = { step, legs: [], station, from (Zeit), list, train, error }
 function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
 const dur = m => (m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60} Min.` : `${m} Min.`);
+// ---------- Datum & Uhrzeit: Schnellwahl + Monatskalender + Uhrzeit ----------
+// key: Feld in W ("when" für Von–Nach, "from" für die Abfahrtstafel). W.cal = offener Kalender, W.calM = angezeigter Monat.
+const CAL_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:-3px;margin-right:8px"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`;
+const startOfDay = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const sameDay = (a, b) => startOfDay(a) === startOfDay(b);
+const hhmm = ms => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+function whenPicker(key) {
+  const v = W[key], now = Date.now();
+  const label = sameDay(v, now) ? "Heute" : sameDay(v, now + 864e5) ? "Morgen" : new Date(v).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+  const quick = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];   // kurze Schnellwahl
+  let cal = "";
+  if (W.cal === key) {
+    const m0 = new Date(W.calM || startOfDay(v)); m0.setDate(1); m0.setHours(0, 0, 0, 0);
+    const first = (m0.getDay() + 6) % 7, days = new Date(m0.getFullYear(), m0.getMonth() + 1, 0).getDate(), today = startOfDay(now);
+    const canPrev = m0.getTime() > today - 31 * 864e5 && new Date(m0.getFullYear(), m0.getMonth(), 0).getTime() >= today;
+    const cells = [];
+    for (let i = 0; i < first; i++) cells.push(`<span></span>`);
+    for (let d = 1; d <= days; d++) {
+      const ms = new Date(m0.getFullYear(), m0.getMonth(), d).getTime();
+      cells.push(`<button class="cal-d${ms === today ? " today" : ""}${sameDay(ms, v) ? " sel" : ""}" data-day="${ms}" ${ms < today ? "disabled" : ""} aria-label="${new Date(ms).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}">${d}</button>`);
+    }
+    cal = `<div class="cal" role="group" aria-label="Kalender">
+      <div class="cal-h"><button class="cal-nav" data-calm="-1" ${canPrev ? "" : "disabled"} aria-label="Voriger Monat">‹</button>
+        <b>${m0.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}</b>
+        <button class="cal-nav" data-calm="1" aria-label="Nächster Monat">›</button></div>
+      <div class="cal-g">${["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map(x => `<span class="cal-w">${x}</span>`).join("")}${cells.join("")}</div></div>`;
+  }
+  return `<div class="chips">${quick.map(([m, l]) => `<button class="chip" data-q="${m}" aria-pressed="${Math.abs(v - (now + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
+    <div class="when-row"><button class="when-day" data-cal aria-expanded="${W.cal === key}">${CAL_ICON}${esc(label)}</button>
+      <span class="when-time"><select id="whenH" aria-label="Stunde">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${new Date(v).getHours() === h ? "selected" : ""}>${String(h).padStart(2, "0")}</option>`).join("")}</select>
+      <b>:</b><select id="whenM" aria-label="Minute">${Array.from({ length: 12 }, (_, i) => i * 5).map(m => `<option value="${m}" ${Math.floor(new Date(v).getMinutes() / 5) * 5 === m ? "selected" : ""}>${String(m).padStart(2, "0")}</option>`).join("")}</select>
+</span></div>${cal}`;
+}
+function bindWhen(key, changed) {
+  const set = ms => { W[key] = ms; changed(); render(); };
+  $app.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { W.cal = null; set(Date.now() + +b.dataset.q * MIN); });
+  $app.querySelector("[data-cal]")?.addEventListener("click", () => { W.cal = W.cal === key ? null : key; W.calM = startOfDay(W[key]); render(); });
+  $app.querySelectorAll("[data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
+  $app.querySelectorAll("[data-day]").forEach(b => b.onclick = () => {
+    const d = new Date(+b.dataset.day), t = new Date(W[key]); d.setHours(t.getHours(), t.getMinutes());
+    W.cal = null; set(Math.max(d.getTime(), Date.now()));
+  });
+  const hs = document.getElementById("whenH"), ms = document.getElementById("whenM");
+  const onT = () => { const d = new Date(W[key]); d.setHours(+hs.value, +ms.value, 0, 0); set(d.getTime()); };
+  if (hs) { hs.onchange = onT; ms.onchange = onT; }
+}
 const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
 
 function stationField(id, label, val) {
@@ -374,7 +420,6 @@ function renderWizard() {
   const err = W.error ? `<p class="err">${esc(W.error)}</p>` : "";
 
   if (W.step === "route") {
-    const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
     $app.innerHTML = `<p class="steps">Neue Reise</p>
       <section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
@@ -387,8 +432,7 @@ function renderWizard() {
       <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
-      <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
-      <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
+      ${whenPicker("when")}
       <p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
       <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
@@ -399,9 +443,8 @@ function renderWizard() {
       if (inp.value.trim().length >= 2) find();          // nach dem Neuzeichnen die Treffer wieder zeigen
     }
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
-    $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
+    bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
-    document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
     document.getElementById("impFile").onchange = e => importFiles([...e.target.files]);
@@ -447,13 +490,12 @@ function renderWizard() {
   }
 
   else if (W.step === "trains") {
-    const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
     const base = W.legs.length ? Date.parse(W.legs[n - 1].to.plan) : Date.now();
     $app.innerHTML = `${head}<h1>Welcher Zug ab ${esc(W.station.name)}?</h1>
-      ${W.legs.length ? `<p class="muted small">Ankunft dort laut Plan ${hm(W.legs[n - 1].to.plan)}.</p>` : `<div class="chips">${chips.map(([m, l]) => `<button class="chip" data-m="${m}" aria-pressed="${Math.abs(W.from - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>`}
+      ${W.legs.length ? `<p class="muted small">Ankunft dort laut Plan ${hm(W.legs[n - 1].to.plan)}.</p>` : whenPicker("from")}
       ${err}<div id="trains">${W.list ? trainList(W.list) : `<div class="spinner"></div>`}</div>
       ${W.list ? `<button class="btn sec" id="later">Spätere Züge</button>` : ""}${back}`;
-    $app.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { W.from = Date.now() + +b.dataset.m * MIN; W.list = null; render(); });
+    if (!W.legs.length) bindWhen("from", () => { W.list = null; });
     const later = document.getElementById("later");
     if (later) later.onclick = () => { const l = W.list[W.list.length - 1]; W.from = l ? Date.parse(l.rt) + MIN : W.from + 60 * MIN; W.list = null; render(); };
     if (!W.list) {
