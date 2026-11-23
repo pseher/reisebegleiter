@@ -94,7 +94,9 @@ const KICKER = { OK: "Alles im Plan", WATCH: "Knapp", RISK: "Achtung", LOST: "Ha
 const listState = t => (t.status === "WATCH" && !t.transfers.some(x => x.status === "WATCH") && t.finalDelay >= 3 ? `${t.finalDelay} Min. später` : KICKER[t.status] || "");
 const heroKicker = t => (t.phase === "before" ? "Vor der Abfahrt" : t.phase === "done" ? "Reise beendet" : "Unterwegs");
 const day = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
-const inMin = iso => { const m = Math.round((Date.parse(iso) - Date.now()) / MIN); return m <= 0 ? "jetzt" : m < 60 ? `in ${m} Min.` : `in ${Math.floor(m / 60)} Std. ${m % 60} Min.`; };
+const inMin = iso => { const m = Math.round((Date.parse(iso) - Date.now()) / MIN);
+  if (m >= 18 * 60) return sameDay(Date.parse(iso), Date.now() + 864e5) ? "morgen" : `am ${new Date(iso).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Berlin" })}`;
+  return m <= 0 ? "jetzt" : m < 60 ? `in ${m} Min.` : `in ${Math.floor(m / 60)} Std. ${m % 60} Min.`; };
 const lateTag = d => (d >= 1 ? ` <span class="late" title="${d} Min. später">+${d}</span>` : "");
 // Im großen „nächster Schritt“: neue Zeit groß, darunter in Worten „13 Min. später, geplant 22:10“
 const lateLine = (d, plan) => (d >= 1 ? `<div class="small"><span class="late">${d} Min. später</span> <span class="muted">· geplant ${hm(plan)}</span></div>` : "");
@@ -158,7 +160,7 @@ function planBCard(t) {
   const open = t.transfers.find(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
   if (k < 0) return !open ? "" : `<section class="card"><div class="k">Möglichkeiten</div><p class="muted small">${open.altChecked
     ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Möglichkeit. Ich prüfe weiter.")
-    : "Ich suche Möglichkeiten …"}</p>${t.here ? "" : `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`}</section>`;
+    : "Ich suche Möglichkeiten …"}</p></section>`;
   const tr = t.transfers[k], lost = tr.status === "LOST", need = t.minT || 3, zbOn = t.ticket === "spar" && !t.zbLifted;
   const before = Date.now() < Date.parse(t.legs[0].dep.rt), curLeg = before ? t.legs[0] : t.legs[k];
   const curArr = Date.parse(t.plan.arr);
@@ -192,9 +194,9 @@ function planBCard(t) {
     const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && !a.watch.legs.some(l => l.delay >= 3)).length, open = openCmp === `calm:${t.id}`;
     const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Ich prüfe sie ab 3 Std. vor der Abfahrt live mit.`;
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
-      ${open ? `${zb}${curRow}${rows}` : ""}<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px"><button class="btn quiet small-btn" data-cmp="calm:${t.id}" style="flex:1">${open ? "Weniger" : "Möglichkeiten zeigen"}</button>${t.here ? "" : here}</div></section>`;
+      ${open ? `${zb}${curRow}${rows}` : ""}<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px"><button class="btn quiet small-btn" data-cmp="calm:${t.id}" style="flex:1">${open ? "Weniger" : "Möglichkeiten zeigen"}</button></div></section>`;
   }
-  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}${t.here ? "" : `<div style="margin-top:8px">${here}</div>`}</section>`;
+  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}</section>`;
 }
 
 // Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
@@ -235,11 +237,15 @@ function liveBadge(a) {
 
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
 let hereBusy = null;
+function searchChips(t, cur) {
+  const start = cleanStop(t.legs[0].dep.name);
+  const opts = [["start", `Ab ${start} · ${day(t.legs[0].dep.plan)}`], ["trip", `${PIN}Ab meinem Standort · zur Reisezeit`], ["now", `${PIN}Ab meinem Standort · jetzt`]];
+  return `<div class="chips search-chips">${opts.filter(([m]) => m !== cur).map(([m, l]) => `<button class="chip" data-here="${t.id}" data-mode="${m}">${l}</button>`).join("")}</div>`;
+}
 function hereCard(t) {
   if (t.phase === "done") return "";
-  if (hereBusy === t.id) return `<section class="card"><div class="k">Ab deinem Standort</div><div class="spinner"></div></section>`;
-  if (!t.here) return t.transfers.some(x => x.status !== "DONE" && (x.alt?.length || x.status === "RISK" || x.status === "LOST")) ? ""
-    : `<button class="btn sec" data-here="${t.id}">${PIN} Verbindungen ab meinem Standort</button>`;
+  if (hereBusy === t.id) return `<section class="card"><div class="k">Andere Verbindungen</div><div class="spinner"></div></section>`;
+  if (!t.here) return `<section class="card flat-s"><div class="k">Andere Verbindungen suchen</div>${searchChips(t, null)}</section>`;
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
@@ -251,11 +257,12 @@ function hereCard(t) {
       ${zb0 && a.zb ? `<div class="cmp-live"><span class="badge warn">anderer Fernzug</span></div>` : ""}
       ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-zb="${a.zb ? "1" : ""}" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}
     </div></div>`; }).join("");
-  const now = t.here.mode === "now";
-  return `<section class="card"><div class="k">Ab deinem Standort · ${now ? "ab jetzt" : `zur Reisezeit (${day(t.legs[0].dep.plan)})`}</div>
+  const mode = t.here.mode || "trip";
+  const title = mode === "start" ? `Ab ${esc(cleanStop(t.legs[0].dep.name))} · zur Reisezeit (${day(t.legs[0].dep.plan)})` : mode === "now" ? "Ab deinem Standort · ab jetzt" : `Ab deinem Standort · zur Reisezeit (${day(t.legs[0].dep.plan)})`;
+  return `<section class="card"><div class="k">${title}</div>
     ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}
-    <div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn quiet small-btn" data-here="${t.id}" data-mode="${now ? "now" : "trip"}" style="flex:1">Neu suchen</button>
-      <button class="btn quiet small-btn" data-here="${t.id}" data-mode="${now ? "trip" : "now"}" style="flex:1">${now ? "Zur Reisezeit suchen" : "Ab jetzt suchen"}</button></div></section>`;
+    <button class="btn quiet small-btn" data-here="${t.id}" data-mode="${mode}">Neu suchen</button>
+    <p class="small muted" style="margin:8px 0 0">Oder suchen:</p>${searchChips(t, mode)}</section>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
@@ -392,8 +399,13 @@ function bindCommon() {
     await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
   });
-  $app.querySelectorAll("[data-here]").forEach(b => b.onclick = () => {
+  $app.querySelectorAll("[data-here]").forEach(b => b.onclick = async () => {
     const id = b.dataset.here;
+    if (b.dataset.mode === "start") {     // ab dem Start der Reise – ohne Standort
+      hereBusy = id; render();
+      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { mode: "start" } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
+      hereBusy = null; return render();
+    }
     if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
     hereBusy = id; render();
     navigator.geolocation.getCurrentPosition(async pos => {

@@ -144,7 +144,7 @@ const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) |
 // mode "trip": im Zeitraum der Reise (ab ca. 75 Min. vor der geplanten Abfahrt) – "now": ab sofort
 export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   const last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
-  const from = mode === "now" ? now : Math.max(now, v.legs[0].dep.plan - 75 * MIN);
+  const from = mode === "now" ? now : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
   const to = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!to) return [];
   const [normal, roomy] = await Promise.all([

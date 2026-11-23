@@ -249,10 +249,18 @@ async function api(req, env, url) {
     const t = await ownTrip(env, dev, mh[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({}));
-    const lat = +b.lat, lon = +b.lon;
-    if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
-    const now = Date.now(), here = { lat: +lat.toFixed(4), lon: +lon.toFixed(4) };
-    const mode = b.mode === "now" ? "now" : "trip";
+    const now = Date.now(), mode = ["now", "start"].includes(b.mode) ? b.mode : "trip";
+    let here;
+    if (mode === "start") {
+      // Ohne Standort: ab dem Start der Reise, zur Reisezeit
+      const f = withCoords(t.legs[0].from);
+      if (f.lat == null && !f.eva) return fail(400, "Für den Start der Reise kenne ich keinen Ort.");
+      here = f.eva ? { eva: f.eva, lat: f.lat, lon: f.lon } : { lat: f.lat, lon: f.lon };
+    } else {
+      const lat = +b.lat, lon = +b.lon;
+      if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
+      here = { lat: +lat.toFixed(4), lon: +lon.toFixed(4) };
+    }
     const list = await planFromHere(env, t, evaluate(t, now), here, now, mode);
     t.state = { ...(t.state || {}), here: { at: now, mode, list } };
     await db.update(env, "rb_trips", t.id, { state: t.state });

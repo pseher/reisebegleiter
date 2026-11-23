@@ -205,3 +205,4 @@ main { overflow-wrap: break-word; }
 .cmp-tag { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .cmp-row.arr-ok .cmp-tag { color: var(--ok); } .cmp-row.arr-late .cmp-tag { color: var(--watch); } .cmp-row.arr-much .cmp-tag { color: var(--risk); }
 .cmp-act .btn { width: auto; padding-left: 22px; padding-right: 22px; }
+.search-chips .chip { display: inline-flex; align-items: center; }
