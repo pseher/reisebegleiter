@@ -9,15 +9,25 @@ const FV = new Set(["ICE", "IC", "EC", "ECE", "ICD", "RJ", "RJX", "NJ", "EN", "F
 
 export class BoardError extends Error {}
 
+// Drosselung: höchstens etwa 6 Anfragen pro Sekunde je Worker-Instanz (Limit der DB: 10/Sek. je Anwendung, geteilt mit PlanFlink)
+let nextSlot = 0;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function slot() { const now = Date.now(), t = Math.max(now, nextSlot); nextSlot = t + 170; if (t > now) await sleep(t - now); }
+
 async function post(env, kind, body) {
   if (env.MOCK === "1") return mockBoard(kind, body);
   if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new BoardError("DB-Schlüssel fehlen");
-  const r = await fetch(`${OB}/${kind === "arr" ? "arrivals" : "departures"}`, {
-    method: "POST", body: JSON.stringify(body),
-    headers: { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
-  }).catch(e => { throw new BoardError(`Netzwerk: ${e.message}`); });
-  if (!r.ok) throw new BoardError(`OpenBoards HTTP ${r.status}`);
-  return r.json();
+  for (let attempt = 0; ; attempt++) {
+    await slot();
+    const r = await fetch(`${OB}/${kind === "arr" ? "arrivals" : "departures"}`, {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
+    }).catch(e => { throw new BoardError(`Netzwerk: ${e.message}`); });
+    if (r.status === 429 && attempt < 3) { await sleep(1000 * (attempt + 1)); continue; }   // zu viele Anfragen: kurz warten, erneut
+    if (r.status === 429) throw new BoardError("Die DB-Schnittstelle ist gerade ausgelastet. Bitte in einer Minute noch einmal versuchen.");
+    if (!r.ok) throw new BoardError(`OpenBoards HTTP ${r.status}`);
+    return r.json();
+  }
 }
 
 // Rohabfrage (für die Fehlersuche)
