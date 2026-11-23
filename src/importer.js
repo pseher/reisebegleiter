@@ -84,11 +84,21 @@ export async function resolveExtracted(env, leg, cache) {
       || cs.find(c => Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(depIso)) <= 2 * 60e3 && c.legs.length === 1);
     if (hit) { arrIso = hit.legs[0].to.plan; toTrack ||= hit.legs[0].to.track; fromTrack ||= hit.legs[0].from.track; }
   }
+  // Immer noch unbekannt: aus der Entfernung schätzen (ca. 90 km/h Reisegeschwindigkeit, mind. 15 Min.) – wird später durch DB-Daten ersetzt
+  let estimated = false;
+  if (!arrIso && f && t) {
+    const km = Math.hypot((f.lat - t.lat) * 111, (f.lon - t.lon) * 68) * 1.25;
+    arrIso = new Date(Date.parse(depIso) + Math.max(15, Math.round(km / 90 * 60)) * 60e3).toISOString();
+    estimated = true;
+  }
   if (!arrIso) return null;
   const line = label.replace(/\s+/g, "");
-  return resolveLeg(env, { rail: rail && !!f && !!t, label, num, line, mode: rail ? "RAIL" : "BUS",
+  const r = await resolveLeg(env, { rail: rail && !!f && !!t, label, num, line, mode: rail ? "RAIL" : "BUS",
     from: { name: f?.name || leg.from, eva: f?.eva, plan: depIso, track: fromTrack },
     to: { name: t?.name || leg.to, eva: t?.eva, plan: arrIso, track: toTrack } }, cache);
+  // Hat OpenBoards die echte Ankunft gefunden, ist sie nicht mehr geschätzt
+  if (estimated && r && r.to.plan === arrIso) r.to.estimated = true;
+  return r;
 }
 
 export async function importTrip(env, { text = "", files = [] }) {
@@ -105,13 +115,18 @@ export async function importTrip(env, { text = "", files = [] }) {
     data = await ask(env, MODEL(env), content).catch(() => ({ trips: [] }));
     if (!data.trips?.some(t => t.legs?.length)) data = await ask(env, MODEL_STRONG(env), content);
   }
-  const cache = new Map(), trips = [];
+  const cache = new Map(), trips = [], skipped = [];
   for (const t of (data.trips || []).slice(0, 3)) {
     const legs = [];
-    for (const l of (t.legs || []).slice(0, 8)) { const r = await resolveExtracted(env, l, cache).catch(e => { console.log("Import-Teilstrecke:", e.message); return null; }); if (r) legs.push(r); }
-    if (legs.length) trips.push({ label: t.label || "", legs });
+    for (const l of (t.legs || []).slice(0, 8)) {
+      const r = await resolveExtracted(env, l, cache).catch(e => { console.log("Import-Teilstrecke:", e.message); return null; });
+      if (r) legs.push(r); else skipped.push(`${l.train || "?"} ${l.from || ""} → ${l.to || ""}`.trim());
+    }
+    if (legs.length) trips.push({ label: t.label || "", legs, estimated: legs.some(x => x.to.estimated) });
   }
-  return { trips, ticket: ["spar", "flex", "dticket", "bc100"].includes(data.ticket) ? data.ticket : null, note: data.note || "" };
+  const note = [skipped.length ? `Nicht übernommen: ${skipped.join(", ")} (Bahnhof oder Zeit nicht erkannt).` : "",
+    trips.some(t => t.estimated) ? "Ankunftszeiten mit ≈ sind geschätzt und werden vor der Fahrt mit den DB-Daten ersetzt." : ""].filter(Boolean).join(" ");
+  return { trips, ticket: ["spar", "flex", "dticket", "bc100"].includes(data.ticket) ? data.ticket : null, note };
 }
 
 // Testdaten: Berlin Hbf → Leipzig → München mit den Zügen der nächsten Stunde

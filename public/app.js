@@ -332,7 +332,7 @@ function renderWizard() {
   }
 
   else if (W.step === "pickTrip") {
-    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
+    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
         <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>
       <button class="btn" id="allTrips">Alle ${W.imported.length} anlegen</button>${back}`;
@@ -382,7 +382,7 @@ function renderWizard() {
   else if (W.step === "leg") {
     $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
-        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
+        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
         ${l.jid ? "" : `<div class="small muted">${l.mode && !/RAIL|SUBURBAN|LONG/.test(l.mode) ? "Bus/U-Bahn/Tram: " : ""}ohne Echtzeit, nur Fahrplan</div>`}</li>`).join("")}</ol></div>
       <button class="btn" id="done">Fertig – weiter</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
@@ -454,7 +454,7 @@ function renderWizard() {
   }
 
   else if (W.step === "pickTrip") {
-    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
+    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
         <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>
       <button class="btn" id="allTrips">Alle ${W.imported.length} anlegen</button>${back}`;

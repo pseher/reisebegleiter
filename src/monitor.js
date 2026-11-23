@@ -140,7 +140,7 @@ export async function bindLate(env, trip, now, cache) {
     const num = (l.label.match(/(\d{2,6})\s*$/) || [])[1] || "";
     const r = await resolveLeg(env, { rail: true, label: l.label, num, line: l.label.replace(/\s+/g, ""), mode: l.mode || "RAIL",
       from: { ...l.from, track: l.from.platform }, to: { ...l.to, track: l.to.platform } }, cache).catch(() => null);
-    if (r?.jid) { trip.legs[i] = { ...l, jid: r.jid, label: r.label, from: { ...l.from, plan: r.from.plan, platform: r.from.platform }, to: { ...l.to, plan: r.to.plan, platform: r.to.platform } }; changed = true; }
+    if (r?.jid) { trip.legs[i] = { ...l, jid: r.jid, label: r.label, from: { ...l.from, plan: r.from.plan, platform: r.from.platform }, to: { ...l.to, plan: r.to.plan, platform: r.to.platform, estimated: false } }; changed = true; }
   }
   if (changed) trip._legsDirty = true;
   return changed;
