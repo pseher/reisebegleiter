@@ -318,8 +318,8 @@ async function api(req, env, url) {
     let here;
     if (mode === "start" || mode === "next") {
       // Ohne Standort: ab dem Start der Reise (zur Reisezeit) bzw. unterwegs ab dem nächsten Halt (zur Ankunftszeit dort)
-      const v0 = evaluate(t, now), ci = Math.max(0, v0.current);
-      const f = withCoords(mode === "next" ? t.legs[ci].to : t.legs[0].from);
+      const v0 = evaluate(t, now), ci = Math.max(0, v0.current), waiting = now < v0.legs[ci].dep.rt;   // wartest du gerade am Umstieg?
+      const f = withCoords(mode === "next" ? (waiting ? t.legs[ci].from : t.legs[ci].to) : t.legs[0].from);
       if (f.lat == null && !f.eva) return fail(400, "Für den Start der Reise kenne ich keinen Ort.");
       here = f.eva ? { eva: f.eva, lat: f.lat, lon: f.lon } : { lat: f.lat, lon: f.lon };
     } else {

@@ -167,20 +167,28 @@ const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) |
 // mode "trip": im Zeitraum der Reise (ab ca. 75 Min. vor der geplanten Abfahrt) – "now": ab sofort
 export async function planFromHere(env, trip, v, here, now, mode = "trip", missedIdx = 0) {
   const last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
-  const ci = Math.max(0, v.current);
-  const from = mode === "now" || mode === "missed" ? now : mode === "next" ? Math.max(now, v.legs[ci].arr.rt) : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
+  const ci = Math.max(0, v.current), waiting = mode === "next" && now < v.legs[ci].dep.rt;   // am Umstieg wartend: ab diesem Bahnhof, sofort
+  const from = mode === "now" || mode === "missed" || waiting ? now : mode === "next" ? Math.max(now, v.legs[ci].arr.rt) : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
   const to = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!to) return [];
-  const [normal, roomy] = await Promise.all([
+  const [normal, roomy, stayList] = await Promise.all([
     connections(env, here, to, from, own).catch(() => []),
     connections(env, here, to, from, Math.max(own, 5) + 7).catch(() => []),
+    // unterwegs: fährt dein Zug selbst weiter? (Suche ab seiner geplanten Ankunft, sonst wäre er schon „weg“)
+    mode === "next" && !waiting ? connections(env, here, to, v.legs[ci].arr.plan - MIN, 0).catch(() => []) : [],
   ]);
+  const curLbl = trip.legs[ci]?.label.replace(/\s/g, "");
+  const stays = stayList.filter(c => c.legs[0]?.label.replace(/\s/g, "") === curLbl).map(c => {
+    // Ankunft mindestens mit der aktuellen Verspätung deines Zugs
+    const d = Math.max(0, v.legs[ci].arr.delay || 0), last = c.legs[c.legs.length - 1];
+    return { ...c, legs: c.legs.map((l, j) => (j === c.legs.length - 1 ? { ...l, to: { ...l.to, rt: new Date(Math.max(rtOf(l.to), Date.parse(l.to.plan) + d * MIN)).toISOString() } } : l)) };
+  });
   // „Wie geplant“ nur, wenn es genau deine Bahn-Züge sind (Busse/U-Bahn davor dürfen abweichen)
   const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => l.label.replace(/\s/g, "")).join("|");
-  const rest = mode === "next" ? trip.legs.slice(ci + 1) : mode === "missed" ? trip.legs.slice(missedIdx) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
+  const rest = mode === "next" ? trip.legs.slice(waiting ? ci : ci + 1) : mode === "missed" ? trip.legs.slice(missedIdx) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
   const planSig = sig(rest);
   const seen = new Set(), all = [];
-  for (const c of [...normal, ...roomy]) {
+  for (const c of [...stays, ...normal, ...roomy]) {
     const key = c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
     if (seen.has(key) || c.legs.some(l => l.cancelled)) continue;
     // nach „verpasst“: den verpassten Zug selbst nicht wieder anbieten
@@ -192,7 +200,7 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip", misse
   const out = all.sort((a, b) => rtOf(a.legs[a.legs.length - 1].to) - rtOf(b.legs[b.legs.length - 1].to)).slice(0, 3).map(c => ({
     kind: mode === "missed" ? "here" : sig(c.legs) === planSig ? "asplanned" : !changesFV(rest, c.legs) && rest.some(isFVLeg) ? "samefv" : "here",
     // unterwegs: ab dem nächsten Halt ersetzen; fährt der eigene Zug weiter, ist es „Sitzen bleiben“
-    from: mode === "next" ? ci : mode === "missed" && missedIdx > 0 ? missedIdx - 1 : "start", stay: mode === "next" && c.legs[0]?.label.replace(/\s/g, "") === trip.legs[ci].label.replace(/\s/g, ""), at: mode === "next" ? trip.legs[ci].to.name : "deinem Standort",
+    from: mode === "next" ? (waiting ? (ci > 0 ? ci - 1 : "start") : ci) : mode === "missed" && missedIdx > 0 ? missedIdx - 1 : "start", stay: mode === "next" && !waiting && c.legs[0]?.label.replace(/\s/g, "") === trip.legs[ci].label.replace(/\s/g, ""), at: mode === "next" ? trip.legs[ci].to.name : "deinem Standort",
     label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers, walkStart: c.walkStart || 0,
     dep: new Date(rtOf(c.legs[0].from)).toISOString(), depPlan: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", firstStop: c.legs[0].from.name,
     arr: new Date(rtOf(c.legs[c.legs.length - 1].to)).toISOString(), arrPlan: c.legs[c.legs.length - 1].to.plan, minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null,
@@ -318,7 +326,10 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
     const cur = trip.legs[k], b = byEva(a.cut.eva) || {};
     let head = { ...cur, must: false, to: { eva: a.cut.eva, name: a.cut.name, plan: a.cut.plan, platform: a.cut.platform || "", lat: b.lat ?? null, lon: b.lon ?? null } };
     if (fresh[0] && fresh[0].label.replace(/\s/g, "") === cur.label.replace(/\s/g, "")) head = { ...head, to: fresh.shift().to };   // erst noch im selben Zug weiter
-    const o = { ...((trip.obs || [])[k] || {}) }; delete o.arr;
+    const o = { ...((trip.obs || [])[k] || {}) };
+    const dl = o.arr?.rt ? Date.parse(o.arr.rt) - Date.parse(cur.to.plan) : 0;   // Verspätung mitnehmen, bis es eine neue Prognose gibt
+    if (!o.dep?.rt && dl > 0) o.dep = { rt: new Date(Date.parse(cur.from.plan) + dl).toISOString(), live: false, t: o.arr.t, est: true };
+    delete o.arr;
     trip.legs = [...trip.legs.slice(0, k), head, ...fresh];
     trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.map(() => ({}))];
     keep = k;

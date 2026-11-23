@@ -64,7 +64,7 @@ test("Gefährdet-Meldung: kurz, mit Vorschlag und Minutenunterschied", () => {
   for (const m of [40, 41]) { const n = T0 + m * MIN, d = diff(t, evaluate(t, n), st, n); st = { ...d.state, alt: { 0: alt } }; msgs.push(...d.msgs); }
   const w = msgs.find(m => /gefährdet/.test(m.title));
   assert.ok(w, JSON.stringify(msgs));
-  assert.match(w.body, /Sitzen bleiben/); assert.match(w.body, /4 Min\. früher/); assert.match(w.body, /Sparpreis/);
+  assert.match(w.body, /sitzen bleiben/i); assert.match(w.body, /4 Min\. früher/); assert.match(w.body, /Sparpreis/);
 });
 
 // Testdaten: ICE 5xx fährt Berlin → Leipzig → … → München, ICE 16xx ab Leipzig

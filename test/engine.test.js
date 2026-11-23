@@ -136,7 +136,7 @@ test("3 Min. Verspätung, 14 Min. Umstieg, ich brauche 5: kein Alarm", () => {
 test("Pflichtzug: Anschluss weg → eigene Überschrift und Meldung", () => {
   const t = trip(arrDelay(25), "flex"); t.legs[1].must = true;
   const now = T0 + 60 * 60e3, v = evaluate(t, now);
-  assert.equal(v.transfers[0].toMust, true); assert.match(v.title, /Pflichtzug ICE 1601/);
+  assert.equal(v.transfers[0].toMust, true); assert.match(v.title, /Fester Zug ICE 1601/);
   const r1 = diff(t, v, {}, now), r2 = diff(t, evaluate(t, now + 60e3), r1.state, now + 60e3);
-  assert.ok([...r1.msgs, ...r2.msgs].some(m => /Pflichtzug ICE 1601 nicht mehr erreichbar/.test(m.title)));
+  assert.ok([...r1.msgs, ...r2.msgs].some(m => /Fester Zug ICE 1601 nicht mehr erreichbar/.test(m.title)));
 });
