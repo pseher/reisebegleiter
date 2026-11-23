@@ -109,3 +109,11 @@ test("vom Fahrplan geplanter 2-Min.-Umstieg ist knapp, nicht gefährdet – erst
   const late = [{ dep: { rt: iso(2), t: 1, live: true }, arr: { rt: iso(7), t: 1, live: true } }, {}];
   assert.equal(evaluate({ id: "w", ticket: "flex", legs, obs: late }, T0 - 10 * 60e3).transfers[0].status, "RISK");
 });
+
+test("eigene Mindest-Umstiegszeit: 9 Min. geplant, ich brauche 10 → zu knapp", () => {
+  const t = trip([], "flex"); t.legs = t.legs.map(l => ({ ...l, minT: 10 }));
+  const v = evaluate({ ...t, legs: t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: iso(79) } } : l) }, T0 + 60 * 60e3);
+  assert.equal(v.transfers[0].gap, 9); assert.equal(v.transfers[0].need, 10); assert.equal(v.transfers[0].status, "RISK");
+  const ok = evaluate(t, T0 + 60 * 60e3);   // 17 Min. geplant
+  assert.equal(ok.transfers[0].status, "OK");
+});

@@ -24,6 +24,12 @@ async function api(path, { method = "GET", body } = {}, retry = true) {
   return data;
 }
 
+// Eigene Mindest-Umstiegszeit (Minuten, 0 = wie vom Fahrplan geplant)
+const MINT_OPTS = [[0, "wie geplant"], [5, "5 Min."], [8, "8 Min."], [10, "10 Min."], [15, "15 Min."]];
+let MINT = 5; try { const v = localStorage.getItem("rb_mint"); if (v != null) MINT = +v; } catch {}
+const setMinT = m => { MINT = m; try { localStorage.setItem("rb_mint", String(m)); } catch {} };
+const minTChips = (attr = "data-mt") => `<div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" ${attr}="${m}" aria-pressed="${MINT === m}">${l}</button>`).join("")}</div>`;
+
 // ---------- Zustand ----------
 let trips = [], loadedAt = 0, view = "home", W = null, timer = null;
 const go = v => { view = v; render(); scrollTo(0, 0); };
@@ -93,14 +99,16 @@ function tripCard(t) {
       <ol class="tl">${items.join("")}</ol>
     </div>
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · noch keine Prognose der DB, Fahrplanzeiten" : ""} · Angaben ohne Gewähr</p>
+    <p class="foot">Meine Umstiegszeit: ${t.minT ? `mind. ${t.minT} Min.` : "wie geplant"} · <a href="#" data-mtrip="${t.id}">ändern</a></p>
     <button class="btn quiet" data-del="${t.id}">Reise beenden</button>`;
 }
 
 function transferText(tr) {
   const pl = tr.arrPl || tr.depPl ? ` · Gleis ${esc(tr.arrPl || "?")} → ${esc(tr.depPl || "?")}` : "";
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus.</b>` : `<b>Nicht zu schaffen:</b> ${tr.gap} Min.${pl}`;
+  if (tr.status === "RISK" && tr.own && tr.gap >= 0 && tr.gap < tr.own) return `<b>Zu knapp für dich:</b> ${tr.gap} Min., du brauchst ${tr.own}${pl}`;
   if (tr.status === "RISK") return tr.gap < 0 ? `<b>Gefährdet:</b> Ankunft ${-tr.gap} Min. nach der Abfahrt${pl}` : `<b>Gefährdet:</b> ${tr.gap} Min. zum Umsteigen${pl}`;
-  if (tr.status === "WATCH") return `<b>Knapp:</b> ${tr.gap} Min. zum Umsteigen${pl}`;
+  if (tr.status === "WATCH") return `<b>Knapp:</b> ${tr.gap} Min. zum Umsteigen${tr.own && tr.gap < tr.own + 4 ? ` (du brauchst ${tr.own})` : ""}${pl}`;
   return `${tr.gap} Min. zum Umsteigen${pl}`;
 }
 
@@ -131,6 +139,14 @@ function bindHome() {
   $app.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     if (!confirm("Reise beenden und nicht mehr überwachen?")) return;
     await api(`/api/trips/${b.dataset.del}`, { method: "DELETE" }).catch(e => alert(e.message));
+    await loadTrips().catch(() => {}); render();
+  });
+  $app.querySelectorAll("[data-mtrip]").forEach(a => a.onclick = async e => {
+    e.preventDefault();
+    const cur = trips.find(t => t.id === a.dataset.mtrip)?.minT ?? MINT;
+    const v = prompt(`Wie viele Minuten brauchst du mindestens zum Umsteigen? (0 = wie geplant)`, String(cur));
+    if (v == null || !/^\d{1,2}$/.test(v.trim())) return;
+    setMinT(+v); await api(`/api/trips/${a.dataset.mtrip}`, { method: "PATCH", body: { minT: +v } }).catch(err => alert(err.message));
     await loadTrips().catch(() => {}); render();
   });
   const p = document.getElementById("pushOn");
@@ -174,6 +190,7 @@ function renderWizard() {
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
       <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
+      <p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
       <button class="btn quiet" id="byTrain">Ich sitze schon im Zug / Zug für Zug anlegen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
@@ -183,16 +200,17 @@ function renderWizard() {
     if (!W.rFrom) document.getElementById("rf")?.focus(); else if (!W.rTo) document.getElementById("rt")?.focus();
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
+    $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
     document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
   }
 
   else if (W.step === "conns") {
-    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
+    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${MINT ? `Umstiege mind. ${MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
-    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&min=${MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
@@ -270,6 +288,7 @@ function renderWizard() {
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
       <input type="datetime-local" id="whenIn" value="${localInput(W.when)}">
+      <p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
       <button class="btn quiet" id="byTrain">Ich sitze schon im Zug / Zug für Zug anlegen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
@@ -279,16 +298,17 @@ function renderWizard() {
     if (!W.rFrom) document.getElementById("rf")?.focus(); else if (!W.rTo) document.getElementById("rt")?.focus();
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     $app.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { W.when = Date.now() + +b.dataset.w * MIN; render(); });
+    $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
     document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
   }
 
   else if (W.step === "conns") {
-    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
+    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${MINT ? `Umstiege mind. ${MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}<div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">Spätere Verbindungen</button>` : ""}${back}`;
-    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+    if (!W.conns) api(`/api/connections?from=${W.rFrom.eva}&to=${W.rTo.eva}&min=${MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
@@ -346,7 +366,7 @@ async function resolveLeg(stop, onRoute = true) {
 async function saveTrip(ticket) {
   W.busy = "Reise wird angelegt …"; render();
   try {
-    await api("/api/trips", { method: "POST", body: { legs: W.legs, ticket } });
+    await api("/api/trips", { method: "POST", body: { legs: W.legs.map(l => ({ ...l, minT: MINT })), ticket } });
     W = null; await loadTrips(); go("home");
   } catch (e) { W.busy = null; W.error = e.message; render(); }
 }

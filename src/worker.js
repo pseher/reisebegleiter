@@ -28,7 +28,7 @@ function view(trip, now = Date.now()) {
   const v = evaluate(trip, now), st = trip.state || {};
   const nextK = v.transfers.findIndex(t => t.status === "RISK" || t.status === "LOST");
   if (nextK >= 0 && st.alt?.[nextK]?.length) v.sub = v.sub.replace(" Ich behalte das im Blick.", "") + altText(st.alt[nextK]);
-  return { id: trip.id, ticket: trip.ticket, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  return { id: trip.id, ticket: trip.ticket, minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [] })) };
@@ -52,7 +52,7 @@ function validLeg(l) {
   const ok = s => s && (l.jid ? /^\d{6,9}$/.test(String(s.eva)) : true) && typeof s.name === "string" && !Number.isNaN(Date.parse(s.plan));
   return l && typeof l.jid === "string" && typeof l.label === "string" && ok(l.from) && ok(l.to) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
 }
-const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)),
+const cleanLeg = l => ({ jid: l.jid, label: l.label.slice(0, 40), mode: String(l.mode || "").slice(0, 20), walk: Math.min(60, Math.max(0, +l.walk || 0)), minT: Math.min(30, Math.max(0, +l.minT || 0)),
   from: { eva: String(l.from.eva), name: l.from.name.slice(0, 80), plan: l.from.plan, platform: String(l.from.platform || "").slice(0, 8) },
   to: { eva: String(l.to.eva), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8) } });
 
@@ -134,7 +134,7 @@ async function api(req, env, url) {
     const from = url.searchParams.get("from"), to = url.searchParams.get("to");
     if (!/^\d{6,9}$/.test(from || "") || !/^\d{6,9}$/.test(to || "")) return fail(400, "Start oder Ziel fehlt");
     const t = Date.parse((url.searchParams.get("time") || "").replace(" ", "+")) || Date.now();
-    return json(await connections(env, from, to, t));
+    return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0));
   }
   // Gewählte Verbindung → Teilstrecken mit DB-Fahrtkennungen
   if (p === "/api/resolve" && method === "POST") {
@@ -191,6 +191,7 @@ async function api(req, env, url) {
     if (method === "PATCH") {
       const b = await req.json().catch(() => ({}));
       if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) await db.update(env, "rb_trips", t.id, { ticket: b.ticket });
+      if (b.minT != null) { const m = Math.min(30, Math.max(0, +b.minT || 0)); await db.update(env, "rb_trips", t.id, { legs: t.legs.map(l => ({ ...l, minT: m })) }); }
       return json({ ok: true });
     }
   }

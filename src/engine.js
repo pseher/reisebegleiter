@@ -52,7 +52,9 @@ export function evaluate(trip, now = Date.now()) {
     const walk = trip.legs[i].walk || 0;                     // Gehzeit aus der Verbindungssuche, falls bekannt
     const gap = Math.round((d.rt - a.rt) / MIN), planGap = Math.round((d.plan - a.plan) / MIN);
     // Vom Fahrplan so geplante Umstiege gelten als machbar: höchstens die geplante Zeit verlangen (mind. 2 Min.)
-    const need = Math.max(2, Math.min(walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform), planGap));
+    // Eigene Mindest-Umstiegszeit des Reisenden (Einstellung) gilt immer
+    const own = +trip.legs[i].minT || 0;
+    const need = Math.max(2, own, Math.min(walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform), planGap));
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until), spare = gap - need;
     let status, reason = "";
     if (d.rt < now - MIN && !d.cancelled && !legs[i].arr.cancelled) status = "DONE";
@@ -61,7 +63,7 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 4) status = "WATCH";
     else status = "OK";
-    transfers.push({ i, at: a.name, eva: a.eva, gap, need, spare, growth, until, status, reason,
+    transfers.push({ i, at: a.name, eva: a.eva, gap, need, own, spare, growth, until, status, reason,
       fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
   }
   const phase = now < first.dep.rt ? "before" : now > last.arr.rt + 2 * MIN ? "done" : "enroute";
