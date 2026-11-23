@@ -334,8 +334,10 @@ function renderWizard() {
   else if (W.step === "pickTrip") {
     $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
       <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
-        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>${back}`;
-    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
+        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>
+      <button class="btn" id="allTrips">Alle ${W.imported.length} anlegen</button>${back}`;
+    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.multi = null; W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
+    document.getElementById("allTrips").onclick = () => { W.multi = W.imported.map(t => t.legs); W.legs = W.multi[0]; W.step = "ticket"; render(); };
   }
 
   else if (W.step === "station") {
@@ -454,15 +456,17 @@ function renderWizard() {
   else if (W.step === "pickTrip") {
     $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
       <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
-        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>${back}`;
-    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
+        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>
+      <button class="btn" id="allTrips">Alle ${W.imported.length} anlegen</button>${back}`;
+    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.multi = null; W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
+    document.getElementById("allTrips").onclick = () => { W.multi = W.imported.map(t => t.legs); W.legs = W.multi[0]; W.step = "ticket"; render(); };
   }
 
   else if (W.step === "station") { W = null; go("home"); }
     else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
-    else if (W.step === "ticket") W.step = "leg";
+    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : "leg";
     else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
     else if (W.step === "leg" && W.mode === "import") { W.legs = []; W.step = "route"; }
     else if (W.step === "pickTrip") { W.step = "route"; }
@@ -541,7 +545,7 @@ async function resolveLeg(stop, onRoute = true) {
 async function saveTrip(ticket) {
   W.busy = "Reise wird angelegt …"; render();
   try {
-    await api("/api/trips", { method: "POST", body: { legs: W.legs.map(l => ({ ...l, minT: MINT })), ticket } });
+    for (const legs of W.multi || [W.legs]) await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket } });
     W = null; await loadTrips(); openId = trips[0]?.id || null; go("home");
   } catch (e) { W.busy = null; W.error = e.message; render(); }
 }

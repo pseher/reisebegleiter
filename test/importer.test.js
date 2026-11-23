@@ -15,3 +15,14 @@ test("Import (Testdaten): zwei Teilstrecken mit Fahrtkennung, Sparpreis erkannt"
   assert.match(a.jid, /^mock-5/); assert.match(b.jid, /^mock-16/);
   assert.equal(a.to.eva, "8010205"); assert.equal(b.to.name, "München Hbf");
 });
+
+test("Ticket ohne Ankunftszeit: Ankunft wird über den Verbindungsplaner ergänzt", async () => {
+  const { resolveExtracted } = await import("../src/importer.js");
+  const d = new Date(Date.now() + 3600e3), hu = d.getUTCHours();
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(d);
+  const h = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", hourCycle: "h23" }).format(d);
+  const leg = await resolveExtracted({ MOCK: "1" }, { train: `ICE ${500 + hu}`, from: "Berlin Hbf", dep_date: date, dep_time: `${h}:05`, to: "Leipzig Hbf" }, new Map());
+  assert.ok(leg, "Teilstrecke trotz fehlender Ankunft");
+  assert.equal(Date.parse(leg.to.plan) - Date.parse(leg.from.plan), 65 * 60e3);
+  assert.match(leg.jid, /^mock-5/);
+});

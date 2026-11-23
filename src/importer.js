@@ -1,7 +1,7 @@
 // Reise einlesen: Screenshot, PDF (Ticket, Buchungsbestätigung) oder Text/Link → KI liest Züge, Bahnhöfe, Zeiten
 // → jede Bahn-Teilstrecke wird wie bei der Suche der echten DB-Fahrt zugeordnet.
 import { search } from "./stations.js";
-import { resolveLeg } from "./routing.js";
+import { resolveLeg, connections } from "./routing.js";
 
 const MODEL = env => env.IMPORT_MODEL || "claude-haiku-5-5";
 const MODEL_STRONG = env => env.IMPORT_MODEL_STRONG || "claude-sonnet-5-5";
@@ -24,9 +24,9 @@ const TOOL = {
             from_platform: { type: "string" },
             to: { type: "string", description: "Ankunftsbahnhof" },
             arr_date: { type: "string", description: "YYYY-MM-DD" },
-            arr_time: { type: "string", description: "HH:MM (Planzeit)" },
+            arr_time: { type: "string", description: "HH:MM (Planzeit). Leer lassen, wenn nicht angegeben (z. B. auf Tickets)." },
             to_platform: { type: "string" },
-          }, required: ["train", "from", "dep_date", "dep_time", "to", "arr_time"] } },
+          }, required: ["train", "from", "dep_date", "dep_time", "to"] } },
         },
         required: ["legs"],
       } },
@@ -39,7 +39,7 @@ const TOOL = {
 
 const SYSTEM = `Du liest Bahnreisen aus Screenshots, Tickets, Buchungsbestätigungen oder geteilten Texten der Deutschen Bahn.
 Gib nur die tatsächliche Verbindung zurück: jede Teilstrecke mit Zug, Abfahrt, Ankunft und Gleis, so wie gedruckt.
-Fußwege weglassen. Fehlt das Jahr, nimm das nächste passende Datum ab heute. Erfinde nichts: lieber eine Teilstrecke weglassen und im Feld note erklären.
+Fußwege weglassen. Steht keine Ankunftszeit da (typisch bei Tickets), lass arr_time leer – nicht raten. Fehlt das Jahr, nimm das nächste passende Datum ab heute. Erfinde nichts: lieber eine Teilstrecke weglassen und im Feld note erklären.
 Heute ist {TODAY} (Europe/Berlin).`;
 
 async function ask(env, model, content) {
@@ -72,14 +72,23 @@ export async function resolveExtracted(env, leg, cache) {
   const depIso = berlinIso(leg.dep_date, leg.dep_time);
   let arrIso = berlinIso(leg.arr_date || leg.dep_date, leg.arr_time);
   if (depIso && arrIso && Date.parse(arrIso) < Date.parse(depIso)) arrIso = new Date(Date.parse(arrIso) + 864e5).toISOString();   // über Mitternacht
-  if (!depIso || !arrIso) return null;
+  if (!depIso) return null;
   const f = station(leg.from), t = station(leg.to), label = String(leg.train || "").replace(/\s+/g, " ").trim();
   const rail = !NON_RAIL.test(label);
   const num = (label.match(/(\d{2,6})\s*$/) || [])[1] || "";
+  // Keine Ankunftszeit (Ticket)? Beim Verbindungsplaner nachsehen: gleicher Zug, gleiche Abfahrt
+  let toTrack = leg.to_platform || "", fromTrack = leg.from_platform || "";
+  if (!arrIso && f && t) {
+    const cs = await connections(env, f.eva, t.eva, Date.parse(depIso) - 60e3).catch(() => []);
+    const hit = cs.find(c => c.legs.length === 1 && Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(depIso)) <= 2 * 60e3 && (!num || String(c.legs[0].num).replace(/\D/g, "") === num || c.legs[0].label.endsWith(num)))
+      || cs.find(c => Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(depIso)) <= 2 * 60e3 && c.legs.length === 1);
+    if (hit) { arrIso = hit.legs[0].to.plan; toTrack ||= hit.legs[0].to.track; fromTrack ||= hit.legs[0].from.track; }
+  }
+  if (!arrIso) return null;
   const line = label.replace(/\s+/g, "");
   return resolveLeg(env, { rail: rail && !!f && !!t, label, num, line, mode: rail ? "RAIL" : "BUS",
-    from: { name: f?.name || leg.from, eva: f?.eva, plan: depIso, track: leg.from_platform || "" },
-    to: { name: t?.name || leg.to, eva: t?.eva, plan: arrIso, track: leg.to_platform || "" } }, cache);
+    from: { name: f?.name || leg.from, eva: f?.eva, plan: depIso, track: fromTrack },
+    to: { name: t?.name || leg.to, eva: t?.eva, plan: arrIso, track: toTrack } }, cache);
 }
 
 export async function importTrip(env, { text = "", files = [] }) {

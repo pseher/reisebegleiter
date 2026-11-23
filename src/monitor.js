@@ -1,7 +1,7 @@
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
 import { evaluate, diff, transferMinutes } from "./engine.js";
 import { findJourney } from "./openboards.js";
-import { connections, resolveConnection } from "./routing.js";
+import { connections, resolveConnection, resolveLeg } from "./routing.js";
 import { search as searchStationsSync } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
@@ -125,18 +125,38 @@ export async function assess(env, trip, now, cache) {
   return { v, msgs };
 }
 
-const saveTrip = (env, t) => db.update(env, "rb_trips", t.id, { obs: t.obs, state: t.state, active: t.active, ends_at: t.ends_at, updated_at: new Date().toISOString() });
+const saveTrip = (env, t) => db.update(env, "rb_trips", t.id, { obs: t.obs, state: t.state, active: t.active, ends_at: t.ends_at, ...(t._legsDirty ? { legs: t.legs } : {}), updated_at: new Date().toISOString() });
+
+// Bahn-Teilstrecken ohne DB-Fahrtkennung (z. B. aus einem Ticket für in ein paar Tagen) nachträglich verknüpfen,
+// sobald die Abfahrt weniger als 6 Std. entfernt ist – höchstens alle 30 Min. je Teilstrecke
+const RAILY = /^(ICE|IC|EC|ECE|RJX?|NJ|EN|FLX|TGV|IRE|RE|RB|S|MEX|FEX|HBX|ERB|NWB|ME|BRB|ALX|ODEG|STB)\b/i;
+export async function bindLate(env, trip, now, cache) {
+  let changed = false;
+  for (let i = 0; i < trip.legs.length; i++) {
+    const l = trip.legs[i], dep = Date.parse(l.from.plan), key = `bind${i}`;
+    if (l.jid || !l.from.eva || !l.to.eva || !RAILY.test(l.label) || dep - now > 6 * 3600e3 || dep < now - 10 * MIN) continue;
+    if (now - (trip.state?.[key] || 0) < 30 * MIN) continue;
+    trip.state = { ...(trip.state || {}), [key]: now };
+    const num = (l.label.match(/(\d{2,6})\s*$/) || [])[1] || "";
+    const r = await resolveLeg(env, { rail: true, label: l.label, num, line: l.label.replace(/\s+/g, ""), mode: l.mode || "RAIL",
+      from: { ...l.from, track: l.from.platform }, to: { ...l.to, track: l.to.platform } }, cache).catch(() => null);
+    if (r?.jid) { trip.legs[i] = { ...l, jid: r.jid, label: r.label, from: { ...l.from, plan: r.from.plan, platform: r.from.platform }, to: { ...l.to, plan: r.to.plan, platform: r.to.platform } }; changed = true; }
+  }
+  if (changed) trip._legsDirty = true;
+  return changed;
+}
 
 // Cron: jede Minute
 export async function runMonitor(env, now = Date.now()) {
   const trips = await db.activeTrips(env), cache = new Map();
+  for (const t of trips) await bindLate(env, t, now, cache).catch(() => {});
   const checks = trips.flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
   await observe(env, checks, now, cache);
   const out = new Map();
   for (const t of trips) {
     const before = JSON.stringify(t.state || {});
     const { msgs } = await assess(env, t, now, cache);
-    if (t._dirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
+    if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     if (msgs.length) out.set(t.device_id, [...(out.get(t.device_id) || []), ...msgs.slice(0, 4)]);
   }
   let sent = 0;
