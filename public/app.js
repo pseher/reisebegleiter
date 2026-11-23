@@ -128,7 +128,6 @@ function nextCard(n, t) {
   if (n.kind === "missed") return `<section class="card next"><div class="k">Zug verpasst</div>
       <div><b>${esc(n.label)}</b> ab ${esc(cleanStop(n.station))} hast du nicht bekommen.</div>
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
-  // „Zug verpasst?“ – vor der Abfahrt und bis 15 Min. danach (falls man doch nicht eingestiegen ist)
   // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
   const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
   const word = leg && MODE[leg.mode] ? ({ Bus: "Bus", Tram: "Tram", "U-Bahn": "U-Bahn", Fähre: "Fähre" }[MODE[leg.mode][1]] || "Zug") : "Zug";
@@ -847,7 +846,16 @@ async function enablePush() {
 }
 
 // ---------- Start ----------
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+// Neue Version automatisch laden: beim Zurückkehren in die App nach Updates schauen; übernimmt der neue Service Worker, Seite neu laden
+if ("serviceWorker" in navigator) {
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("/sw.js").then(reg => {
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+    setInterval(() => reg.update().catch(() => {}), 30 * MIN);
+  }).catch(() => {});
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!had || reloading || W?.busy) return; reloading = true; location.reload(); });
+}
 document.addEventListener("click", e => { if (e.target.closest('[data-go="add"]')) { startWizard(); } }, true);
 $app.innerHTML = `<div class="spinner"></div>`;
 async function takeShared() {
