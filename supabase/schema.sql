@@ -6,6 +6,7 @@ create table if not exists public.rb_devices (
   id          uuid primary key default gen_random_uuid(),
   token_hash  text not null,                       -- SHA-256 des Geräte-Schlüssels, der Schlüssel selbst bleibt auf dem Gerät
   push        jsonb,                               -- Web-Push-Abo dieses Geräts
+  usage       jsonb,                               -- Tageszähler für den KI-Import
   created_at  timestamptz not null default now(),
   last_seen   timestamptz not null default now()
 );
@@ -30,3 +31,6 @@ alter table public.rb_devices enable row level security;
 alter table public.rb_trips   enable row level security;
 revoke all on public.rb_devices from anon, authenticated;
 revoke all on public.rb_trips   from anon, authenticated;
+
+-- Nachtrag (für bestehende Tabellen): Tageszähler für den KI-Import
+alter table public.rb_devices add column if not exists usage jsonb;

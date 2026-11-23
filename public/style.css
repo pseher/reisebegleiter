@@ -115,3 +115,6 @@ h2 { font-size: 22px; line-height: 1.25; margin: 2px 0 4px; }
 .ok-t { color: var(--ok); }
 .leg-row > button { grid-template-columns: 74px 1fr auto; }
 .detail { padding-left: 98px; }
+.import { border: 2px dashed var(--line); }
+label.btn { cursor: pointer; }
+textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); margin-top: 8px; }

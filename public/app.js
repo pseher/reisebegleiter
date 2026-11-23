@@ -237,7 +237,16 @@ function renderWizard() {
 
   if (W.step === "route") {
     const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
-    $app.innerHTML = `<p class="steps">Neue Reise</p><h1>Wohin geht es?</h1>
+    $app.innerHTML = `<p class="steps">Neue Reise</p>
+      <section class="card import">
+        <div class="k">Schnell: Reise einfügen</div>
+        <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
+        <div class="row"><label class="btn" style="margin:4px 0">Screenshot / PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
+          <button class="btn sec" id="impTextBtn" style="margin:4px 0">Text einfügen</button></div>
+        ${W.showText ? `<textarea id="impText" rows="5" placeholder="Hier den geteilten Text oder die Buchungsbestätigung einfügen">${esc(W.impText || "")}</textarea>
+          <div class="row"><button class="btn sec" id="impPaste" style="margin:4px 0">Aus Zwischenablage</button><button class="btn" id="impGo" style="margin:4px 0">Einlesen</button></div>` : ""}
+      </section>
+      <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
@@ -256,6 +265,12 @@ function renderWizard() {
     document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
+    document.getElementById("impFile").onchange = e => importFiles([...e.target.files]);
+    document.getElementById("impTextBtn").onclick = () => { W.showText = !W.showText; render(); document.getElementById("impText")?.focus(); };
+    const it = document.getElementById("impText"); if (it) it.oninput = () => { W.impText = it.value; };
+    const ip = document.getElementById("impPaste");
+    if (ip) ip.onclick = async () => { try { W.impText = await navigator.clipboard.readText(); render(); } catch { alert("Einfügen bitte per langem Tippen ins Textfeld."); } };
+    const ig = document.getElementById("impGo"); if (ig) ig.onclick = () => runImport({ text: W.impText || "" });
   }
 
   else if (W.step === "conns") {
@@ -267,6 +282,13 @@ function renderWizard() {
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
+  }
+
+  else if (W.step === "pickTrip") {
+    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
+      <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
+        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>${back}`;
+    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
   }
 
   else if (W.step === "station") {
@@ -309,16 +331,16 @@ function renderWizard() {
   }
 
   else if (W.step === "leg") {
-    $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>
+    $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
         <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
         ${l.jid ? "" : `<div class="small muted">${l.mode && !/RAIL|SUBURBAN|LONG/.test(l.mode) ? "Bus/U-Bahn/Tram: " : ""}ohne Echtzeit, nur Fahrplan</div>`}</li>`).join("")}</ol></div>
       <button class="btn" id="done">Fertig – weiter</button>
-      ${W.mode === "route" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
-      ${W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
+      ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
+      ${W.mode === "import" ? `<button class="btn quiet" id="undo">Verwerfen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
     document.getElementById("done").onclick = () => { W.step = "ticket"; render(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
-    document.getElementById("undo").onclick = () => { if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
+    document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
   }
 
@@ -326,7 +348,7 @@ function renderWizard() {
     const opts = [["spar", "Sparpreis / Super Sparpreis", "Mit Zugbindung – ich sage dir, wann sie voraussichtlich aufgehoben ist."],
       ["flex", "Flexpreis", "Freie Zugwahl auf der Strecke."], ["dticket", "Deutschlandticket", "Nur Nahverkehr."], ["bc100", "BahnCard 100", "Freie Zugwahl."]];
     $app.innerHTML = `<p class="steps">Fast fertig</p><h1>Welches Ticket hast du?</h1><p class="muted small">Nur für den Hinweis zur Zugbindung. Es wird nichts gekauft oder gebucht.</p>
-      ${err}<ul class="list">${opts.map(([k, t, d]) => `<li><button data-t="${k}"><b>${t}</b><br><span class="small muted">${d}</span></button></li>`).join("")}</ul>${back}`;
+      ${err}<ul class="list">${opts.map(([k, t, d]) => `<li><button data-t="${k}"><b>${t}</b>${W.ticketGuess === k ? ` <span class="chip-t">erkannt</span>` : ""}<br><span class="small muted">${d}</span></button></li>`).join("")}</ul>${back}`;
     $app.querySelectorAll("[data-t]").forEach(b => b.onclick = () => saveTrip(b.dataset.t));
   }
 
@@ -335,7 +357,16 @@ function renderWizard() {
     W.error = "";
     if (W.step === "route") {
     const chips = [[0, "Jetzt"], [30, "+30 Min."], [60, "+1 Std."], [120, "+2 Std."]];
-    $app.innerHTML = `<p class="steps">Neue Reise</p><h1>Wohin geht es?</h1>
+    $app.innerHTML = `<p class="steps">Neue Reise</p>
+      <section class="card import">
+        <div class="k">Schnell: Reise einfügen</div>
+        <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
+        <div class="row"><label class="btn" style="margin:4px 0">Screenshot / PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
+          <button class="btn sec" id="impTextBtn" style="margin:4px 0">Text einfügen</button></div>
+        ${W.showText ? `<textarea id="impText" rows="5" placeholder="Hier den geteilten Text oder die Buchungsbestätigung einfügen">${esc(W.impText || "")}</textarea>
+          <div class="row"><button class="btn sec" id="impPaste" style="margin:4px 0">Aus Zwischenablage</button><button class="btn" id="impGo" style="margin:4px 0">Einlesen</button></div>` : ""}
+      </section>
+      <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       <div class="chips">${chips.map(([m, l]) => `<button class="chip" data-w="${m}" aria-pressed="${Math.abs(W.when - (Date.now() + m * MIN)) < 2 * MIN}">${l}</button>`).join("")}</div>
@@ -354,6 +385,12 @@ function renderWizard() {
     document.getElementById("whenIn").onchange = e => { const v = Date.parse(e.target.value); if (v) W.when = v; };
     document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.step = "conns"; render(); };
     document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
+    document.getElementById("impFile").onchange = e => importFiles([...e.target.files]);
+    document.getElementById("impTextBtn").onclick = () => { W.showText = !W.showText; render(); document.getElementById("impText")?.focus(); };
+    const it = document.getElementById("impText"); if (it) it.oninput = () => { W.impText = it.value; };
+    const ip = document.getElementById("impPaste");
+    if (ip) ip.onclick = async () => { try { W.impText = await navigator.clipboard.readText(); render(); } catch { alert("Einfügen bitte per langem Tippen ins Textfeld."); } };
+    const ig = document.getElementById("impGo"); if (ig) ig.onclick = () => runImport({ text: W.impText || "" });
   }
 
   else if (W.step === "conns") {
@@ -367,12 +404,21 @@ function renderWizard() {
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
   }
 
+  else if (W.step === "pickTrip") {
+    $app.innerHTML = `<p class="steps">Eingelesen</p><h1>Welche Fahrt?</h1>
+      <ul class="list">${W.imported.map((t, i) => `<li><button data-it="${i}"><b>${esc(t.label || `Fahrt ${i + 1}`)}</b><br>
+        <span class="small muted">${esc(t.legs[0].from.name)} → ${esc(t.legs[t.legs.length - 1].to.name)} · ${new Date(t.legs[0].from.plan).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</span></button></li>`).join("")}</ul>${back}`;
+    $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.legs = W.imported[+b.dataset.it].legs; W.step = "leg"; render(); });
+  }
+
   else if (W.step === "station") { W = null; go("home"); }
     else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
     else if (W.step === "ticket") W.step = "leg";
     else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
+    else if (W.step === "leg" && W.mode === "import") { W.legs = []; W.step = "route"; }
+    else if (W.step === "pickTrip") { W.step = "route"; }
     render();
   };
 }
@@ -394,6 +440,36 @@ async function searchInto(q, id, onPick) {
     el.innerHTML = res.length ? res.map((s, i) => `<li><button data-i="${i}">${esc(s.name)}</button></li>`).join("") : `<li><p class="muted small">Kein Bahnhof gefunden.</p></li>`;
     el.querySelectorAll("[data-i]").forEach(b => b.onclick = () => onPick(res[+b.dataset.i]));
   } catch (e) { el.innerHTML = `<li><p class="err">${esc(e.message)}</p></li>`; }
+}
+
+// Bild verkleinern (spart Zeit und KI-Kosten), PDF unverändert
+function fileToPayload(f) {
+  return new Promise((ok, no) => {
+    if (f.type === "application/pdf") {
+      if (f.size > 5e6) return no(new Error("PDF ist zu groß (max. 5 MB)."));
+      const r = new FileReader(); r.onload = () => ok({ type: f.type, data: String(r.result).split(",")[1] }); r.onerror = () => no(new Error("PDF nicht lesbar")); r.readAsDataURL(f); return;
+    }
+    const img = new Image(), url = URL.createObjectURL(f);
+    img.onload = () => { const k = Math.min(1, 1800 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); ok({ type: "image/jpeg", data: c.toDataURL("image/jpeg", 0.85).split(",")[1] }); };
+    img.onerror = () => no(new Error("Bild nicht lesbar")); img.src = url;
+  });
+}
+async function importFiles(files) {
+  try { runImport({ files: await Promise.all(files.slice(0, 3).map(fileToPayload)), text: W.impText || "" }); }
+  catch (e) { W.error = e.message; render(); }
+}
+async function runImport(body) {
+  W.busy = "Ich lese deine Reise …"; W.error = ""; render();
+  try {
+    const r = await api("/api/import", { method: "POST", body });
+    W.ticketGuess = r.ticket; W.note = r.note; W.mode = "import"; W.imported = r.trips;
+    if (!r.trips.length) W.error = `Ich konnte darin keine Verbindung erkennen.${r.note ? " " + r.note : ""} Versuch einen Screenshot der Reiseübersicht.`;
+    else if (r.trips.length === 1) { W.legs = r.trips[0].legs; W.step = "leg"; }
+    else W.step = "pickTrip";
+  } catch (e) { W.error = e.message; }
+  W.busy = null; render();
 }
 
 async function pickConnection(c) {
@@ -441,4 +517,18 @@ async function enablePush() {
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 document.addEventListener("click", e => { if (e.target.closest('[data-go="add"]')) { startWizard(); } }, true);
 $app.innerHTML = `<div class="spinner"></div>`;
-loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p>`; throw e; }).then(() => { render(); schedule(); });
+async function takeShared() {
+  if (!new URLSearchParams(location.search).has("share")) return;
+  history.replaceState(null, "", "/");
+  try {
+    const c = await caches.open("rb-share"), meta = await (await c.match("/share-meta"))?.json().catch(() => null);
+    if (!meta) return;
+    const files = [];
+    for (const k of meta.files || []) { const r = await c.match(k); if (r) files.push(new File([await r.blob()], "geteilt", { type: r.headers.get("Content-Type") || "image/jpeg" })); }
+    await caches.delete("rb-share");
+    startWizard(); view = "add";
+    const text = [meta.title, meta.text, meta.url].filter(Boolean).join("\n");
+    if (files.length) { W.impText = text; importFiles(files); } else if (text) runImport({ text });
+  } catch {}
+}
+loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p>`; throw e; }).then(() => { render(); schedule(); takeShared(); });

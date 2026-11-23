@@ -2,6 +2,7 @@
 import * as db from "./db.js";
 import { searchStations } from "./stations.js";
 import { connections, resolveConnection } from "./routing.js";
+import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, altText } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt } from "./monitor.js";
@@ -127,6 +128,18 @@ async function api(req, env, url) {
     const eva = url.searchParams.get("eva"), t = Date.parse(url.searchParams.get("time") || "") || Date.now();
     if (!/^\d{6,9}$/.test(eva || "")) return fail(400, "Bahnhof fehlt");
     return json(await departures(env, eva, t));
+  }
+
+  // Reise einlesen (Screenshot, PDF, Text/Link) – mit Tageslimit pro Gerät
+  if (p === "/api/import" && method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    const files = (Array.isArray(b.files) ? b.files : []).filter(f => f && typeof f.data === "string" && f.data.length < 7e6).slice(0, 3);
+    const text = String(b.text || "").slice(0, 8000);
+    if (!files.length && text.trim().length < 10) return fail(400, "Bitte einen Screenshot, ein PDF oder einen Text mit der Verbindung einfügen.");
+    const day = new Date().toISOString().slice(0, 10), use = dev.usage?.day === day ? dev.usage.n : 0, limit = +(env.IMPORT_DAILY_LIMIT || 15);
+    if (use >= limit) return fail(429, `Heute schon ${limit} Reisen eingelesen. Morgen geht es weiter – oder die Verbindung über „Von / Nach“ suchen.`);
+    await db.update(env, "rb_devices", dev.id, { usage: { day, n: use + 1 } }).catch(() => {});   // ohne Spalte „usage“: kein Limit
+    return json(await importTrip(env, { text, files }));
   }
 
   // Verbindungssuche Von → Nach

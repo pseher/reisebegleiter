@@ -69,7 +69,7 @@ export async function resolveLeg(env, l, cache = new Map()) {
     from: { eva: "", name: l.from.name, plan: l.from.plan, platform: l.from.track || "" },
     to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "" } };
   if (!l.rail) return base;
-  const f = nearest(l.from.lat, l.from.lon), t = nearest(l.to.lat, l.to.lon);
+  const f = l.from.eva ? byEva(l.from.eva) : nearest(l.from.lat, l.from.lon), t = l.to.eva ? byEva(l.to.eva) : nearest(l.to.lat, l.to.lon);
   if (!f || !t) return base;
   base.from.eva = f.eva; base.to.eva = t.eva;
   const dep = Date.parse(l.from.plan), list = await board(env, "dep", f.eva, isoBerlin(dep - 5 * MIN), { maxVia: 40, cache });

@@ -18,6 +18,8 @@ Die Bahnhofssuche braucht keine DB-Abfrage (eingebaute Stationsliste, Quelle DB 
    - `SUPABASE_SERVICE_KEY` – derselbe Secret Key wie beim PlanFlink-Worker
    - `DB_CLIENT_ID`, `DB_API_KEY` – dieselben wie bei PlanFlink
    - `VAPID_JWK` – denselben Wert wie bei PlanFlink übernehmen oder neu erzeugen: `node tools/vapid.mjs`
+   - `ANTHROPIC_KEY` – für „Reise einfügen“ (Screenshot/PDF/Text), derselbe wie beim PlanFlink-KI-Worker
+   - optional als Variable: `IMPORT_DAILY_LIMIT` (Standard 15 Einlesungen pro Gerät und Tag)
 3. Adresse aufrufen (z. B. `https://reisebegleiter.<konto>.workers.dev`), Reise anlegen, Mitteilungen erlauben.
    Eigene Domain später unter **Einstellungen → Domains & Routen**.
 
