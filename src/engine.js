@@ -91,7 +91,7 @@ export function nextStep(v, now = Date.now()) {
   for (let i = 0; i < legs.length; i++) {
     const l = legs[i];
     if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
-      return { kind: i === 0 ? "board" : "change", at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
+      return { kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
         platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform),
         cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap } : null, dest: l.arr.name };
     }

@@ -87,7 +87,7 @@ function nextCard(n) {
   const pc = n.platformChanged ? ` <span class="late">Gleiswechsel</span>` : "";
   let body;
   if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}${pc}</div>
-      <div><b>${esc(n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
+      <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
       <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>`;
   else body = `<div class="big">${hm(n.at)}${lateTag(n.delay)} ${gl(n.platform)}</div>
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(n.station)}</b></div>
@@ -138,6 +138,11 @@ function planBCard(t) {
   return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${curRow}${rows}</section>`;
 }
 
+// Verkehrsmittel vor reine Liniennummern schreiben (auch für ältere Reisen)
+const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"], FERRY: ["Fähre", "Fähre"], SUBWAY: ["U", "U-Bahn"], METRO: ["U", "U-Bahn"] };
+const nice = l => { const m = MODE[l.mode]; return m && /^\d/.test(l.label) ? `${m[0]} ${l.label}` : l.label; };
+const kindWord = l => (MODE[l.mode] ? (MODE[l.mode][1] === "U-Bahn" ? "Diese U-Bahn" : MODE[l.mode][1] === "Tram" ? "Diese Tram" : MODE[l.mode][1] === "Fähre" ? "Diese Fähre" : "Diesen Bus") : "Diesen Zug");
+
 // Kompakter Verlauf: eine Zeile pro Zug, Umstiege als schmale Zeile, Details auf Antippen
 function timeline(t) {
   const rows = [];
@@ -145,7 +150,7 @@ function timeline(t) {
     const past = Date.parse(l.arr.rt) < Date.now(), open = openLeg === `${t.id}:${i}`;
     rows.push(`<li class="leg-row ${past ? "past" : ""}"><button data-leg="${t.id}:${i}" aria-expanded="${open}">
       <span class="tm">${hm(l.dep.rt)}${lateTag(l.dep.delay)}<br><span class="muted">${hm(l.arr.rt)}${lateTag(l.arr.delay)}</span></span>
-      <span class="ln"><span class="chip-t">${esc(l.label)}</span>${l.must ? ` <span class="must">Pflichtzug</span>` : ""}${l.live ? "" : ` <span class="muted small">Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
+      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">Pflichtzug</span>` : ""}${l.live ? "" : ` <span class="muted small">Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
         <span class="small">${esc(l.dep.name)} → ${esc(l.arr.name)}</span></span>
       <span class="pl small">${l.dep.platform ? `Gl. ${esc(l.dep.platform)}` : ""}</span></button>
       ${open ? `<div class="detail small">
@@ -153,17 +158,18 @@ function timeline(t) {
         <div>An ${esc(l.arr.name)}: plan ${hm(l.arr.plan)}${l.arr.delay ? `, jetzt ${hm(l.arr.rt)}${l.arr.estimated ? " (geschätzt)" : ""}` : ""}${l.arr.platform ? `, Gleis ${esc(l.arr.platform)}` : ""}</div>
         ${[...(l.dep.messages || []), ...(l.arr.messages || [])].slice(0, 3).map(m => `<div class="muted">${esc(m)}</div>`).join("")}
         ${l.live ? "" : `<div class="muted">Für dieses Verkehrsmittel gibt es noch keine Echtzeit.</div>`}
-        ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Kein Pflichtzug mehr" : "Diesen Zug muss ich bekommen"}</button>` : ""}
+        ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr Pflicht" : `${kindWord(l)} muss ich bekommen`}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];
-    if (tr) rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
-      <span class="small">Umstieg ${esc(tr.at)} · ${transferText(tr)}</span></li>`);
+    if (tr) { const nx = t.legs[i + 1], walk = cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
+      rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
+      <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : ""} · ${transferText(tr)}</span></li>`); }
   });
   return `<ol class="tl2">${rows.join("")}</ol>`;
 }
 
 function transferText(tr) {
-  const pl = tr.arrPl || tr.depPl ? ` · Gl. ${esc(tr.arrPl || "?")} → ${esc(tr.depPl || "?")}` : "";
+  const pl = tr.arrPl && tr.depPl ? ` · Gl. ${esc(tr.arrPl)} → ${esc(tr.depPl)}` : tr.depPl ? ` · weiter von Gl. ${esc(tr.depPl)}` : "";
   if (tr.status === "DONE") return `erledigt`;
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus</b>` : `<b>nicht zu schaffen</b>${pl}`;
   if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>Pflichtzug in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;

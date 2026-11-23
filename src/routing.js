@@ -24,7 +24,13 @@ async function motis(env, params) {
   throw new Error("Verbindungssuche nicht erreichbar");
 }
 
-export function legLabel(l) {
+const PREFIX = { BUS: "Bus", COACH: "Bus", TRAM: "Tram", FERRY: "Fähre", SUBWAY: "U", METRO: "U" };
+export function legLabel(l) { const s = rawLabel(l), p = PREFIX[l.mode];
+  if (!p || new RegExp(`^${p}\\b|^${p}\\s?\\d`, "i").test(s) || (p === "U" && /^U\s?\d/i.test(s))) return s;
+  return `${p} ${s.replace(/^(STR|Bus)\s*/i, "")}`;
+}
+function rawLabel(l) {
+  if (PREFIX[l.mode] && PREFIX[l.mode] !== "U") return l.displayName || l.routeShortName || l.tripShortName || "";   // Bus/Tram: Linienname wie M10, X9
   if (l.displayName) return spaced(l.displayName);
   const rs = l.routeShortName || "", ts = l.tripShortName || "";
   if (FV_MODES.has(l.mode) && ts) return `${(l.category?.shortName || rs.split(" ")[0] || "Zug").trim()} ${ts}`;

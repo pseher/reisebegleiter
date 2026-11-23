@@ -5,7 +5,10 @@ import { simplify, legLabel, connections, resolveConnection } from "../src/routi
 test("legLabel: Fernverkehr mit Zugnummer, S-Bahn mit Linie", () => {
   assert.equal(legLabel({ mode: "HIGHSPEED_RAIL", routeShortName: "ICE", tripShortName: "1234" }), "ICE 1234");
   assert.equal(legLabel({ mode: "SUBURBAN", routeShortName: "S2" }), "S 2");
-  assert.equal(legLabel({ mode: "BUS", routeShortName: "M85" }), "M 85");
+  assert.equal(legLabel({ mode: "BUS", routeShortName: "M85" }), "Bus M85");
+  assert.equal(legLabel({ mode: "BUS", routeShortName: "101" }), "Bus 101");
+  assert.equal(legLabel({ mode: "TRAM", routeShortName: "M10" }), "Tram M10");
+  assert.equal(legLabel({ mode: "SUBWAY", routeShortName: "U7" }), "U 7");
   assert.equal(legLabel({ mode: "REGIONAL_RAIL", displayName: "RE1" }), "RE 1");
 });
 
