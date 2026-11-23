@@ -132,3 +132,8 @@ test("Zugbindung nur bei anderem Fernzug – Bus/S-Bahn/RE sind frei", () => {
   assert.equal(changesFV(plan, [L("Bus M19", "2026-11-24T07:46"), L("ICE 842", "2026-11-24T09:50")]), true);
   assert.equal(isFV(L("RE 1")), false); assert.equal(isFV(L("IC 2037")), true); assert.equal(isFV(L("S 5")), false);
 });
+
+test("gleicher ICE, anderer Zustiegsbahnhof ist kein anderer Fernzug", () => {
+  const L = (label, plan) => ({ label, from: { plan } });
+  assert.equal(changesFV([L("ICE 1540", "2026-11-23T22:42:00Z")], [L("Bus 115", "2026-11-23T22:23:00Z"), L("S 1", "2026-11-23T22:30:00Z"), L("ICE 1540", "2026-11-23T22:20:00Z")]), false);
+});

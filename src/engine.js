@@ -10,7 +10,8 @@ export const HUBS = new Set(["8011160", "8098160", "8002549", "8000105", "800020
 // Zugbindung gilt nur für Fernverkehrszüge (ICE, IC, EC …) – Bus, S-/U-Bahn, Tram und Regionalzüge sind frei
 const FV_RE = /^(ICE|IC|EC|ECE|ICD|RJX?|NJ|EN|TGV|EST|D)\s?\d/i;
 export const isFV = l => FV_RE.test(String(l?.label || "").trim()) || ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL"].includes(l?.mode);
-const fvKey = l => `${String(l.label).replace(/\s/g, "").toUpperCase()}@${String(l.from?.plan || "").slice(0, 16)}`;
+// Derselbe Zug = gleiche Zugnummer am selben Tag – egal, an welchem Bahnhof man zusteigt
+const fvKey = l => `${String(l.label).replace(/\s/g, "").toUpperCase()}@${new Date(Date.parse(l.from?.plan || 0) - 4 * 3600e3).toISOString().slice(0, 10)}`;
 // Ändert eine Alternative die gebuchten Fernverkehrszüge? (nur dann ist die Zugbindung ein Thema)
 export function changesFV(planLegs, altLegs) {
   const a = planLegs.filter(isFV).map(fvKey).sort().join("|"), b = altLegs.filter(isFV).map(fvKey).sort().join("|");
@@ -113,7 +114,7 @@ export function nextStep(v, now = Date.now()) {
     }
     if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
       return { kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
-        platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform),
+        platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform), platformPlan: l.dep.platformPlan,
         cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap, name: legs[i - 1].arr.name, lat: legs[i - 1].arr.lat, lon: legs[i - 1].arr.lon } : null,
         dest: l.arr.name, lat: l.dep.lat, lon: l.dep.lon };
     }

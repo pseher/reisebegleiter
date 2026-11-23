@@ -162,7 +162,7 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   }
   const toName = (last.to.name || "").replace(/\s*\(tief\)$/i, "");
   const out = all.sort((a, b) => rtOf(a.legs[a.legs.length - 1].to) - rtOf(b.legs[b.legs.length - 1].to)).slice(0, 3).map(c => ({
-    kind: sig(c.legs) === planSig ? "asplanned" : "here", from: "start", at: "deinem Standort",
+    kind: sig(c.legs) === planSig ? "asplanned" : !changesFV(trip.legs, c.legs) && trip.legs.some(isFVLeg) ? "samefv" : "here", from: "start", at: "deinem Standort",
     label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers, walkStart: c.walkStart || 0,
     dep: new Date(rtOf(c.legs[0].from)).toISOString(), depPlan: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", firstStop: c.legs[0].from.name,
     arr: new Date(rtOf(c.legs[c.legs.length - 1].to)).toISOString(), arrPlan: c.legs[c.legs.length - 1].to.plan, minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null,

@@ -126,9 +126,9 @@ function nextCard(n) {
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b> – oben siehst du, wie du weiterkommst.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
-  const pc = n.platformChanged ? ` <span class="late">Gleiswechsel</span>` : "";
+  const pc = n.platformChanged ? `<span class="late">Gleiswechsel${n.platformPlan ? ` (statt Gleis ${esc(n.platformPlan)})` : ""}</span>` : "";
   let body;
-  if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)} ${gl(n.platform)}${pc}</div>${lateLine(n.delay, n.plan)}
+  if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)} ${gl(n.platform)}</div>${pc ? `<div class="small">${pc}</div>` : ""}${lateLine(n.delay, n.plan)}
       <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
       <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>
       ${n.from && cleanStop(n.from.name) !== cleanStop(n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
@@ -219,7 +219,7 @@ function hereCard(t) {
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
-    return `<div class="cmp-row"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
+    return `<div class="cmp-row"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.kind === "samefv" ? `Zu deinem ${esc(a.legs.find(l => /^(ICE|IC|EC|RJ|NJ|EN|TGV)\b/i.test(l.label))?.label.split(" ")[0] || "Zug")}` : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
       <div class="cmp-point">${a.walkStart ? `${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}, ` : ""}ab <b>${hm(a.dep)}</b> ${esc(a.label)}</div>
       <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${span(-d)} früher</b>` : d > 1 ? ` · ${span(d)} später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
       <div class="cmp-live">${liveBadge(a)}</div>
