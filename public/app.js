@@ -718,17 +718,31 @@ function renderWizard() {
   }
 
   else if (W.step === "station") {
-    $app.innerHTML = `${head}<h1>Von welchem Bahnhof fährt dein Zug?</h1><p class="small muted">Du wählst danach den Zug aus der Abfahrtstafel und deinen Ausstieg. Weitere Umstiege kannst du anhängen.</p>
-      <input type="search" id="q" placeholder="Bahnhof, z. B. Berlin Hbf" autocomplete="off" enterkeyhint="search" value="${esc(W.q || "")}">
+    $app.innerHTML = `${head}<h1>Wo steigst du ein?</h1><p class="small muted">Bahnhof oder Haltestelle (Bus, Tram, U-Bahn). Du wählst danach das Verkehrsmittel aus der Abfahrtstafel und deinen Ausstieg. Weitere Umstiege kannst du anhängen.</p>
+      <input type="search" id="q" placeholder="Bahnhof oder Haltestelle" autocomplete="off" enterkeyhint="search" value="${esc(W.q || "")}">
+      <button class="chip here-chip" data-nearst>${PIN} Mein Standort</button>
       ${err}<ul class="list" id="res"></ul>${back}`;
     const q = document.getElementById("q");
-    let t; q.oninput = () => { clearTimeout(t); W.q = q.value; t = setTimeout(() => searchInto(q.value, "res", s => { W.station = s; W.from = Date.now(); W.step = "trains"; W.list = null; render(); }), 250); };
+    const choose = s => { W.station = s; W.from = Date.now(); W.step = "trains"; W.list = null; render(); };
+    let t; q.oninput = () => { clearTimeout(t); W.q = q.value; t = setTimeout(() => searchInto(q.value, "res", choose, true), 250); };
+    // Haltestellen und Bahnhöfe in der Nähe
+    $app.querySelector("[data-nearst]").onclick = () => {
+      if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
+      const ul = document.getElementById("res"); ul.innerHTML = `<li><div class="spinner"></div></li>`;
+      navigator.geolocation.getCurrentPosition(async pos => {
+        try {
+          const list = await api(`/api/stations/near?stops=1&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
+          ul.innerHTML = list.length ? list.map((x, i) => `<li><button data-ns="${i}"><b>${esc(x.name)}</b><br><span class="small muted">${x.stop ? "Haltestelle · " : ""}ca. ${x.dist < 1000 ? `${Math.round(x.dist / 10) * 10} m` : `${(x.dist / 1000).toFixed(1).replace(".", ",")} km`}</span></button></li>`).join("") : `<li class="muted small">Nichts in der Nähe gefunden.</li>`;
+          ul.querySelectorAll("[data-ns]").forEach(b => b.onclick = () => choose(list[+b.dataset.ns]));
+        } catch (e) { ul.innerHTML = `<li class="err">${esc(e.message)}</li>`; }
+      }, err => { ul.innerHTML = ""; alert(err.code === 1 ? "Ohne Erlaubnis für den Standort geht das nicht." : "Standort gerade nicht verfügbar."); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+    };
     if (W.q) q.oninput();
   }
 
   else if (W.step === "trains") {
     const base = W.legs.length ? Date.parse(W.legs[n - 1].to.plan) : Date.now();
-    $app.innerHTML = `${head}<h1>Welcher Zug ab ${esc(W.station.name)}?</h1>
+    $app.innerHTML = `${head}<h1>${W.station.eva ? "Welcher Zug" : "Was fährst du"} ab ${esc(W.station.name)}?</h1>
       ${W.legs.length ? `<p class="muted small">Ankunft dort laut Plan ${hm(W.legs[n - 1].to.plan)}.</p>` : whenPicker("from")}
       ${err}${W.list && W.from > Date.now() + 5 * MIN && !W.legs.length ? `<button class="btn quiet" id="earlier">↑ Frühere Züge</button>` : ""}
       <div id="trains">${W.list ? trainList(W.list) : `<div class="spinner"></div>`}</div>
@@ -740,10 +754,32 @@ function renderWizard() {
     if (later) later.onclick = () => { const l = W.list[W.list.length - 1]; W.from = l ? Date.parse(l.rt) + MIN : W.from + 60 * MIN; W.list = null; render(); };
     if (!W.list) {
       const from = W.legs.length ? Math.max(W.from, base) : W.from;
-      api(`/api/departures?eva=${W.station.eva}&time=${encodeURIComponent(new Date(from).toISOString())}`)
-        .then(l => { W.list = l; W.error = ""; }).catch(e => { W.list = []; W.error = e.message; }).then(render);
+      const time = encodeURIComponent(new Date(from).toISOString());
+      (async () => {
+        const st = W.station;
+        if (st.eva) return api(`/api/departures?eva=${st.eva}&time=${time}`);
+        // Haltestelle ohne Kennung (z. B. Ausstieg der vorigen Fahrt): nächste Haltestelle am Ort nachschlagen
+        if (!st.id && st.lat != null) { const n = (await api(`/api/stations/near?stops=1&lat=${st.lat}&lon=${st.lon}`)).find(x => x.stop || x.eva); if (n?.eva) { W.station = { ...st, eva: n.eva }; return api(`/api/departures?eva=${n.eva}&time=${time}`); } if (n) st.id = n.id; }
+        if (!st.id) throw new Error("Für diese Haltestelle finde ich keine Abfahrten.");
+        return api(`/api/stopdepartures?id=${encodeURIComponent(st.id)}&time=${time}`);
+      })().then(l => { W.list = l; W.error = ""; }).catch(e => { W.list = []; W.error = e.message; }).then(render);
     }
-    $app.querySelectorAll("[data-j]").forEach(b => b.onclick = () => { W.train = W.list[+b.dataset.j]; W.step = "exit"; render(); });
+    $app.querySelectorAll("[data-j]").forEach(b => b.onclick = () => { W.train = W.list[+b.dataset.j]; W.tripStops = null; W.step = "exit"; render(); });
+  }
+
+  else if (W.step === "exit" && W.train.tripId) {
+    const tr = W.train;
+    $app.innerHTML = `${head}<h1>Wo steigst du aus?</h1><p class="muted">${esc(tr.label)} ab ${hm(tr.rt)}${tr.platform ? ` · ${esc(tr.platform)}` : ""}</p>
+      ${err}<div>${W.tripStops ? `<ul class="list">${W.tripStops.map((s, i) => `<li><button data-ts="${i}"><b>${esc(s.name)}</b> <span class="small muted">an ${hm(s.plan)}</span></button></li>`).join("") || `<li><p class="muted">Keine Halte bekannt.</p></li>`}</ul>` : `<div class="spinner"></div>`}</div>${back}`;
+    if (!W.tripStops) api(`/api/tripstops?trip=${encodeURIComponent(tr.tripId)}&after=${encodeURIComponent(tr.plan)}`)
+      .then(l => { W.tripStops = l; }).catch(e => { W.tripStops = []; W.error = e.message; }).then(render);
+    $app.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => {
+      const s = W.tripStops[+b.dataset.ts], st = W.station;
+      W.legs.push({ jid: "", label: tr.label, mode: tr.mode || "",
+        from: { eva: st.eva || "", name: st.name, plan: tr.plan, platform: tr.platform || "", lat: st.lat, lon: st.lon },
+        to: { eva: s.eva || "", name: s.name, plan: s.plan, platform: s.track || "", lat: s.lat, lon: s.lon } });
+      W.tripStops = null; W.step = "leg"; W.error = ""; render();
+    });
   }
 
   else if (W.step === "exit") {
@@ -771,7 +807,7 @@ function renderWizard() {
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
     document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); W.step = "ticket"; render(); };
-    if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
+    if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
   }
@@ -804,7 +840,7 @@ function trainList(list) {
   if (!list.length) return `<p class="muted">Keine Abfahrten in diesem Zeitraum gefunden.</p>`;
   return `<ul class="list">${list.map((e, i) => `<li><button data-j="${i}" ${e.cancelled ? "disabled" : ""}><div class="train">
     <span class="t">${hm(e.rt)}</span><span class="l">${esc(e.label)}${e.cancelled ? ` <span class="late">fällt aus</span>` : ""}</span>
-    <span class="pl">${e.platform ? `Gleis ${esc(e.platform)}` : ""}</span>
+    <span class="pl">${e.platform ? `${/^\d/.test(e.platform) ? "Gleis " : ""}${esc(e.platform)}` : ""}</span>
     <span class="d">${e.rt !== e.plan && Date.parse(e.rt) - Date.parse(e.plan) >= MIN ? `<span class="late">+${Math.round((Date.parse(e.rt) - Date.parse(e.plan)) / MIN)}</span> · ` : ""}nach ${esc(e.direction.map(d => d.name).filter(Boolean).join(" / ") || "?")}</span>
   </div></button></li>`).join("")}</ul>`;
 }

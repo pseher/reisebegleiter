@@ -1,7 +1,7 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
-import { connections, resolveConnection, geocodeStop, searchStops } from "./routing.js";
+import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
@@ -164,10 +164,22 @@ async function api(req, env, url) {
   if (p === "/api/stations/near") {
     const lat = +url.searchParams.get("lat"), lon = +url.searchParams.get("lon");
     if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
-    if (env.MOCK === "1") return json([{ eva: "8011160", name: "Berlin Hbf", dist: 800 }, { eva: "8010205", name: "Leipzig Hbf", dist: 2400 }]);
-    return json(nearby(lat, lon));
+    const stops = url.searchParams.get("stops") === "1" ? await stopsNear(env, lat, lon).catch(() => []) : [];
+    const st = env.MOCK === "1" ? [{ eva: "8011160", name: "Berlin Hbf", dist: 800 }, { eva: "8010205", name: "Leipzig Hbf", dist: 2400 }] : nearby(lat, lon);
+    return json([...stops, ...st].sort((a, b) => a.dist - b.dist).slice(0, 6));
   }
 
+  // Haltestellen ohne DB-Nummer: Abfahrten und Fahrtverlauf über Transitous
+  if (p === "/api/stopdepartures") {
+    const id = url.searchParams.get("id") || "", t = Date.parse(url.searchParams.get("time") || "") || Date.now();
+    if (!id) return fail(400, "Haltestelle fehlt");
+    return json(await stopDepartures(env, { id }, t));
+  }
+  if (p === "/api/tripstops") {
+    const id = url.searchParams.get("trip") || "", after = Date.parse(url.searchParams.get("after") || "") || Date.now();
+    if (!id) return fail(400, "Fahrt fehlt");
+    return json(await tripStops(env, id, after));
+  }
   if (p === "/api/departures") {
     const eva = url.searchParams.get("eva"), t = Date.parse(url.searchParams.get("time") || "") || Date.now();
     if (!/^\d{6,9}$/.test(eva || "")) return fail(400, "Bahnhof fehlt");
