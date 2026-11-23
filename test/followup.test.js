@@ -123,3 +123,12 @@ test("Plan B vor der Abfahrt auch, wenn die Reise an einer Haltestelle ohne DB-N
   assert.ok(alts.length > 0, "keine Alternativen");
   assert.ok(alts.every(a => a.from === "start"));
 });
+
+import { changesFV, isFV } from "../src/engine.js";
+test("Zugbindung nur bei anderem Fernzug – Bus/S-Bahn/RE sind frei", () => {
+  const L = (label, plan, mode = "") => ({ label, mode, from: { plan } });
+  const plan = [L("Bus M19", "2026-11-24T07:56"), L("RE 1", "2026-11-24T08:16"), L("ICE 840", "2026-11-24T08:50")];
+  assert.equal(changesFV(plan, [L("Bus X10", "2026-11-24T07:54"), L("S 5", "2026-11-24T08:10"), L("ICE 840", "2026-11-24T08:50")]), false);
+  assert.equal(changesFV(plan, [L("Bus M19", "2026-11-24T07:46"), L("ICE 842", "2026-11-24T09:50")]), true);
+  assert.equal(isFV(L("RE 1")), false); assert.equal(isFV(L("IC 2037")), true); assert.equal(isFV(L("S 5")), false);
+});

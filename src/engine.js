@@ -7,6 +7,15 @@ const MIN = 60e3;
 export const HUBS = new Set(["8011160", "8098160", "8002549", "8000105", "8000207", "8000261", "8000152", "8010205", "8000096",
   "8000284", "8000085", "8000244", "8010101", "8000080", "8000098", "8000191", "8000050", "8000128", "8010159", "8000013"]);
 
+// Zugbindung gilt nur für Fernverkehrszüge (ICE, IC, EC …) – Bus, S-/U-Bahn, Tram und Regionalzüge sind frei
+const FV_RE = /^(ICE|IC|EC|ECE|ICD|RJX?|NJ|EN|TGV|EST|D)\s?\d/i;
+export const isFV = l => FV_RE.test(String(l?.label || "").trim()) || ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL"].includes(l?.mode);
+const fvKey = l => `${String(l.label).replace(/\s/g, "").toUpperCase()}@${String(l.from?.plan || "").slice(0, 16)}`;
+// Ändert eine Alternative die gebuchten Fernverkehrszüge? (nur dann ist die Zugbindung ein Thema)
+export function changesFV(planLegs, altLegs) {
+  const a = planLegs.filter(isFV).map(fvKey).sort().join("|"), b = altLegs.filter(isFV).map(fvKey).sort().join("|");
+  return a !== b;
+}
 export const hm = ms => new Date(ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 const T = x => (x ? Date.parse(x) : NaN);
 const cleanName = n => String(n || "").replace(/\s*\(tief\)$/i, "");
@@ -85,7 +94,7 @@ export function evaluate(trip, now = Date.now()) {
   const bookedArr = Date.parse(trip.state?.origArr || "") || last.arr.plan;   // nach „Übernehmen“: ursprünglich gebuchte Ankunft
   const finalDelay = lostTransfer || legCancel ? null : Math.round((last.arr.rt - bookedArr) / MIN);
   if (status === "OK" && phase !== "done" && (finalDelay ?? 0) >= 10) status = "WATCH";   // deutlich später am Ziel: nicht grün
-  const zbLifted = trip.ticket === "spar" && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
+  const zbLifted = trip.ticket === "spar" && legs.some(isFV) && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
   const v = { status, phase, legs, transfers, current, finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null };
   Object.assign(v, headline(v, trip, now));
   v.next = nextStep(v, now);
@@ -241,5 +250,5 @@ export function altText(alts, refArr, spar = false) {
   const delta = d == null ? "" : d <= -2 ? ` – ${d * -1} Min. früher` : d >= 2 ? ` – ${d} Min. später` : " – etwa gleich";
   const what = a.kind === "stay" ? `Sitzen bleiben in ${a.label}` : a.reach ? `ab ${a.at} ${hm(T(a.dep))} mit ${a.label.split(" → ")[0]}, so erreichst du ${a.label.split(" → ").pop()}`
     : `ab ${a.at} ${hm(T(a.dep))}${a.depPl ? ` (Gleis ${a.depPl})` : ""} mit ${a.label}`;
-  return ` Vorschlag: ${what}${a.arr && !a.reach ? `, Ziel ca. ${hm(T(a.arr))}${delta}` : ""}.${spar ? " Mit Sparpreis nur, wenn die Zugbindung aufgehoben ist." : ""}`;
+  return ` Vorschlag: ${what}${a.arr && !a.reach ? `, Ziel ca. ${hm(T(a.arr))}${delta}` : ""}.${spar && a.zb !== false ? " Anderer Fernzug: mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}`;
 }

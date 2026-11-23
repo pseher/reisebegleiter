@@ -158,7 +158,7 @@ function planBCard(t) {
   const open = t.transfers.find(x => (x.status === "RISK" || x.status === "LOST") && !x.alt?.length);
   if (k < 0) return !open ? "" : `<section class="card"><div class="k">Möglichkeiten</div><p class="muted small">${open.altChecked
     ? (open.toMust ? `Ich finde keinen Weg, der dich rechtzeitig zu ${esc(open.toLabel)} bringt. Ich prüfe weiter.` : "Gerade keine bessere Möglichkeit. Ich prüfe weiter.")
-    : "Ich suche Möglichkeiten …"}</p></section>`;
+    : "Ich suche Möglichkeiten …"}</p>${t.here ? "" : `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`}</section>`;
   const tr = t.transfers[k], lost = tr.status === "LOST", need = t.minT || 3;
   const before = Date.now() < Date.parse(t.legs[0].dep.rt), curLeg = before ? t.legs[0] : t.legs[k];
   const curArr = Date.parse(t.plan.arr);
@@ -181,20 +181,22 @@ function planBCard(t) {
     return `<div class="cmp-row"><div class="cmp-tag">${tag(a)}</div><div class="cmp-main">
       ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : point(a.watch?.point || tightest(a.legs || []))}
       ${goal(a.arr || a.dep, a.reach ? "" : delta(a))}
-      <div class="cmp-live">${a.kind === "stay" ? "" : `<span class="small muted">ab ${hm(a.dep)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""} · </span>`}${liveOf(a)}</div>
+      <div class="cmp-live">${a.kind === "stay" ? "" : `<span class="small muted">ab ${hm(a.dep)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""} · </span>`}${liveOf(a)}${zbOn && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
       ${isOpen ? `<div class="small muted cmp-more">Abfahrt ${hm(a.dep)} in ${esc(a.at)}${a.depPl ? `, Gleis ${esc(a.depPl)}` : ""}<br>${esc(a.label)}</div>` : ""}
-      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-adopt-text="${esc(tag(a))}: ${esc(a.label)}, Ziel ca. ${hm(a.arr || a.dep)}">Übernehmen</button>
+      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb === false ? "" : "1"}" data-adopt-text="${esc(tag(a))}: ${esc(a.label)}, Ziel ca. ${hm(a.arr || a.dep)}">Übernehmen</button>
         <button class="btn quiet small-btn" data-cmp="${id}">${isOpen ? "Weniger" : "Details"}</button></div>
     </div></div>`; }).join("");
-  const zb = t.ticket === "spar" && !t.zbLifted ? `<p class="small zb-warn"><b>Sparpreis:</b> Er gilt nur für deine gebuchten Züge. Einen anderen Zug darfst du erst nehmen, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden.</p>` : "";
+  const zbOn = t.ticket === "spar" && !t.zbLifted;
+  const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn"><b>Sparpreis:</b> Bei Möglichkeiten mit „anderer Fernzug“ gilt dein Ticket erst, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge sind frei wählbar.</p>` : "";
+  const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
     // Plan ist knapp, aber gerade in Ordnung: ruhig zeigen, dass es Ausweichmöglichkeiten gibt
     const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && !a.watch.legs.some(l => l.delay >= 3)).length, open = openCmp === `calm:${t.id}`;
     const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Ich prüfe sie ab 3 Std. vor der Abfahrt live mit.`;
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
-      ${open ? `${zb}${curRow}${rows}` : ""}<button class="btn quiet small-btn" data-cmp="calm:${t.id}">${open ? "Weniger" : "Möglichkeiten zeigen"}</button></section>`;
+      ${open ? `${zb}${curRow}${rows}` : ""}<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px"><button class="btn quiet small-btn" data-cmp="calm:${t.id}" style="flex:1">${open ? "Weniger" : "Möglichkeiten zeigen"}</button>${t.here ? "" : here}</div></section>`;
   }
-  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}</section>`;
+  return `<section class="card planb"><div class="k">${lost ? "So kommst du jetzt weiter" : "Vergleich"}</div>${zb}${curRow}${rows}${t.here ? "" : `<div style="margin-top:8px">${here}</div>`}</section>`;
 }
 
 // Live-Zustand einer Möglichkeit (wird ab 3 Std. vor Abfahrt mitbeobachtet)
@@ -212,18 +214,23 @@ let hereBusy = null;
 function hereCard(t) {
   if (t.phase === "done") return "";
   if (hereBusy === t.id) return `<section class="card"><div class="k">Ab deinem Standort</div><div class="spinner"></div></section>`;
-  if (!t.here) return `<button class="btn quiet" data-here="${t.id}">Möglichkeiten ab meinem Standort</button>`;
-  const ref = Date.parse(t.plan.arr);
+  if (!t.here) return t.transfers.some(x => x.status !== "DONE" && (x.alt?.length || x.status === "RISK" || x.status === "LOST")) ? ""
+    : `<button class="btn sec" data-here="${t.id}">${PIN} Verbindungen ab meinem Standort</button>`;
+  const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
+  const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const rows = t.here.list.map((a, i) => { const d = Math.round((Date.parse(a.arr) - ref) / MIN);
     return `<div class="cmp-row"><div class="cmp-tag">${a.kind === "asplanned" ? "Wie geplant" : a.transfers ? (Date.parse(a.arr) < ref - MIN ? "Früher da" : "Möglichkeit") : "Ohne Umstieg"}</div><div class="cmp-main">
       <div class="cmp-point">${a.walkStart ? `${a.walkStart} Min. zu Fuß zu ${esc(cleanStop(a.firstStop))}, ` : ""}ab <b>${hm(a.dep)}</b> ${esc(a.label)}</div>
-      <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
+      <div class="cmp-goal">Ziel <b>${hm(a.arr)}</b>${d < -1 ? ` · <b class="ok-t">${span(-d)} früher</b>` : d > 1 ? ` · ${span(d)} später` : " · wie dein Plan"}${a.transfers ? ` · ${a.transfers} Umstieg${a.transfers > 1 ? "e" : ""}` : " · ohne Umstieg"}</div>
       <div class="cmp-live">${liveBadge(a)}</div>
-      ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}
+      ${zb0 && a.zb ? `<div class="cmp-live"><span class="badge warn">anderer Fernzug</span></div>` : ""}
+      ${a.kind === "asplanned" ? "" : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|here" data-zb="${a.zb ? "1" : ""}" data-adopt-text="${esc(a.label)}, Ziel ca. ${hm(a.arr)}">Übernehmen</button></div>`}
     </div></div>`; }).join("");
-  return `<section class="card"><div class="k">Ab deinem Standort · ${hm(new Date(t.here.at).toISOString())}</div>
+  const now = t.here.mode === "now";
+  return `<section class="card"><div class="k">Ab deinem Standort · ${now ? "ab jetzt" : `zur Reisezeit (${day(t.legs[0].dep.plan)})`}</div>
     ${rows || `<p class="small muted">Keine Verbindung gefunden.</p>`}
-    <button class="btn quiet small-btn" data-here="${t.id}">Neu suchen</button></section>`;
+    <div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn quiet small-btn" data-here="${t.id}" data-mode="${now ? "now" : "trip"}" style="flex:1">Neu suchen</button>
+      <button class="btn quiet small-btn" data-here="${t.id}" data-mode="${now ? "trip" : "now"}" style="flex:1">${now ? "Zur Reisezeit suchen" : "Ab jetzt suchen"}</button></div></section>`;
 }
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
@@ -288,7 +295,7 @@ function renderTrip(t, many) {
     <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
-    ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted ? " Achtung: Dein Sparpreis gilt nur für die gebuchten Züge, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
+    ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Das ist ein anderer Fernzug – mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
     ${t.status === "WATCH" || t.status === "OK" ? nextCard(t.next) + planBCard(t) : planBCard(t) + nextCard(t.next)}
     ${hereCard(t)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
@@ -354,7 +361,7 @@ function bindCommon() {
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
     const [id, k, idx, src] = b.dataset.adopt.split("|"), t = trips.find(x => x.id === id);
-    const zbWarn = t && t.ticket === "spar" && !t.zbLifted ? "\n\nAchtung Sparpreis: Die Zugbindung ist noch nicht aufgehoben. Mit einem anderen Zug kann ein neues Ticket fällig werden." : "";
+    const zbWarn = t && t.ticket === "spar" && !t.zbLifted && b.dataset.zb ? "\n\nAchtung Sparpreis: Hier fährst du mit einem anderen Fernzug. Das geht erst, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden." : "";
     if (!confirm(`Diese Verbindung übernehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nIch überwache dann die neue Verbindung. Du kannst das rückgängig machen.`)) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
     await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
@@ -365,7 +372,7 @@ function bindCommon() {
     if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
     hereBusy = id; render();
     navigator.geolocation.getCurrentPosition(async pos => {
-      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude } }); trips = trips.map(x => (x.id === id ? v : x)); }
+      try { const v = await api(`/api/trips/${id}/here`, { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude, mode: b.dataset.mode || "trip" } }); trips = trips.map(x => (x.id === id ? v : x)); }
       catch (e) { alert(e.message); }
       hereBusy = null; render();
     }, err => { hereBusy = null; render(); alert(err.code === 1 ? "Ohne Erlaubnis für den Standort kann ich nicht ab hier suchen. Du kannst sie in den Browser-Einstellungen erteilen." : "Standort gerade nicht verfügbar. Bitte gleich noch einmal versuchen."); },
@@ -395,6 +402,7 @@ function startWizard() { W = { step: "route", mode: "route", legs: [], station: 
 const dur = m => (m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60} Min.` : `${m} Min.`);
 // ---------- Datum & Uhrzeit: Schnellwahl + Monatskalender + Uhrzeit ----------
 // key: Feld in W ("when" für Von–Nach, "from" für die Abfahrtstafel). W.cal = offener Kalender, W.calM = angezeigter Monat.
+const PIN = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>`;
 const CAL_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:-3px;margin-right:8px"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`;
 const startOfDay = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const sameDay = (a, b) => startOfDay(a) === startOfDay(b);
@@ -444,7 +452,8 @@ const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffse
 function stationField(id, label, val) {
   return val
     ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
-    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}"><ul class="list" id="${id}Res"></ul>`;
+    : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}">
+      ${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}<ul class="list" id="${id}Res"></ul>`;
 }
 
 function connList(list) {
@@ -488,6 +497,20 @@ function renderWizard() {
       inp.oninput = () => { (W.typed ||= {})[id] = inp.value; saveW(); clearTimeout(t); t = setTimeout(find, 250); };
       if (inp.value.trim().length >= 2) find();          // nach dem Neuzeichnen die Treffer wieder zeigen
     }
+    // Von: Bahnhöfe in der Nähe des Standorts zur Auswahl
+    $app.querySelectorAll("[data-near]").forEach(b => b.onclick = () => {
+      if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
+      const ul = document.getElementById(`${b.dataset.near}Res`); ul.innerHTML = `<li><div class="spinner"></div></li>`;
+      navigator.geolocation.getCurrentPosition(async pos => {
+        try {
+          const list = await api(`/api/stations/near?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
+          ul.innerHTML = list.length ? list.map((st, i) => `<li><button data-ns="${i}"><b>${esc(st.name)}</b><br><span class="small muted">ca. ${st.dist < 1000 ? `${Math.round(st.dist / 10) * 10} m` : `${(st.dist / 1000).toFixed(1).replace(".", ",")} km`} entfernt</span></button></li>`).join("")
+            : `<li class="muted small">Kein Bahnhof in der Nähe gefunden – bitte Namen eingeben.</li>`;
+          ul.querySelectorAll("[data-ns]").forEach(x => x.onclick = () => { W.rFrom = list[+x.dataset.ns]; if (W.typed) delete W.typed.rf; render(); });
+        } catch (e) { ul.innerHTML = `<li class="err">${esc(e.message)}</li>`; }
+      }, err => { ul.innerHTML = ""; alert(err.code === 1 ? "Ohne Erlaubnis für den Standort geht das nicht. Du kannst sie in den Browser-Einstellungen erteilen." : "Standort gerade nicht verfügbar."); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+    });
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });

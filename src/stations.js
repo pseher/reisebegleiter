@@ -43,6 +43,13 @@ export function nearest(lat, lon, maxM = 600) {
   return best && Math.sqrt(bd) <= maxM ? { eva: best.eva, name: displayName(best), dist: Math.round(Math.sqrt(bd)) } : null;
 }
 
+// Bahnhöfe in der Nähe eines Standorts (nächste zuerst)
+export function nearby(lat, lon, maxM = 2500, limit = 4) {
+  const kx = Math.cos(lat * Math.PI / 180) * 111320, ky = 110540;
+  return index().map(s => ({ s, d: Math.hypot((s.lon - lon) * kx, (s.lat - lat) * ky) })).filter(x => x.d <= maxM)
+    .sort((a, b) => a.d - b.d).slice(0, limit).map(({ s, d }) => ({ eva: s.eva, name: displayName(s), dist: Math.round(d) }));
+}
+
 export async function searchStations(env, q) {
   if (env.MOCK === "1") { const f = fold(q); return MOCK_STATIONS.filter(s => fold(s.name).includes(f)).slice(0, 8); }
   return search(q);

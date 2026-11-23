@@ -1,10 +1,10 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
-import { searchStations, byEva } from "./stations.js";
+import { searchStations, byEva, nearby } from "./stations.js";
 import { connections, resolveConnection, geocodeStop } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
-import { evaluate } from "./engine.js";
+import { evaluate, changesFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
 import { vapid, b64u } from "./push.js";
 
@@ -34,8 +34,9 @@ function view(trip, now = Date.now()) {
   const current = { dep: iso(v.legs[0].dep.rt), arr: iso(v.legs[v.legs.length - 1].arr.rt), transfers: v.transfers.length,
     minGap: open.length ? Math.min(...open.map(t => t.gap)) : null, label: v.legs.map(l => l.label).join(" → ") };
   const canUndo = !!st.undo?.legs?.length && now - (st.undo.at || 0) < 3 * 3600e3 && v.phase !== "done";
+  const undoZb = canUndo && changesFV(st.undo.legs, trip.legs);       // nur dann betrifft die Änderung die Zugbindung
   const here = st.here && now - st.here.at < 30 * MIN ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
-  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, here, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, undoZb, here, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: st.alt?.[k] || [], altChecked: !!st.altAt?.[k] })) };
@@ -141,6 +142,13 @@ async function api(req, env, url) {
   if (!dev) return fail(401, "Gerät unbekannt");
 
   if (p === "/api/stations") return json(await searchStations(env, url.searchParams.get("q")));
+  // Bahnhöfe in der Nähe (für „Von: mein Standort“) – der Standort wird nicht gespeichert
+  if (p === "/api/stations/near") {
+    const lat = +url.searchParams.get("lat"), lon = +url.searchParams.get("lon");
+    if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
+    if (env.MOCK === "1") return json([{ eva: "8011160", name: "Berlin Hbf", dist: 800 }, { eva: "8010205", name: "Leipzig Hbf", dist: 2400 }]);
+    return json(nearby(lat, lon));
+  }
 
   if (p === "/api/departures") {
     const eva = url.searchParams.get("eva"), t = Date.parse(url.searchParams.get("time") || "") || Date.now();
@@ -237,8 +245,9 @@ async function api(req, env, url) {
     const lat = +b.lat, lon = +b.lon;
     if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
     const now = Date.now(), here = { lat: +lat.toFixed(4), lon: +lon.toFixed(4) };
-    const list = await planFromHere(env, t, evaluate(t, now), here, now);
-    t.state = { ...(t.state || {}), here: { at: now, list } };
+    const mode = b.mode === "now" ? "now" : "trip";
+    const list = await planFromHere(env, t, evaluate(t, now), here, now, mode);
+    t.state = { ...(t.state || {}), here: { at: now, mode, list } };
     await db.update(env, "rb_trips", t.id, { state: t.state });
     return json(view(t, now));
   }

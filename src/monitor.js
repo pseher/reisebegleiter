@@ -1,5 +1,5 @@
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
-import { evaluate, diff, transferMinutes } from "./engine.js";
+import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
 import { findJourney } from "./openboards.js";
 import { connections, resolveConnection, resolveLeg } from "./routing.js";
 import { search as searchStationsSync } from "./stations.js";
@@ -102,6 +102,8 @@ export async function planB(env, trip, v, k, now) {
   const later = all.filter(x => x !== safer && x !== faster && x.arr > curArr + 2 * MIN).sort((a, b) => a.arr - b.arr)[0];
   if (later) out.push(mk(later, "later"));
   const res = out.slice(0, 3);
+  const replaced = before ? trip.legs : trip.legs.slice(k + 1);
+  for (const a of res) a.zb = a.kind === "stay" ? replaced.some(l => l.label !== curLeg.label && isFVLeg(l)) : changesFV(replaced, a.legs);
   await watchAlts(env, res, now, own).catch(e => console.log("Alternativen beobachten:", e.message));
   return res;
 }
@@ -139,13 +141,15 @@ export async function watchAlts(env, alts, now, own = 0, cache = new Map()) {
 const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) || 0) || Date.parse(s.plan);
 
 // Alternativen ab dem aktuellen Standort (auf Wunsch aus der App): bis zu 3 Verbindungen zum Ziel, live mitgeprüft
-export async function planFromHere(env, trip, v, here, now) {
+// mode "trip": im Zeitraum der Reise (ab ca. 75 Min. vor der geplanten Abfahrt) – "now": ab sofort
+export async function planFromHere(env, trip, v, here, now, mode = "trip") {
   const last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
+  const from = mode === "now" ? now : Math.max(now, v.legs[0].dep.plan - 75 * MIN);
   const to = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!to) return [];
   const [normal, roomy] = await Promise.all([
-    connections(env, here, to, now, own).catch(() => []),
-    connections(env, here, to, now, Math.max(own, 5) + 7).catch(() => []),
+    connections(env, here, to, from, own).catch(() => []),
+    connections(env, here, to, from, Math.max(own, 5) + 7).catch(() => []),
   ]);
   // „Wie geplant“ nur, wenn es genau deine Bahn-Züge sind (Busse/U-Bahn davor dürfen abweichen)
   const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => l.label.replace(/\s/g, "")).join("|");
@@ -163,6 +167,7 @@ export async function planFromHere(env, trip, v, here, now) {
     dep: new Date(rtOf(c.legs[0].from)).toISOString(), depPlan: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", firstStop: c.legs[0].from.name,
     arr: new Date(rtOf(c.legs[c.legs.length - 1].to)).toISOString(), arrPlan: c.legs[c.legs.length - 1].to.plan, minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null,
     toName, legs: c.legs }));
+  for (const a of out) a.zb = changesFV(trip.legs, a.legs);
   await watchAlts(env, out, now, own).catch(e => console.log("Standort beobachten:", e.message));
   return out;
 }
@@ -183,6 +188,7 @@ async function planToMust(env, trip, v, k, mi, now, own) {
       toName: (trip.legs[trip.legs.length - 1].to.name || "").replace(/\s*\(tief\)$/i, ""), reach: `${must.label} in ${must.from.name} erreicht`, legs: c.legs }));
 }
 const nearestEvaByName = name => searchStationsSync(name)?.[0]?.eva || "";
+const isFVLeg = l => /^(ICE|IC|EC|ECE|ICD|RJX?|NJ|EN|TGV|EST|D)\s?\d/i.test(String(l?.label || ""));
 const placeOf = s => (s?.eva ? { eva: s.eva, lat: s.lat, lon: s.lon } : s?.lat != null && s?.lon != null ? { lat: s.lat, lon: s.lon } : null);
 
 // Bewertung + Plan B + Meldungen für eine Reise (nach dem Beobachten)
