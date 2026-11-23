@@ -243,6 +243,30 @@ function liveBadge(a) {
   return late.length ? late.map(l => `<span class="badge warn">${esc(l.label)} +${l.delay}</span>`).join(" ") : `<span class="badge ${w.live ? "good" : ""}">${w.live ? "pünktlich" : "nur Fahrplan"}</span>`;
 }
 
+// ---------- SOS: im Zug, Verspätung angesagt → sofort Ausstiege und Alternativen ----------
+let sosBusy = null;
+const sosAvailable = t => t.phase === "enroute" || (t.phase === "before" && Date.parse(t.legs[0].dep.rt) - Date.now() < 60 * MIN);
+function sosCard(t) {
+  if (sosBusy === t.id) return `<section class="card sos"><div class="k">SOS</div><p style="margin:0">Ich ordne deinen Zug zu und suche, wie du am schnellsten ans Ziel kommst …</p><div class="spinner"></div></section>`;
+  const s = t.sos; if (!s) return "";
+  const i = s.info || {}, zb0 = t.ticket === "spar" && !t.zbLifted;
+  const where = i.onTrain ? `Du bist vermutlich in <b>${esc(i.label)}</b>${i.near ? ` bei ${esc(i.near)}` : ""}.` : `Nächster Zug laut Plan: <b>${esc(i.label)}</b>.`;
+  const exits = (s.exits || []).slice(0, 4).map(x => `${esc(x.name)} ${hm(x.arr)}${x.delay >= 3 ? ` <span class="late">+${x.delay}</span>` : ""}`).join(" · ");
+  const ci = Math.max(0, t.current), mine = { ...t, legs: t.legs.slice(ci), transfers: t.transfers.slice(ci) };
+  const plan = `<div class="cmp-row cur"><div class="cmp-tag">Dein Plan${s.plan && !s.plan.ok ? " – klappt so nicht mehr" : ""}</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, s.plan?.arr || t.plan.arr, null, t.planArr)}${stepsHtml(planSteps(mine))}</div></div>`;
+  const rows = (s.list || []).map((a, k) => `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${a.stayOn ? "Sitzen bleiben" : `Aussteigen in ${esc(cleanStop(a.at))}`}</div><div class="cmp-main">
+      <div class="small">Mit ${esc(i.label)} bis ${esc(cleanStop(a.at))}, an <b>${hm(a.exitAt)}</b>${a.exitDelay >= 3 ? ` <span class="late">+${a.exitDelay}</span>` : ""}</div>
+      ${a.stayOn ? `<div class="cmp-times">Ziel <b>${hm(a.arr)}</b></div>` : losZiel(a.dep, a.arr, null, t.planArr)}${a.stayOn ? "" : stepsHtml(altSteps(a))}
+      <div class="cmp-live">${a.stayOn ? "" : liveBadge(a)}${zb0 && a.zb ? ` <span class="badge warn">anderer Fernzug</span>` : ""}</div>
+      <div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|${a.from}|${k}|sos" data-zb="${a.zb ? "1" : ""}" data-adopt-text="Aussteigen in ${esc(cleanStop(a.at))} (${hm(a.exitAt)}), Ziel ca. ${hm(a.arr)}\n${esc(a.label)}">Übernehmen</button></div>
+    </div></div>`).join("");
+  return `<section class="card sos"><div class="k">SOS · Stand ${hm(new Date(s.at).toISOString())}</div>
+      <p style="margin:0 0 4px">${where}${i.located ? "" : ` <span class="small muted">(ohne Standort)</span>`}</p>
+      ${exits ? `<p class="small muted" style="margin:0">Nächste Halte: ${exits}</p>` : ""}
+      <div class="seg-info small"><span></span><span><button class="link" data-sos="${t.id}">↻ neu</button> · <button class="link" data-sosx="${t.id}">✕ schließen</button></span></div></section>
+    <div class="tiles">${plan}${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine andere Verbindung gefunden. Ich behalte deinen Zug im Blick.</p></div>`}</div>`;
+}
+
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
 let hereBusy = null;
 // Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
@@ -321,7 +345,7 @@ function timeline(t) {
         ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr Pflicht" : `${kindWord(l)} muss ich bekommen`}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];
-    if (tr) { const nx = t.legs[i + 1], walk = cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
+    if (tr) { const nx = t.legs[i + 1], walk = l.arr.eva && nx.dep.eva ? l.arr.eva !== nx.dep.eva : cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
       rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
       <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : ""} · ${transferText(tr)}</span>
       ${walk && tr.status !== "DONE" ? walkBtn(l.arr, nx.dep) : ""}</li>`); }
@@ -349,6 +373,8 @@ function renderTrip(t, many) {
     <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}" style="flex:0 0 auto;margin-top:10px">${isFav(t) ? "★" : "☆"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
+    ${sosAvailable(t) && !t.sos && sosBusy !== t.id ? `<button class="btn sos-btn" data-sos="${t.id}">SOS · Verspätung? Sofort Alternativen</button>` : ""}
+    ${sosCard(t)}
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du hast eine andere Verbindung übernommen.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Das ist ein anderer Fernzug – mit Sparpreis erst, wenn die Zugbindung aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Rückgängig</button></div>` : ""}
     ${t.missed != null ? nextCard(t.next, t) + hereCard(t) : t.status === "WATCH" || t.status === "OK" ? nextCard(t.next, t) + hereCard(t) + planBCard(t) : hereCard(t) + planBCard(t) + nextCard(t.next, t)}
     ${t.zbLifted ? `<div class="banner"><b>Zugbindung voraussichtlich aufgehoben.</b> Du darfst nach den DB-Regeln einen anderen Zug nehmen. <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
@@ -418,7 +444,7 @@ function bindCommon() {
     const zbWarn = t && t.ticket === "spar" && !t.zbLifted && b.dataset.zb ? "\n\nAchtung Sparpreis: Hier fährst du mit einem anderen Fernzug. Das geht erst, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden." : "";
     if (!confirm(`Diese Verbindung übernehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nIch überwache dann die neue Verbindung. Du kannst das rückgängig machen.`)) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
-    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here" } }).catch(e => alert(e.message));
+    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here", sos: src === "sos" } }).catch(e => alert(e.message));
     await loadTrips().catch(() => {}); render();
   });
   $app.querySelectorAll("[data-missed]").forEach(b => b.onclick = async () => {
@@ -432,6 +458,21 @@ function bindCommon() {
     const id = b.dataset.caught; b.disabled = true;
     try { const v = await api(`/api/trips/${id}/missed`, { method: "DELETE" }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
     render();
+  });
+  // SOS: Standort versuchen (höchstens 8 Sek.), sonst ohne – Suche läuft so oder so
+  $app.querySelectorAll("[data-sos]").forEach(b => b.onclick = () => {
+    const id = b.dataset.sos; sosBusy = id; render(); scrollTo(0, 0);
+    const go = async pos => {
+      try { const v = await api(`/api/trips/${id}/sos`, { method: "POST", body: pos ? { lat: pos.coords.latitude, lon: pos.coords.longitude } : {} }); trips = trips.map(x => (x.id === id ? v : x)); }
+      catch (e) { alert(e.message); }
+      sosBusy = null; render();
+    };
+    if (!navigator.geolocation) return go(null);
+    navigator.geolocation.getCurrentPosition(go, () => go(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+  });
+  $app.querySelectorAll("[data-sosx]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.sosx; trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
+    await api(`/api/trips/${id}/sos`, { method: "DELETE" }).catch(() => {});
   });
   $app.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => {
     const id = b.dataset.hide; trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();

@@ -2,7 +2,7 @@
 import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
 import { findJourney } from "./openboards.js";
 import { connections, resolveConnection, resolveLeg } from "./routing.js";
-import { search as searchStationsSync } from "./stations.js";
+import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
 
@@ -280,17 +280,26 @@ export async function deliver(env, sub, msg) {
 }
 
 // Plan B übernehmen: Teilstrecken ab dem Abweichungspunkt ersetzen, Echtzeit und Meldungsstand dafür zurücksetzen
-export async function adopt(env, trip, k, idx, fromHere = false) {
-  const a = fromHere ? trip.state?.here?.list?.[idx] : trip.state?.alt?.[k]?.[idx];
-  if (fromHere && a && a.from !== "start") k = +a.from;
-  if (!a?.legs?.length) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
+export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false) {
+  const a = fromSos ? trip.state?.sos?.list?.[idx] : fromHere ? trip.state?.here?.list?.[idx] : trip.state?.alt?.[k]?.[idx];
+  if ((fromHere || fromSos) && a && a.from !== "start") k = +a.from;
+  if (!a?.legs?.length && !a?.cut) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
   const st0 = trip.state || {};
   const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null, missed: st0.missed || null };
   const origArr = st0.origArr || trip.legs[trip.legs.length - 1].to.plan;   // ursprünglich gebuchte Ankunft merken
-  const fresh = (await resolveConnection(env, a.legs)).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
+  const fresh = (a.legs?.length ? await resolveConnection(env, a.legs) : []).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
   const tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
-  if ((a.kind === "stay" || a.stay) && fresh.length) {
+  if (a.cut) {
+    // SOS: im aktuellen Zug bis zum gewählten Halt fahren, dann weiter mit der neuen Verbindung
+    const cur = trip.legs[k], b = byEva(a.cut.eva) || {};
+    let head = { ...cur, must: false, to: { eva: a.cut.eva, name: a.cut.name, plan: a.cut.plan, platform: a.cut.platform || "", lat: b.lat ?? null, lon: b.lon ?? null } };
+    if (fresh[0] && fresh[0].label.replace(/\s/g, "") === cur.label.replace(/\s/g, "")) head = { ...head, to: fresh.shift().to };   // erst noch im selben Zug weiter
+    const o = { ...((trip.obs || [])[k] || {}) }; delete o.arr;
+    trip.legs = [...trip.legs.slice(0, k), head, ...fresh];
+    trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.map(() => ({}))];
+    keep = k;
+  } else if ((a.kind === "stay" || a.stay) && fresh.length) {
     // Im selben Zug weiterfahren: die aktuelle Teilstrecke bis zum neuen Ausstieg verlängern
     const cur = trip.legs[k];
     trip.legs = [...trip.legs.slice(0, k), { ...cur, must: false, to: fresh[0].to }, ...fresh.slice(1)];
@@ -307,10 +316,10 @@ export async function adopt(env, trip, k, idx, fromHere = false) {
   }
   // Meldungsstand nur für die unveränderten Teilstrecken behalten
   // (beim Sitzenbleiben bleibt die Abfahrt der aktuellen Teilstrecke gleich, nur ihre Ankunft ist neu)
-  const depKeep = a.kind === "stay" || a.stay ? keep + 1 : keep;
+  const depKeep = a.kind === "stay" || a.stay || a.cut ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, missed: null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, missed: null };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
