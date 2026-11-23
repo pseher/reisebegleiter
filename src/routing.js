@@ -58,7 +58,8 @@ export async function connections(env, fromEva, toEva, timeMs) {
   const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
     numItineraries: "6", searchWindow: "5400", detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
   const seen = new Set();
-  return simplify(data).filter(c => { const k = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
+  return simplify(data).filter(c => !c.legs.some(l => l.mode === "COACH" || l.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
+    .filter(c => { const k = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep)).slice(0, 8);
 }
 
