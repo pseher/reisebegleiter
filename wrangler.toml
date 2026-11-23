@@ -1,0 +1,24 @@
+name = "reisebegleiter"
+main = "src/worker.js"
+compatibility_date = "2026-11-01"
+keep_vars = true                       # im Dashboard gesetzte Werte beim Bereitstellen nicht löschen
+
+# App (PWA) und Schnittstelle laufen im selben Worker – eine Adresse, kein CORS
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[vars]
+SUPABASE_URL = "https://vhwajjbrpibdurlovrrz.supabase.co"   # PlanFlink-Projekt, Tabellen mit Präfix rb_
+VAPID_SUBJECT = "mailto:kontakt@herdzeit.de"
+
+[triggers]
+crons = ["* * * * *"]                  # jede Minute: laufende Reisen prüfen
+
+# Geheime Werte NICHT hier eintragen, sondern:
+#   npx wrangler secret put SUPABASE_SERVICE_KEY   (Supabase → Project Settings → API → Secret key)
+#   npx wrangler secret put DB_CLIENT_ID           (DB API Marketplace → Anwendung → Client ID)
+#   npx wrangler secret put DB_API_KEY             (DB API Marketplace → Anwendung → API Key)
+#   npx wrangler secret put VAPID_JWK              (node tools/vapid.mjs)
