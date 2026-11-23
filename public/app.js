@@ -129,8 +129,11 @@ function nextCard(n, t) {
       <div><b>${esc(n.label)}</b> ab ${esc(cleanStop(n.station))} hast du nicht bekommen.</div>
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
   // „Zug verpasst?“ – vor der Abfahrt und bis 15 Min. danach (falls man doch nicht eingestiegen ist)
-  const missBtn = t && n.i != null && (n.kind === "board" || n.kind === "change" || ((n.kind === "ride-change" || n.kind === "ride-arrive") && Date.now() - Date.parse(n.depAt) < 15 * MIN))
-    ? `<button class="link small miss" data-missed="${t.id}|${n.i}">${n.kind.startsWith("ride") ? "Doch nicht eingestiegen?" : "Zug verpasst?"}</button>` : "";
+  // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
+  const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
+  const word = leg && MODE[leg.mode] ? ({ Bus: "Bus", Tram: "Tram", "U-Bahn": "U-Bahn", Fähre: "Fähre" }[MODE[leg.mode][1]] || "Zug") : "Zug";
+  const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 120 * MIN
+    ? `<button class="link small miss" data-missed="${t.id}|${n.i}">${word} verpasst / nicht eingestiegen?</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b> – oben siehst du, wie du weiterkommst.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
@@ -421,7 +424,7 @@ function bindCommon() {
   });
   $app.querySelectorAll("[data-missed]").forEach(b => b.onclick = async () => {
     const [id, i] = b.dataset.missed.split("|");
-    if (!b.closest(".seg-info") && !confirm("Zug verpasst bzw. nicht eingestiegen?\n\nIch suche dir sofort die nächsten Verbindungen ab diesem Bahnhof.")) return;
+    if (!b.closest(".seg-info") && !confirm("Verpasst bzw. nicht eingestiegen?\n\nIch suche dir sofort die nächsten Verbindungen ab dieser Haltestelle.")) return;
     hereBusy = id; render();
     try { const v = await api(`/api/trips/${id}/missed`, { method: "POST", body: { i: +i } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
     hereBusy = null; render(); scrollTo(0, 0);
