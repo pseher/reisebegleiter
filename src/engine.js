@@ -57,7 +57,9 @@ export function evaluate(trip, now = Date.now()) {
     // Vom Fahrplan so geplante Umstiege gelten als machbar: höchstens die geplante Zeit verlangen (mind. 2 Min.)
     // Eigene Mindest-Umstiegszeit des Reisenden (Einstellung) gilt immer
     const own = +trip.legs[i].minT || 0;
-    const need = Math.max(2, own, Math.min(walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform), planGap));
+    const usual = walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform);
+    const need = Math.max(2, own, Math.min(usual, planGap));
+    const tightPlan = planGap < Math.max(own, usual) + 3;              // schon im Fahrplan knapp → Ausweichmöglichkeiten bereithalten
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until, a.delay), spare = gap - need;
     let status, reason = "";
     const cancel = a.cancelled || d.cancelled || legs[i].dep.cancelled;
@@ -68,7 +70,7 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
-    transfers.push({ i, at: a.name, eva: a.eva, gap, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
+    transfers.push({ i, at: a.name, eva: a.eva, gap, planGap, tightPlan, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
       fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depRt: d.rt, arrRt: a.rt });
   }
   const openTransfers = transfers.filter(t => t.status !== "DONE");
@@ -228,7 +230,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
 // Kurzer Vorschlag für Meldungen: was tun, wann am Ziel, Unterschied zum Plan
 export function altText(alts, refArr, spar = false) {
   if (!alts?.length) return "";
-  const a = alts[0], d = Number.isFinite(refArr) && a.arr ? Math.round((T(a.arr) - refArr) / MIN) : null;
+  const a = alts.find(x => x.watch?.ok !== false) || alts[0], d = Number.isFinite(refArr) && a.arr ? Math.round((T(a.arr) - refArr) / MIN) : null;
   const delta = d == null ? "" : d <= -2 ? ` – ${d * -1} Min. früher` : d >= 2 ? ` – ${d} Min. später` : " – etwa gleich";
   const what = a.kind === "stay" ? `Sitzen bleiben in ${a.label}` : a.reach ? `ab ${a.at} ${hm(T(a.dep))} mit ${a.label.split(" → ")[0]}, so erreichst du ${a.label.split(" → ").pop()}`
     : `ab ${a.at} ${hm(T(a.dep))}${a.depPl ? ` (Gleis ${a.depPl})` : ""} mit ${a.label}`;

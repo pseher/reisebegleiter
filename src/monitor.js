@@ -58,8 +58,8 @@ export async function planB(env, trip, v, k, now) {
   const before = now < v.legs[0].dep.rt - MIN;
   const fromEva = before ? trip.legs[0].from.eva : t.eva;
   if (!fromEva) return [];
-  // Vor der Abfahrt auch frühere Abfahrten zulassen (bis 45 Min. vor Plan)
-  const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 45 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
+  // Vor der Abfahrt auch frühere Abfahrten zulassen (bis 75 Min. vor Plan) – „ein paar Minuten eher los“
+  const fromMs = before ? Math.max(now + 2 * MIN, v.legs[0].dep.plan - 75 * MIN) : Math.max(now, t.arrRt + Math.max(own, 3) * MIN);
   const current = trip.legs.slice(before ? 0 : k + 1).map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|");
   const curArr = v.legs[v.legs.length - 1].arr.rt;
   const curMin = v.transfers.filter(x => x.status !== "DONE").reduce((m, x) => Math.min(m, x.gap), Infinity);
@@ -100,7 +100,40 @@ export async function planB(env, trip, v, k, now) {
   // Später: nächste entspannte Möglichkeit, falls der Plan kippt
   const later = all.filter(x => x !== safer && x !== faster && x.arr > curArr + 2 * MIN).sort((a, b) => a.arr - b.arr)[0];
   if (later) out.push(mk(later, "later"));
-  return out.slice(0, 3);
+  const res = out.slice(0, 3);
+  await watchAlts(env, res, now, own).catch(e => console.log("Alternativen beobachten:", e.message));
+  return res;
+}
+
+// Alternativen gleichzeitig beobachten: jede Teilstrecke den DB-Echtzeitdaten zuordnen (ab 3 Std. vor Abfahrt)
+// und festhalten, ob sie pünktlich ist und ob ihre Umstiege mit Echtzeit noch klappen.
+export async function watchAlts(env, alts, now, own = 0, cache = new Map()) {
+  for (const a of alts) {
+    if (!a.legs?.length || Date.parse(a.depPlan || a.dep) - now > 3 * 3600e3) { a.watch = null; continue; }
+    const legs = [];
+    for (const l of a.legs) {
+      const r = l.rail ? await resolveLeg(env, l, cache).catch(() => null) : null;
+      const dPlan = Date.parse(l.from.plan), aPlan = Date.parse(l.to.plan);
+      const dRt = Date.parse(r?.live?.dep?.rt || l.from.rt || l.from.plan), live = !!r?.jid;
+      const dDelay = Math.round((dRt - dPlan) / MIN);
+      const aRt = r?.live?.arr?.rt ? Date.parse(r.live.arr.rt) : Math.max(Date.parse(l.to.rt || l.to.plan), aPlan + Math.max(0, dDelay) * MIN);
+      legs.push({ label: l.label, live, liveArr: !!r?.live?.arr?.rtKnown, dep: dRt, arr: aRt, delay: dDelay, arrDelay: Math.round((aRt - aPlan) / MIN),
+        pl: r?.live?.dep?.pl || l.from.track || "", c: !!(l.cancelled || r?.live?.dep?.c || r?.live?.arr?.c) });
+    }
+    const gaps = legs.slice(1).map((l, i) => Math.round((l.dep - legs[i].arr) / MIN));
+    const gi = gaps.length ? gaps.indexOf(Math.min(...gaps)) : -1;
+    const point = gi < 0 ? null : { at: String(a.legs[gi].to.name || "").replace(/\s*\(tief\)$/i, ""), arr: new Date(legs[gi].arr).toISOString(), dep: new Date(legs[gi + 1].dep).toISOString(), gap: gaps[gi] };
+    const minGap = gaps.length ? Math.min(...gaps) : null, cancelled = legs.some(l => l.c);
+    const ok = !cancelled && (minGap == null || minGap >= Math.max(2, Math.min(own || 2, 5)));
+    a.watch = { t: now, point, live: legs.some(l => l.live), delay: legs[0].delay, arrDelay: legs[legs.length - 1].arrDelay, cancelled, minGap, ok,
+      legs: legs.map(l => ({ label: l.label, delay: l.delay, c: l.c, live: l.live })) };
+    a.dep = new Date(legs[0].dep).toISOString();
+    // Ohne echte Prognose fürs Ziel die bisherige (ggf. höhere) Schätzung nicht unterbieten
+    const lastL = legs[legs.length - 1], prevArr = Date.parse(a.arr) || 0;
+    a.arr = new Date(lastL.liveArr ? lastL.arr : Math.max(lastL.arr, prevArr)).toISOString();
+    a.depPl = legs[0].pl || a.depPl;
+  }
+  return alts;
 }
 const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) || 0) || Date.parse(s.plan);
 
@@ -125,10 +158,16 @@ const nearestEvaByName = name => searchStationsSync(name)?.[0]?.eva || "";
 export async function assess(env, trip, now, cache) {
   let v = evaluate(trip, now);
   const prev = { ...(trip.state || {}) }, alt = { ...(prev.alt || {}) }, altAt = { ...(prev.altAt || {}) };
+  const firstDep = v.legs[0].dep.rt;
   for (const t of v.transfers) {
     const k = v.transfers.indexOf(t);
-    if (t.status === "RISK" || t.status === "LOST" || t.status === "WATCH") {
-      if (!alt[k] || now - (altAt[k] || 0) > (t.status === "WATCH" ? 10 : 5) * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
+    const acute = t.status === "RISK" || t.status === "LOST" || t.status === "WATCH";
+    // Schon im Fahrplan knapp: ab 4 Std. vor Reisebeginn Ausweichmöglichkeiten bereithalten und beobachten
+    const calm = t.status === "OK" && t.tightPlan && firstDep - now < 4 * 3600e3;
+    if (acute || calm) {
+      // je näher und je kritischer, desto öfter (Alternativen werden dabei auch mit Echtzeit geprüft)
+      const every = t.status === "RISK" || t.status === "LOST" ? 4 : t.arrRt - now < 90 * MIN ? 5 : 12;
+      if (!alt[k] || now - (altAt[k] || 0) > every * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
   }
   const { state, msgs } = diff(trip, v, { ...prev, alt }, now);
@@ -202,7 +241,7 @@ export async function adopt(env, trip, k, idx) {
   const st0 = trip.state || {};
   const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null };
   const origArr = st0.origArr || trip.legs[trip.legs.length - 1].to.plan;   // ursprünglich gebuchte Ankunft merken
-  const fresh = (await resolveConnection(env, a.legs)).map(l => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
+  const fresh = (await resolveConnection(env, a.legs)).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
   const tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
   if (a.kind === "stay" && fresh.length) {

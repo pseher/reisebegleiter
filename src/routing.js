@@ -91,7 +91,9 @@ export async function resolveLeg(env, l, cache = new Map()) {
   const e = scored[0]?.e;
   if (!e) return base;
   const arr = await findJourney(env, "arr", t.eva, e.jid, Date.parse(l.to.plan), { windows: 2, cache, label: e.label, after: dep }).catch(() => null);
+  // live: Echtzeit zum Zeitpunkt der Zuordnung (für die Beobachtung von Alternativen)
   return { ...base, jid: e.jid, label: e.label,
+    live: { dep: { rt: e.rt, pl: e.platform, c: e.cancelled, rtKnown: e.realtime }, arr: arr ? { rt: arr.rt, pl: arr.platform, c: arr.cancelled, rtKnown: arr.realtime } : null },
     from: { eva: f.eva, name: f.name, plan: e.plan, platform: e.platformPlan || e.platform || base.from.platform, lat: l.from.lat ?? byEva(f.eva)?.lat, lon: l.from.lon ?? byEva(f.eva)?.lon },
     to: { eva: t.eva, name: t.name, plan: arr?.plan || l.to.plan, platform: arr ? (arr.platformPlan || arr.platform) : base.to.platform, lat: l.to.lat ?? byEva(t.eva)?.lat, lon: l.to.lon ?? byEva(t.eva)?.lon } };
 }

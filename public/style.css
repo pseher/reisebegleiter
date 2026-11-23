@@ -159,3 +159,11 @@ textarea { width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px; 
 main { overflow-wrap: break-word; }
 .small-btn, .chip, .gl { white-space: nowrap; }
 .banner a { color: var(--accent); font-weight: 600; }
+
+/* Live-Zustand der Möglichkeiten */
+.cmp-live { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.badge { display: inline-block; font-size: 13px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.badge.good { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.badge.warn { background: var(--watch-bg); color: var(--watch); border-color: transparent; }
+.badge.bad { background: var(--lost-bg); color: var(--lost); border-color: transparent; }
+.card.calm { border: 1.5px dashed var(--line); }
