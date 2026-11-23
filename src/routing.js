@@ -103,3 +103,17 @@ export async function resolveConnection(env, legs) {
 }
 
 export { trainLabel };
+
+// Haltestelle per Name nachschlagen (MOTIS-Geocoder), bevorzugt nahe einem bekannten Punkt
+export async function geocodeStop(env, name, near) {
+  if (env.MOCK === "1" || !name) return null;
+  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+  const q = new URLSearchParams({ text: String(name).replace(/\s*\((Berlin|tief)\)/g, ""), type: "STOP", numResults: "5", language: "de",
+    ...(near ? { place: `${near.lat},${near.lon}`, placeBias: "8" } : {}) });
+  const r = await fetch(`${base}/api/v1/geocode?${q}`, { headers: { "User-Agent": "Reisebegleiter/0.1 (kontakt@herdzeit.de)", Accept: "application/json" } }).catch(() => null);
+  if (!r || !r.ok) return null;
+  const list = await r.json().catch(() => []);
+  const dist = m => near ? Math.hypot((m.lat - near.lat) * 111, (m.lon - near.lon) * 68) : 0;
+  const hit = (Array.isArray(list) ? list : []).filter(m => m.lat != null && dist(m) < 3).sort((a, b) => dist(a) - dist(b))[0];
+  return hit ? { lat: +hit.lat.toFixed(5), lon: +hit.lon.toFixed(5) } : null;
+}

@@ -1,7 +1,7 @@
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva } from "./stations.js";
-import { connections, resolveConnection } from "./routing.js";
+import { connections, resolveConnection, geocodeStop } from "./routing.js";
 import { importTrip } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, altText } from "./engine.js";
@@ -180,6 +180,20 @@ async function api(req, env, url) {
 
   if (p === "/api/trips" && method === "GET") {
     const now = Date.now(), trips = await db.tripsOf(env, dev.id), cache = new Map();
+    // Einmalig: fehlende Koordinaten von Haltestellen ohne DB-Nummer (Bus/Tram) nachschlagen – für die Fußweg-Navigation
+    for (const t of trips) {
+      if (t.state?.geo) continue;
+      let changed = false;
+      for (let i = 0; i < t.legs.length; i++) for (const side of ["from", "to"]) {
+        const st = t.legs[i][side];
+        if (st.lat != null || (st.eva && byEva(st.eva))) continue;
+        const other = withCoords(side === "to" ? (t.legs[i + 1]?.from || t.legs[i].from) : (t.legs[i - 1]?.to || t.legs[i].to));
+        const c = await geocodeStop(env, st.name, other.lat != null ? other : null).catch(() => null);
+        if (c) { t.legs[i][side] = { ...st, ...c }; changed = true; }
+      }
+      t.state = { ...(t.state || {}), geo: true };
+      await db.update(env, "rb_trips", t.id, { legs: t.legs, state: t.state }).catch(() => {});
+    }
     // Nur fällige Abfragen nachholen, damit die Anzeige frisch ist (Meldungen verschickt nur der Cron)
     const checks = trips.flatMap(t => dueChecks(t, now)).slice(0, 6);
     if (checks.length) { await observe(env, checks, now, cache); for (const t of trips) if (t._dirty) await db.update(env, "rb_trips", t.id, { obs: t.obs, updated_at: new Date().toISOString() }); }
