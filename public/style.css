@@ -76,3 +76,42 @@ input[type=search], input[type=datetime-local] { width: 100%; min-height: var(--
 @keyframes sp { to { transform: rotate(360deg); } }
 .steps { color: var(--muted); font-size: 14px; margin: 0 0 4px; }
 .err { color: var(--lost); }
+
+/* ---- Ruhige Struktur (v2) ---- */
+h2 { font-size: 22px; line-height: 1.25; margin: 2px 0 4px; }
+.sec-h { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 6px; font-weight: 700; }
+.back { background: none; border: 0; color: var(--accent); font: inherit; font-weight: 600; padding: 6px 0; cursor: pointer; }
+.trip-head h1 { font-size: 22px; margin: 4px 0 2px; }
+.trip-head p { margin: 0 0 10px; }
+.hero { padding: 14px 16px; margin: 8px 0 12px; }
+.hero p { margin: 2px 0 0; font-size: 16px; }
+.card .k, .next .k, .planb .k { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.next .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; margin-bottom: 2px; }
+.gl { display: inline-block; font-size: 15px; font-weight: 700; padding: 2px 8px; border-radius: 8px; background: var(--brand); color: #fff; vertical-align: middle; }
+.planb { border: 2px solid var(--accent); }
+.alt-row + .alt-row { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.alt-row .btn { margin-top: 10px; }
+.card.flat { padding: 4px 0; }
+.tl2 { list-style: none; margin: 0; padding: 0; }
+.leg-row > button { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; width: 100%; text-align: left; background: none; border: 0; color: var(--ink);
+  padding: 12px 14px; cursor: pointer; align-items: start; font: inherit; }
+.leg-row.past { opacity: .55; }
+.leg-row .tm { font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1.35; }
+.leg-row .tm .muted { font-weight: 500; }
+.leg-row .pl { color: var(--muted); padding-top: 2px; }
+.chip-t { display: inline-block; font-weight: 700; font-size: 14px; padding: 1px 8px; border-radius: 6px; border: 1.5px solid var(--line); }
+.detail { padding: 0 14px 12px 88px; color: var(--ink); }
+.detail div { margin: 2px 0; }
+.xfer { display: flex; gap: 10px; align-items: center; padding: 6px 14px 6px 34px; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); background: var(--bg); }
+.sdot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.d-OK, .d-DONE { background: var(--ok); } .d-WATCH { background: var(--watch); } .d-RISK { background: var(--risk); } .d-LOST { background: var(--lost); }
+.trips { list-style: none; margin: 12px 0; padding: 0; }
+.trips li + li { margin-top: 10px; }
+.trips button { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; background: var(--card); color: var(--ink); border: 0; border-radius: var(--r);
+  padding: 14px 16px; cursor: pointer; font: inherit; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.trips .tr-main { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.trips .tr-state { color: var(--muted); }
+.trips .sdot { width: 12px; height: 12px; }
+.ok-t { color: var(--ok); }
+.leg-row > button { grid-template-columns: 74px 1fr auto; }
+.detail { padding-left: 98px; }

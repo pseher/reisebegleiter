@@ -26,7 +26,7 @@ export function transferMinutes(arrEva, arrPl, depEva, depPl) {
 // Ist der Zug schon verspätet, wächst die Verspätung oft weiter → mehr Puffer, je weiter die Ankunft entfernt ist.
 // Ohne Verspätung nur ein kleiner Puffer für weit entfernte Umstiege.
 export const growthBuffer = (minutesUntilArrival, delay = 0) => (minutesUntilArrival <= 0 ? 0
-  : delay >= 3 ? Math.min(10, Math.floor(minutesUntilArrival / 20)) : Math.min(2, Math.floor(minutesUntilArrival / 60)));
+  : delay >= 3 ? Math.min(10, delay, Math.floor(minutesUntilArrival / 20)) : Math.min(2, Math.floor(minutesUntilArrival / 60)));
 
 // Halt (Abfahrt oder Ankunft) einer Teilstrecke mit Echtzeit zusammenführen
 function stop(leg, o, side) {
@@ -80,7 +80,28 @@ export function evaluate(trip, now = Date.now()) {
   const zbLifted = trip.ticket === "spar" && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
   const v = { status, phase, legs, transfers, current, finalDelay, zbLifted, legCancel: legCancel ? legCancel.i : null };
   Object.assign(v, headline(v, trip, now));
+  v.next = nextStep(v, now);
   return v;
+}
+
+// Der eine nächste Schritt für den Reisenden: einsteigen, umsteigen, aussteigen
+export function nextStep(v, now = Date.now()) {
+  const { legs, transfers } = v;
+  if (v.phase === "done") return null;
+  for (let i = 0; i < legs.length; i++) {
+    const l = legs[i];
+    if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
+      return { kind: i === 0 ? "board" : "change", at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
+        platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform),
+        cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap } : null, dest: l.arr.name };
+    }
+    if (now < l.arr.rt + MIN) {                            // unterwegs in diesem Zug
+      const t = transfers[i];
+      return { kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name,
+        platform: l.arr.platform, cancelled: l.arr.cancelled, then: t ? { label: t.toLabel, at: t.depRt, platform: t.depPl, gap: t.gap } : null };
+    }
+  }
+  return null;
 }
 
 const mins = m => (m === 1 ? "1 Min." : `${m} Min.`);
