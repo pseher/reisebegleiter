@@ -406,3 +406,6 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 /* Vor der Abfahrt, nur Fahrplan: neutral statt grün */
 .hero.s-PLAN { background: var(--card); border-color: var(--accent); } .s-PLAN .k { color: var(--accent); }
 .d-PLAN { background: var(--accent); }
+/* Wann muss ich los? */
+.acc { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.acc .chips { margin-top: 6px; }

@@ -2,7 +2,7 @@ import { flush } from "./stats.js";
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
-import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops } from "./routing.js";
+import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime } from "./routing.js";
 import { importTrip, onlyBahnLink } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
@@ -381,6 +381,18 @@ async function api(req, env, url) {
   }
 
   // Alternativen ab dem aktuellen Standort (Koordinaten kommen nur auf Knopfdruck aus der App, werden nicht dauerhaft gespeichert)
+  // Wann muss ich los? Weg vom aktuellen Standort zum Start (zu Fuß oder Auto) – Standort wird nicht gespeichert
+  const mw = /^\/api\/trips\/([0-9a-f-]{36})\/access$/i.exec(p);
+  if (mw && method === "POST") {
+    const t = await ownTrip(env, dev, mw[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const b = await req.json().catch(() => ({})), lat = +b.lat, lon = +b.lon, mode = b.mode === "CAR" ? "CAR" : "WALK";
+    if (!(lat > 35 && lat < 72 && lon > -12 && lon < 35)) return fail(400, "Standort unbekannt");
+    const to = withCoords(t.legs[0].from);
+    if (to.lat == null) return fail(400, "Für den Start kenne ich keine Lage.");
+    return json({ ...(await accessTime(env, { lat, lon }, { lat: +to.lat, lon: +to.lon }, mode)), mode, to: to.name });
+  }
+
   const mh = /^\/api\/trips\/([0-9a-f-]{36})\/here$/i.exec(p);
   if (mh && method === "DELETE") {
     const t = await ownTrip(env, dev, mh[1]);

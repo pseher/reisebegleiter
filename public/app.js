@@ -259,6 +259,33 @@ function renderRoutines() {
 }
 
 // Die laufende/nächste Fahrt groß – Ampelfarbe, Uhrzeit, Steig/Gleis, ein Satz
+// „Wann muss ich los?“ – vom aktuellen Standort, zu Fuß oder mit dem Auto. Gemerkt werden nur Minuten und Art (auf dem Gerät), nie der Standort.
+const PARK = 5;   // Auto: Zeit zum Parken und zum Bahnsteig
+let ACC = {}; try { ACC = JSON.parse(localStorage.getItem("rb_access") || "{}"); } catch {}
+const saveAcc = () => { try { localStorage.setItem("rb_access", JSON.stringify(ACC)); } catch {} };
+function accessBox(t) {
+  const a = ACC[t.id], dep = Date.parse(t.legs[0].dep.rt);
+  if (a?.busy) return `<div class="acc"><div class="spinner"></div></div>`;
+  if (!a?.min) return `<div class="acc"><span class="small"><b>Wann muss ich los?</b> Ab deinem Standort:</span>
+    <div class="chips"><button class="chip" data-acc="${t.id}|WALK">🚶 Zu Fuß</button><button class="chip" data-acc="${t.id}|CAR">🚗 Mit dem Auto</button></div>${a?.err ? `<div class="small late">${esc(a.err)}</div>` : ""}</div>`;
+  const need = a.min + (a.mode === "CAR" ? PARK : 0), go = dep - need * MIN, left = Math.round((go - Date.now()) / MIN);
+  const how = a.mode === "CAR" ? `${a.min} Min. mit dem Auto + ${PARK} Min. Parken` : `${a.min} Min. zu Fuß`;
+  return `<div class="acc"><div><b class="${left < 0 ? "late" : left <= 10 ? "warn-t" : ""}">${left < 0 ? `Los – eigentlich schon seit ${-left} Min.` : left <= 1 ? "Jetzt los!" : `Los um ${hm(go)}`}</b>
+    <span class="small muted">· ${a.rough ? "grob " : "ca. "}${how} (geschätzt, ab deinem Standort um ${hm(a.at)})</span></div>
+    <div class="chips"><button class="chip" data-acc="${t.id}|${a.mode}">↻ Neu berechnen</button><button class="chip" data-acc="${t.id}|${a.mode === "CAR" ? "WALK" : "CAR"}">${a.mode === "CAR" ? "🚶 Lieber zu Fuß" : "🚗 Lieber Auto"}</button>${walkBtn(null, { name: t.legs[0].dep.name, lat: t.legs[0].dep.lat, lon: t.legs[0].dep.lon }, a.mode)}</div></div>`;
+}
+function bindAccess() {
+  $app.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => {
+    const [id, mode] = b.dataset.acc.split("|");
+    if (!navigator.geolocation) { ACC[id] = { err: "Dein Gerät gibt keinen Standort heraus." }; return render(); }
+    ACC[id] = { busy: true }; render();
+    navigator.geolocation.getCurrentPosition(async pos => {
+      try { const r = await api(`/api/trips/${id}/access`, { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude, mode } }); ACC[id] = { min: r.min, mode: r.mode, rough: r.rough, at: Date.now() }; }
+      catch (e) { ACC[id] = { err: e.message }; }
+      saveAcc(); render();
+    }, () => { ACC[id] = { err: "Ohne Standort kann ich den Weg nicht schätzen. Bitte den Standort für Umstiegsheld erlauben." }; render(); }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
+  });
+}
 function jetztCard(t) {
   const n = t.next, lbl = n ? (/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label) : "";
   const when = t.phase === "enroute" ? "unterwegs" : inMin(t.legs[0].dep.rt);
@@ -460,6 +487,7 @@ function nextCard(n, t) {
   else if (n.kind === "board" || n.kind === "change") body = `<div class="big">${hm(n.at)} ${gl(n.platform, n)}</div>${pc ? `<div class="small">${pc}</div>` : ""}${lateLine(n.delay, n.plan)}
       <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
       <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>
+      ${t && n.kind === "board" && t.phase === "before" ? accessBox(t) : ""}
       ${n.from && cleanStop(n.from.name) !== cleanStop(n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
   else body = `<div class="big">${hm(n.at)} ${gl(n.platform, n)}</div>${lateLine(n.delay, n.plan)}
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(n.station)}</b></div>
@@ -697,14 +725,15 @@ function hereCard(t) {
 
 // Fußweg-Navigation: iPhone → Apple Karten, sonst Google Maps
 // Ziel: genaue Koordinaten des Bahnhofs (sonst Name + „Bahnhof“). Start: Koordinaten der Haltestelle, sonst der eigene Standort.
-function walkUrl(a, b) {
+function walkUrl(a, b, mode) {
+  const car = mode === "CAR";
   const has = x => x && x.lat != null && x.lon != null;
   const dest = has(b) ? `${b.lat},${b.lon}` : `${cleanStop(b.name)} Bahnhof`;
   const orig = has(a) ? `${a.lat},${a.lon}` : "";
-  if (isIOS) return `https://maps.apple.com/?${orig ? `saddr=${encodeURIComponent(orig)}&` : ""}daddr=${encodeURIComponent(dest)}&dirflg=w`;
-  return `https://www.google.com/maps/dir/?api=1${orig ? `&origin=${encodeURIComponent(orig)}` : ""}&destination=${encodeURIComponent(dest)}&travelmode=walking`;
+  if (isIOS) return `https://maps.apple.com/?${orig ? `saddr=${encodeURIComponent(orig)}&` : ""}daddr=${encodeURIComponent(dest)}&dirflg=${car ? "d" : "w"}`;
+  return `https://www.google.com/maps/dir/?api=1${orig ? `&origin=${encodeURIComponent(orig)}` : ""}&destination=${encodeURIComponent(dest)}&travelmode=${car ? "driving" : "walking"}`;
 }
-const walkBtn = (a, b) => `<a class="walk" href="${walkUrl(a, b)}" target="_blank" rel="noopener">Weg zeigen ↗</a>`;
+const walkBtn = (a, b, mode) => `<a class="walk" href="${walkUrl(a, b, mode)}" target="_blank" rel="noopener">Weg zeigen ↗</a>`;
 
 // Verkehrsmittel vor reine Liniennummern schreiben (auch für ältere Reisen)
 const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"], FERRY: ["Fähre", "Fähre"], SUBWAY: ["U", "U-Bahn"], METRO: ["U", "U-Bahn"] };
@@ -806,6 +835,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
+  bindAccess();
   bindHints();
   bindCommon();
 }

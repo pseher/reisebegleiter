@@ -236,3 +236,16 @@ export async function geocodeStop(env, name, near) {
   const hit = (Array.isArray(list) ? list : []).filter(m => m.lat != null && dist(m) < 3).sort((a, b) => dist(a) - dist(b))[0];
   return hit ? { lat: +hit.lat.toFixed(5), lon: +hit.lon.toFixed(5) } : null;
 }
+
+// Weg vom Standort zur Start-Haltestelle: Dauer zu Fuß oder mit dem Auto (der Standort wird nicht gespeichert)
+export async function accessTime(env, from, to, mode) {
+  const km = Math.hypot((from.lat - to.lat) * 111, (from.lon - to.lon) * 68);
+  const rough = () => ({ min: Math.max(1, Math.round(mode === "CAR" ? km * 1.4 / 28 * 60 + 2 : km * 1.3 / 4.5 * 60)), rough: true, km: +km.toFixed(1) });
+  if (env.MOCK === "1" || km < 0.05) return rough();
+  try {
+    const d = await motis(env, { fromPlace: `${from.lat},${from.lon}`, toPlace: `${to.lat},${to.lon}`, time: new Date().toISOString(), transitModes: "", directModes: mode, maxDirectTime: "7200" });
+    const it = (d.direct || []).find(x => x.duration > 0);
+    if (it) return { min: Math.max(1, Math.round(it.duration / 60)), rough: false, km: +km.toFixed(1) };
+  } catch (e) { console.log("Weg zur Haltestelle:", e.message); }
+  return rough();
+}

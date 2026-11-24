@@ -140,3 +140,13 @@ test("Doppelt getippt: dieselbe Reise wird nur einmal angelegt", async () => {
   assert.equal(a.s, 201); assert.equal(b.j.id, a.j.id);
   assert.equal((await call("/api/trips", A)).j.length, 1);
 });
+
+test("Wann muss ich los: Wegzeit vom Standort zum Start (zu Fuß/Auto), nur für eigene Reisen", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.11", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, B = (await call("/api/register", null, "POST", {})).j, T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const t = (await call("/api/trips", A, "POST", { ticket: "flex", legs: [{ jid: "a", label: "ICE 1", from: { eva: "8011160", name: "Berlin Hbf", plan: iso(90) }, to: { eva: "8010205", name: "Leipzig Hbf", plan: iso(160) } }] })).j;
+  const w = (await call(`/api/trips/${t.id}/access`, A, "POST", { lat: 52.5200, lon: 13.3500, mode: "WALK" })).j, c = (await call(`/api/trips/${t.id}/access`, A, "POST", { lat: 52.5200, lon: 13.3500, mode: "CAR" })).j;
+  assert.ok(w.min > 5 && w.min < 40 && c.min < w.min, JSON.stringify([w, c]));
+  assert.equal((await call(`/api/trips/${t.id}/access`, B, "POST", { lat: 52.52, lon: 13.35, mode: "WALK" })).s, 404);
+});
