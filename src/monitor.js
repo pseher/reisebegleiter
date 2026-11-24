@@ -1,7 +1,7 @@
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
 import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
 import { findJourney } from "./openboards.js";
-import { connections, resolveConnection, resolveLeg } from "./routing.js";
+import { connections, resolveConnection, resolveLeg, rideOn } from "./routing.js";
 import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
@@ -281,6 +281,18 @@ export async function assess(env, trip, now, cache) {
 
 const saveTrip = (env, t) => db.update(env, "rb_trips", t.id, { obs: t.obs, state: t.state, active: t.active, ends_at: t.ends_at, ...(t._legsDirty ? { legs: t.legs } : {}), updated_at: new Date().toISOString() });
 
+// Gespeicherte Reisen einmal nachbessern: nicht eine Station zu früh aussteigen und laufen, wenn derselbe Bus weiterfährt
+async function sitStill(env, t, now) {
+  if (t.state?.rideOn || !t.legs?.length || Date.parse(t.legs[0].from.plan) < now) return;
+  const pseudo = { legs: t.legs.map(l => ({ ...l, tripId: l.tid || "", walk: l.walk || 0 })) };
+  await rideOn(env, [pseudo], +t.legs[0].minT || 0);
+  pseudo.legs.forEach((p, i) => { if (!p.rideOn) return;
+    const { tripId, rideOn: _r, ...l } = p; t.legs[i] = { ...t.legs[i], walk: l.walk, to: { ...t.legs[i].to, name: l.to.name, lat: l.to.lat, lon: l.to.lon, stopId: l.to.stopId || "", plan: l.to.plan, platform: "", eva: "" } };
+    if (t.obs?.[i]) t.obs[i] = { ...t.obs[i], arr: undefined };
+    t._legsDirty = true; });
+  t.state = { ...(t.state || {}), rideOn: true };
+}
+
 // Bahn-Teilstrecken ohne DB-Fahrtkennung (z. B. aus einem Ticket für in ein paar Tagen) nachträglich verknüpfen,
 // sobald die Abfahrt weniger als 6 Std. entfernt ist – höchstens alle 30 Min. je Teilstrecke
 const RAILY = /^(ICE|IC|EC|ECE|RJX?|NJ|EN|FLX|TGV|IRE|RE|RB|S|MEX|FEX|HBX|ERB|NWB|ME|BRB|ALX|ODEG|STB)\b/i;
@@ -306,6 +318,7 @@ export async function runMonitor(env, now = Date.now()) {
   const rMsgs = await makeDue(env, now, (opts, own) => watchAlts(env, opts, now, own || 0)).catch(e => { console.log("Regelmäßig:", e.message); return []; });
   const trips = await db.activeTrips(env), cache = new Map();
   for (const t of trips) await bindLate(env, t, now, cache).catch(() => {});
+  for (const t of trips) await sitStill(env, t, now).catch(() => {});
   const checks = trips.flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
   await observe(env, checks, now, cache);
   const out = new Map();

@@ -88,7 +88,11 @@ export async function rideOn(env, list, minT = 0) {
     if (!l.tripId || !l.walk || l.walk < 2 || distM(l.to, nx.from) < 120) continue;
     if (!cache.has(l.tripId)) cache.set(l.tripId, await tripStops(env, l.tripId, Date.parse(l.to.plan)).catch(() => []));
     const need = Math.max(2, Math.min(minT || 0, 10)) * 60e3, dep = Date.parse(nx.from.rt || nx.from.plan);
-    const hit = cache.get(l.tripId).find(s => (distM(s, nx.from) < 250 || (plainStopName(s.name) && plainStopName(s.name) === plainStopName(nx.from.name))) && Date.parse(s.rt || s.plan) + need <= dep);
+    // Vergleich mit dem Fußweg: sitzen bleiben ist ok, wenn du damit nicht später am Bahnsteig bist als zu Fuß (oder sowieso genug Zeit hast)
+    const viaWalk = Date.parse(l.to.rt || l.to.plan) + l.walk * 60e3;
+    const ok = s => { const w = distM(s, nx.from) < 120 ? 0 : Math.max(1, Math.round(distM(s, nx.from) * 1.3 / 75)), at = Date.parse(s.rt || s.plan) + w * 60e3;
+      return at <= viaWalk + 60e3 || Date.parse(s.rt || s.plan) + need <= dep; };
+    const hit = cache.get(l.tripId).find(s => (distM(s, nx.from) < 250 || (plainStopName(s.name) && plainStopName(s.name) === plainStopName(nx.from.name))) && Date.parse(s.rt || s.plan) < dep && ok(s));
     if (!hit) continue;
     const walk = distM(hit, nx.from) < 120 ? 0 : Math.max(1, Math.round(distM(hit, nx.from) * 1.3 / 75));
     if (walk >= l.walk) continue;

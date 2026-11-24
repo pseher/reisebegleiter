@@ -48,3 +48,15 @@ test("Weiterfahren statt laufen: derselbe Bus fährt bis zum Umstieg", async () 
   assert.equal(c.legs[0].to.name, "S+U Heidelberger Platz");
   assert.equal(c.legs[0].walk, 0);
 });
+
+test("Weiterfahren auch bei hoher eigener Umstiegszeit, wenn es nicht später ist als zu Fuß", async () => {
+  const { rideOn } = await import("../src/routing.js");
+  const T = m => new Date(Date.UTC(2026, 10, 24, 9, m)).toISOString();
+  const c = { legs: [
+    { label: "Bus 249", mode: "BUS", tripId: "t249", walk: 8, from: { name: "Berkaer Str./Breite Str.", plan: T(0) }, to: { name: "Mecklenburgische Str./Binger Str.", lat: 52.4810, lon: 13.3050, plan: T(5) } },
+    { label: "S 42", mode: "SUBURBAN", from: { name: "Heidelberger Platz", lat: 52.4797, lon: 13.3122, plan: T(13) }, to: { name: "Südkreuz", plan: T(20) } }] };
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ legs: [{ intermediateStops: [], to: { name: "S+U Heidelberger Platz", lat: 52.4798, lon: 13.3120, scheduledArrival: T(6), arrival: T(6) } }] }), { status: 200 });
+  try { await rideOn({ TRANSITOUS_URL: "http://127.0.0.1:9" }, [c], 10); } finally { globalThis.fetch = orig; }
+  assert.equal(c.legs[0].to.name, "S+U Heidelberger Platz");
+});
