@@ -355,3 +355,11 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .rchips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
 .rchip { font: inherit; font-size: 14px; padding: 8px 12px; min-height: 40px; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); cursor: pointer; }
 .rchip.off { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+/* Zeilen mit Löschen-Knopf, Zähler in der Kachel */
+.crow-li, .rhead-row { display: flex; align-items: stretch; }
+.crow-li .crow { flex: 1; min-width: 0; }
+.rhead-row .rhead { flex: 1; min-width: 0; }
+.trips .row-del, .row-del { flex: 0 0 48px; width: 48px; background: var(--card); border: 0; border-left: 1px solid var(--line); border-radius: 0; color: var(--muted); font-size: 16px; cursor: pointer; justify-content: center; }
+.row-del:hover, .row-del:focus-visible { color: var(--lost); }
+.tile .ti-ic { display: flex; align-items: center; gap: 8px; }
+.tile .cnt { font-style: normal; font-size: 13px; font-weight: 700; color: var(--on-accent); background: var(--accent); border-radius: 999px; padding: 1px 8px; }

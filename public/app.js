@@ -128,6 +128,7 @@ function render0() {
   CUR_OWN = null; CUR_ZB = false;
   if (view === "add") { if (!W) startWizard(); return renderWizard(); }
   if (view === "settings") return renderSettings();
+  if (view === "routines") return renderRoutines();
   const active = trips.filter(t => t.active !== false);
   if (openId && !active.some(t => t.id === openId)) openId = null;
   if (openId) return renderTrip(active.find(t => t.id === openId), active.length > 1);
@@ -157,26 +158,32 @@ function renderList(active) {
   const now = Date.now(), cur = active.filter(t => t.phase !== "done" && (t.phase === "enroute" || Date.parse(t.legs[0].dep.rt) - now < 6 * 3600e3))
     .sort((a, b) => (a.phase === "enroute" ? -1 : 0) - (b.phase === "enroute" ? -1 : 0) || Date.parse(a.legs[0].dep.rt) - Date.parse(b.legs[0].dep.rt))[0];
   const soon = now + 18 * 3600e3, today = active.filter(t => t !== cur && Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => t !== cur && !today.includes(t));
-  const row = t => `<li><button data-open="${t.id}" class="crow"><span class="sdot d-${t.status}"></span>
-      <span class="tr-main"><b>${hm(t.legs[0].dep.rt)} ${t.rname ? esc(t.rname) : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`}</b>${Date.parse(t.legs[0].dep.plan) > soon ? `<span class="muted small">${day(t.legs[0].dep.plan)}</span>` : ""}</span>
-      <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
-  const chips = ROUTINES.map(r => `<button class="rchip ${r.paused ? "off" : ""}" data-rgo="${r.id}">↻ ${esc(r.name)} · ${r.paused ? "pausiert" : `${daysText(r.days)} ${r.win ? r.win[0] : r.dep}`}</button>`).join("");
+  const row = t => `<li class="crow-li"><button data-open="${t.id}" class="crow"><span class="sdot d-${t.status}"></span>
+      <span class="tr-main"><b>${hm(t.legs[0].dep.rt)} ${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`}</b>${Date.parse(t.legs[0].dep.plan) > soon ? `<span class="muted small">${day(t.legs[0].dep.plan)}</span>` : ""}</span>
+      <span class="tr-state small">${esc(listState(t))}</span></button><button class="row-del" data-del="${t.id}" aria-label="Fahrt löschen" title="Löschen">✕</button></li>`;
   $app.innerHTML = `${flashBox()}
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
     ${cur ? jetztCard(cur) : ""}
     ${tiles(cur)}
     ${fresh ? "" : pushCard()}
     ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
-    ${ROUTINES.length ? `<div class="sec-row"><span>Regelmäßig</span><button class="link" data-rlist>${R_LIST_OPEN ? "Fertig" : "Verwalten ›"}</button></div>
-      ${R_LIST_OPEN ? `<div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : `<div class="rchips">${chips}</div>`}` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
     ${fresh ? `<button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät? Verbinden</button>` : ""}`;
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
-  $app.querySelector("[data-rlist]")?.addEventListener("click", () => { R_LIST_OPEN = !R_LIST_OPEN; R_OPEN = null; render(); });
-  $app.querySelectorAll("[data-rgo]").forEach(b => b.onclick = () => { R_LIST_OPEN = true; R_OPEN = b.dataset.rgo; render(); document.querySelector(`[data-ropen="${b.dataset.rgo}"]`)?.scrollIntoView({ block: "center" }); });
   bindTiles(cur);
+  bindRoutines();
+  bindCommon();
+}
+
+// Regelmäßige Fahrten: verwalten oder neu anlegen
+function renderRoutines() {
+  $app.innerHTML = `${flashBox()}<h1>Regelmäßige Fahrten</h1>
+    <p class="muted small" style="margin-top:0">Z. B. Schulweg oder Arbeitsweg: An jedem Fahrtag lege ich die Fahrt ein paar Stunden vorher an und sag dir Bescheid, wenn etwas nicht klappt.</p>
+    <button class="btn big-btn" data-regstart>＋ Neue regelmäßige Fahrt</button>
+    ${ROUTINES.length ? `<div class="sec-row"><span>Werden überwacht · ${ROUTINES.length}</span></div><div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>`
+      : `<p class="muted small">Noch keine – leg oben deine erste an.</p>`}`;
   bindRoutines();
   bindCommon();
 }
@@ -198,7 +205,7 @@ function tiles(cur) {
   const tile = (attr, icon, title, sub, cls = "") => `<button class="tile ${cls}" ${attr}><span class="ti-ic" aria-hidden="true">${icon}</span><b>${title}</b><span>${sub}</span></button>`;
   return `<div class="tiles4">
     ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach")}
-    ${tile("data-regstart", "↻", "Mein Weg", "Regelmäßig überwachen")}
+    ${tile('data-go="routines"', `↻${ROUTINES.length ? `<em class="cnt">${ROUTINES.length}</em>` : ""}`, "Regelmäßige Fahrten", ROUTINES.length ? `${ROUTINES.length} ${ROUTINES.length === 1 ? "wird" : "werden"} überwacht` : "Schulweg, Arbeitsweg …")}
     ${tile("data-tticket", "🎫", "Ticket einfügen", "Foto, PDF, DB-Link")}
     ${sosTrip ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS", `Ich sitze ${vehicleOf(sosTrip.legs[ridingLeg(sosTrip)]).im}`, "sos") : tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt", "quick")}
   </div>`;
@@ -251,7 +258,7 @@ function toTicket() {
   W.step = "ticket"; render();
 }
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
-const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name));
+const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && (W.regIntent || !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name)));
 // In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
 const REG = { open: false, name: "", days: [1, 2, 3, 4, 5], from: "", to: "", hol: true, ticket: "dticket", busy: false };
 function regularBox() {
@@ -310,9 +317,10 @@ function routineRow(r) {
   const open = R_OPEN === r.id, nx = r.next;
   const state = r.paused ? `<span class="badge">pausiert</span>` : nx ? `nächste: <b>${dateWord(nx.date)}</b>` : "keine Fahrt in den nächsten 3 Wochen";
   const off = !r.paused && r.todayOff && r.todayOff !== "kein Fahrtag" ? ` · heute nicht (${esc(r.todayOff)})` : "";
-  return `<div class="rrow ${open ? "open" : ""}"><button class="rhead" data-ropen="${r.id}" aria-expanded="${open}">
+  return `<div class="rrow ${open ? "open" : ""}"><div class="rhead-row"><button class="rhead" data-ropen="${r.id}" aria-expanded="${open}">
       <span class="tr-main"><b>↻ ${esc(r.name)}</b><span class="small muted">${daysText(r.days)} · ${r.win ? `${esc(r.win[0])}–${esc(r.win[1])}` : esc(r.dep)} · ${esc(cleanStop(r.from))} → ${esc(cleanStop(r.to))}</span>
       <span class="small">${state}${off}</span></span><span class="chev">${open ? "▴" : "▾"}</span></button>
+      <button class="row-del" data-rdel="${r.id}" aria-label="${esc(r.name)} löschen" title="Löschen">✕</button></div>
     ${open ? `<div class="rbody">
       <p class="small muted" style="margin:0 0 6px">${esc(r.label)}</p>
       <p class="small muted" style="margin:0">Fahrtage</p>${dayChips(r.days, `data-rday="${r.id}" data-d`)}
@@ -322,7 +330,7 @@ function routineRow(r) {
       ${r.skip.length ? `<p class="small" style="margin:8px 0 0">Ausgesetzt: ${r.skip.map(d => `<button class="chip" data-runskip="${r.id}|${d}" title="Wieder fahren">${dateWord(d)} ✕</button>`).join(" ")}</p>` : ""}
       <div class="rbtns"><button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren"}</button>
         <button class="btn quiet small-btn" data-rname="${r.id}">Umbenennen</button></div>
-      <button class="btn danger small-btn" data-rdel="${r.id}">Regelmäßige Überwachung beenden</button></div>` : ""}</div>`;
+      </div>` : ""}</div>`;
 }
 async function rCall(path, opts) { try { const v = await api(path, opts); return v; } catch (e) { alert(e.message); return null; } }
 async function reloadRoutines() { ROUTINES = await api("/api/routines").catch(() => ROUTINES); render(); }
@@ -1414,7 +1422,7 @@ async function saveTrip(ticket) {
       if (r) {
         ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win ? `${r.win[0]}–${r.win[1]}` : r.dep}. Die Fahrt erscheint jeweils ein paar Stunden vorher hier.`;
-        W = null; await loadTrips(); openId = null; return go("home");
+        const fromReg = W.regIntent; W = null; await loadTrips(); openId = null; return go(fromReg ? "routines" : "home");
       }
     }
     if (W.mode === "import" && !W.multi && W.imported?.length > 1 && W.pickedIdx != null) {
