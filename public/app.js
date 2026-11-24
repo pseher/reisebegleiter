@@ -1302,18 +1302,20 @@ function renderWizard() {
     const K = keepInfo();
     if (!W.conns) api(K ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
       : `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
-      .then(c => { if (K) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN);
+      .then(c => { if (K) { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
+          c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max).slice(-4); }
         W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     // eine Stunde früher suchen (nicht vor jetzt)
     const ec = document.getElementById("earlierC");
-    if (ec && K) ec.onclick = () => { const a = Math.min(...W.conns.map(c => Date.parse(c.legs[c.legs.length - 1].to.plan))); W.arrBy = (Number.isFinite(a) ? a : K.latest) - MIN; W.conns = null; render(); };
+    if (ec && K) ec.onclick = () => { const a = Math.min(...W.conns.map(c => Date.parse(c.legs[c.legs.length - 1].to.plan))), d = Math.min(...W.conns.map(c => Date.parse(c.legs[0].from.plan)));
+      W.arrBy = (Number.isFinite(a) ? a : K.latest) - MIN; W.depMax = Number.isFinite(d) ? d - MIN : null; W.conns = null; render(); };
     else if (ec) ec.onclick = () => { const first = W.conns[0] ? Date.parse(W.conns[0].legs[0].from.plan) : W.when; W.when = Math.max(Date.now(), Math.min(W.when, first) - 60 * MIN); W.conns = null; render(); };
     document.getElementById("bufC")?.addEventListener("click", () => { W.buf = !W.buf; W.conns = null; render(); });
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
     document.getElementById("otherTime")?.addEventListener("click", () => { W.step = "route"; W.conns = null; render(); });
-    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; W.keep = v === "" ? null : +v; W.arrBy = null; W.conns = null; render(); });
+    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; W.keep = v === "" ? null : +v; W.arrBy = null; W.depMax = null; W.conns = null; render(); });
     document.getElementById("otherRoute")?.addEventListener("click", () => { W.step = "route"; W.when = Math.max(Date.now(), Date.parse(W.ref.dep)); W.conns = null; render(); });
   }
 

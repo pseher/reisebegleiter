@@ -70,11 +70,13 @@ export async function connections(env, from, to, timeMs, minT = 0, arriveBy = fa
   const fromEva = a.eva || "", toEva = b.eva || "";
   const search = async mt => {
     const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
-      numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, mt | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
+      numItineraries: arriveBy ? "10" : "6", searchWindow: arriveBy ? "2700" : "5400", minTransferTime: String(Math.max(0, Math.min(30, mt | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
     const seen = new Set();
     const l = simplify(data).filter(c => !c.legs.some(x => x.mode === "COACH" || x.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
       .filter(c => { const k = c.legs.map(x => `${x.label}@${x.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep)).slice(0, 8);
+      .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep));
+    // „Ankunft bis“: die Verbindungen kurz vor der Zeit sind die interessanten, nicht die frühesten im Suchfenster
+    if (arriveBy) l.splice(0, Math.max(0, l.length - 8)); else l.length = Math.min(l.length, 8);
     await rideOn(env, l, mt).catch(e => console.log("Weiterfahren:", e.message));
     return l;
   };
