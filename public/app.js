@@ -217,11 +217,11 @@ function renderList(active) {
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
     ${cur ? jetztCard(cur) : ""}
     ${tiles(cur)}
-    ${fresh ? "" : hintCard()}
+    ${fresh ? iosFirst() : hintCard()}
     ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
-    ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät? Verbinden</button>` : ""}`;
+    ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät? Verbinden"}</button>` : ""}`;
   if (fresh && !DEV.list && !DEV.asked) { DEV.asked = true; api("/api/devices").then(l => { DEV.list = l; if (view === "home" && !openId && l.length > 1) render(); }).catch(() => {}); }
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
@@ -899,6 +899,9 @@ function hintCard() {
   return `<div class="banner info hint row" style="align-items:center"><span style="flex:3"><b>Umstiegsheld als App?</b> Liegt dann auf dem Startbildschirm und öffnet schneller.</span>
     <button class="btn small-btn" id="installApp" style="flex:0 0 auto;width:auto;margin:0">Installieren</button>${x("install")}</div>`;
 }
+// iPhone in Safari, noch nichts angelegt: zuerst installieren – sonst landen die Fahrten in Safari statt in der App
+const iosFirst = () => (isIOS && !standalone && !later("iosfirst") ? `<div class="banner info hint row" style="align-items:center"><span><b>Tipp fürs iPhone:</b> Erst auf den Home-Bildschirm legen – Safari „Teilen“ <span aria-hidden="true">⬆︎</span> → „Zum Home-Bildschirm“ – und Umstiegsheld von dort öffnen.
+  Nur dann bekommst du Mitteilungen, und deine Fahrten liegen gleich in der App.</span><button class="link small hint-later" data-later-hint="iosfirst">Später</button></div>` : "");
 function bindHints() {
   $app.querySelectorAll("[data-later-hint]").forEach(b => b.onclick = () => { try { localStorage.setItem(`rb_later_${b.dataset.laterHint}`, String(Date.now() + 3 * 864e5)); } catch {} render(); });
   document.getElementById("installApp")?.addEventListener("click", async () => { const e = INSTALL; if (!e) return; INSTALL = null;
@@ -909,7 +912,8 @@ function pushCard() {
   if (!("serviceWorker" in navigator)) return "";
   const perm = "Notification" in window ? Notification.permission : "default";
   if (perm === "granted" && localStorage.getItem("rb_push") === "1") return "";
-  if (isIOS && !standalone) return `<div class="banner info small"><b>Für Mitteilungen unterwegs:</b> In Safari „Teilen“ → „Zum Home-Bildschirm“, dann von dort öffnen.</div>`;
+  if (isIOS && !standalone) return `<div class="banner info hint small row" style="align-items:center"><span><b>Für Mitteilungen unterwegs:</b> In Safari „Teilen“ → „Zum Home-Bildschirm“, dann Umstiegsheld von dort öffnen.
+    Die App startet leer – deine Fahrten nimmst du so mit: hier unter Einstellungen „Gerät hinzufügen“, in der App „Code eingeben“.</span><button class="btn sec small-btn" data-go="settings" style="flex:0 0 auto;width:auto;margin:0">Code anzeigen</button></div>`;
   if (perm === "denied") return `<div class="banner info small">Mitteilungen sind blockiert. Du kannst sie in den Browser-Einstellungen erlauben.</div>`;
   return `<div class="banner info push-ask row" style="align-items:center"><span style="flex:3"><b>Bescheid bekommen,</b> wenn dein Bus oder Zug ausfällt oder sich verspätet?</span><button class="btn small-btn" id="pushOn" style="flex:0 0 auto;width:auto;margin:0">Einschalten</button></div>`;
 }
