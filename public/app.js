@@ -1027,4 +1027,16 @@ async function takeShared() {
   } catch {}
 }
 try { const w = JSON.parse(sessionStorage.getItem("rb_w") || "null"); if (w?.step) { W = w; view = "add"; } } catch {}
+// Aus einer Meldung geöffnet: gleich die betroffene Reise zeigen
+const tripFromUrl = u => { try { return new URL(u, location.origin).searchParams.get("trip"); } catch { return null; } };
+const startTrip = tripFromUrl(location.href);
+if (startTrip) { openId = startTrip; sheetId = null; openLeg = null; if (view !== "add") view = "home"; history.replaceState(null, "", "/"); }
+navigator.serviceWorker?.addEventListener("message", async e => {
+  const id = e.data?.open && tripFromUrl(e.data.open);
+  if (!id) return;
+  if (view === "add" && W && (W.legs?.length || W.rFrom || W.imported)) return;   // laufende Eingabe nicht verwerfen
+  W = null; openId = id; sheetId = null; openLeg = null;
+  await loadTrips().catch(() => {});
+  go("home");
+});
 loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; throw e; }).then(() => { render(); schedule(); takeShared(); });

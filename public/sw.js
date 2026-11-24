@@ -1,5 +1,5 @@
 // Reisebegleiter – Service Worker: App startet auch mit schlechtem Netz, Meldungen kommen an
-const V = "rb-37";
+const V = "rb-38";
 const SHELL = ["/", "/app.js", "/style.css", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -27,5 +27,11 @@ self.addEventListener("push", e => {
 self.addEventListener("notificationclick", e => {
   e.notification.close();
   const url = new URL(e.notification.data?.url || "/", self.location.origin).href;
-  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(ws => { const w = ws[0]; if (w) return w.focus(); return clients.openWindow(url); }));
+  // Tippen auf die Meldung: direkt zur betroffenen Reise – offene App umschalten, sonst mit dieser Reise starten
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(ws => {
+    const w = ws[0];
+    if (!w) return clients.openWindow(url);
+    w.postMessage({ open: url });
+    return w.focus().catch(() => clients.openWindow(url));
+  }));
 });
