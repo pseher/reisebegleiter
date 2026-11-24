@@ -85,7 +85,11 @@ export function evaluate(trip, now = Date.now()) {
     // rechnerisch nicht zu schaffen: mit echter Ankunftsprognose oder kurz vorher sicher verpasst; nur geschätzt und noch weit weg → gefährdet (kann aufgeholt werden)
     else if (gap < 0 && (until <= 45 || !a.estimated)) { status = "LOST"; reason = "late"; }
     // Eigene Umstiegszeit eingestellt: genau so viel Zeit ist ausreichend – knapp erst darunter (Puffer nur, wenn der Zug schon verspätet ist)
-    else if (own > 0) { const g2 = a.delay >= 3 ? growth : 0; status = spare < g2 ? "RISK" : a.delay >= 3 && spare < g2 + 2 ? "WATCH" : "OK"; }
+    // Eigene Umstiegszeit: ab dieser Zeit ist alles gut. Darunter „knapp“ (gelb) – „gefährdet“ (rot) erst, wenn es auch praktisch eng wird.
+    else if (own > 0) {
+      const g2 = a.delay >= 3 ? growth : 0, phys = gap - Math.max(2, Math.min(usual, planGap));
+      status = phys < g2 ? "RISK" : gap < own + g2 || (a.delay >= 3 && spare < g2 + 2) ? "WATCH" : "OK";
+    }
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";

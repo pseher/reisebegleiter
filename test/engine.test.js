@@ -110,10 +110,10 @@ test("vom Fahrplan geplanter 2-Min.-Umstieg ist knapp, nicht gefährdet – erst
   assert.equal(evaluate({ id: "w", ticket: "flex", legs, obs: late }, T0 - 10 * 60e3).transfers[0].status, "RISK");
 });
 
-test("eigene Mindest-Umstiegszeit: 9 Min. geplant, ich brauche 10 → zu knapp", () => {
+test("eigene Mindest-Umstiegszeit: 9 Min. geplant, ich brauche 10 → knapp (aber nicht gefährdet)", () => {
   const t = trip([], "flex"); t.legs = t.legs.map(l => ({ ...l, minT: 10 }));
   const v = evaluate({ ...t, legs: t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: iso(79) } } : l) }, T0 + 60 * 60e3);
-  assert.equal(v.transfers[0].gap, 9); assert.equal(v.transfers[0].need, 10); assert.equal(v.transfers[0].status, "RISK");
+  assert.equal(v.transfers[0].gap, 9); assert.equal(v.transfers[0].need, 10); assert.equal(v.transfers[0].status, "WATCH");
   const ok = evaluate(t, T0 + 60 * 60e3);   // 17 Min. geplant
   assert.equal(ok.transfers[0].status, "OK");
 });
@@ -156,5 +156,7 @@ test("eigene Umstiegszeit 8, Umstieg genau 8 Min., pünktlich: nicht knapp", () 
   const v = evaluate({ ...t, legs }, T0 - 120 * 60e3);
   assert.equal(v.transfers[0].gap, 8); assert.equal(v.transfers[0].status, "OK");
   const legs7 = t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: new Date(Date.parse(t.legs[0].to.plan) + 7 * 60e3).toISOString() } } : l);
-  assert.equal(evaluate({ ...t, legs: legs7 }, T0 - 120 * 60e3).transfers[0].status, "RISK");
+  assert.equal(evaluate({ ...t, legs: legs7 }, T0 - 120 * 60e3).transfers[0].status, "WATCH");
+  const legs1 = t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: new Date(Date.parse(t.legs[0].to.plan) + 1 * 60e3).toISOString() } } : l);
+  assert.equal(evaluate({ ...t, legs: legs1 }, T0 - 120 * 60e3).transfers[0].status, "RISK");
 });

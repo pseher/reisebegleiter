@@ -463,7 +463,7 @@ function stepsHtml(steps) {
     ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
       const walk = plainStop(x.to) !== plainStop(steps[i + 1].from) && (x.walk == null || x.walk > 0);
       if (g < 0) return `<span class="late">Umstieg geht nicht – ${-g} Min. zu spät</span>`;
-      return `<span class="${g < Math.max(ownMin(), 3) ? "late" : !ownMin() && g < 6 ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
+      return `<span class="${g < 3 ? "late" : (ownMin() ? g < ownMin() : g < 6) ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
 }
 // Teilstrecken einer Möglichkeit (MOTIS) mit Echtzeit aus der Beobachtung
 const altSteps = a => (a.legs || []).map((l, i) => { const w = a.watch?.legs?.[i], d = w?.delay || 0, shift = ms => new Date(Date.parse(ms) + Math.max(0, d) * MIN).toISOString();
@@ -661,6 +661,7 @@ function transferText(tr) {
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus</b>` : `<b>nicht zu schaffen</b>${pl}`;
   if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>${vehicleOf(tr.toLeg).fest} in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;
   if (tr.status === "RISK" && tr.own && tr.gap >= 0 && tr.gap < tr.own) return `<b>${tr.gap} Min., zu knapp für dich</b>${pl}`;
+  if (tr.status === "WATCH" && tr.own && tr.gap >= 0 && tr.gap < tr.own) return `<b>${tr.gap} Min.</b> – etwas weniger als deine ${tr.own} Min.${pl}`;
   if (tr.status === "RISK") return tr.gap < 0 ? `<b>Ankunft ${-tr.gap} Min. nach Abfahrt</b>${pl}` : `<b>nur ${tr.gap} Min.</b>${pl}`;
   if (tr.status === "WATCH") return `<b>${tr.gap} Min., knapp</b>${pl}`;
   return `${tr.gap} Min.${pl}`;
@@ -1009,7 +1010,7 @@ function connList(list) {
       ${late >= 2 ? `<span class="small late" style="grid-column:1/3">${late} Min. später (geplant ${hm(c.legs[0].from.plan)})</span>` : ""}
       ${(() => { const own = W?.editId ? W.minT : MINT, bad = c.legs.slice(1).map((l, k) => ({ at: c.legs[k].to.name, g: Math.round((Date.parse(l.from.rt || l.from.plan) - Date.parse(c.legs[k].to.rt || c.legs[k].to.plan)) / MIN) }))
         .filter(x => x.g < Math.max(own, 2)).sort((a, b) => a.g - b.g)[0];
-        return bad ? `<span class="small late" style="grid-column:1/3">${bad.g < 0 ? `Umstieg in ${esc(cleanStop(bad.at))} geht nicht` : `Umstieg in ${esc(cleanStop(bad.at))} nur ${bad.g} Min.${own > bad.g ? " – zu knapp für dich" : ""}`}</span>` : ""; })()}
+        return bad ? `<span class="small ${bad.g < 3 ? "late" : "warn-t"}" style="grid-column:1/3">${bad.g < 0 ? `Umstieg in ${esc(cleanStop(bad.at))} geht nicht` : `Umstieg in ${esc(cleanStop(bad.at))} ${bad.g} Min.${own > bad.g ? ` – weniger als deine ${own} Min.` : ""}`}</span>` : ""; })()}
     </div></button></li>`; }).join("")}</ul>`;
 }
 
