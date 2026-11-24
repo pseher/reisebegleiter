@@ -122,10 +122,10 @@ document.getElementById("hdrBack")?.addEventListener("click", () => { if (guard)
 const flashBox = () => offlineBox() + flashBox0();
 const flashBox0 = () => { if (!flash) return ""; const f = flash; flash = ""; return `<div class="banner ok small" role="status">${esc(f)}</div>`; };
 // Umstiegszeit für die Bewertung: in einer Reise deren eigene, sonst die übliche
-let CUR_OWN = null;
+let CUR_OWN = null, CUR_ZB = false;
 const ownMin = () => (CUR_OWN != null ? CUR_OWN : MINT);
 function render0() {
-  CUR_OWN = null;
+  CUR_OWN = null; CUR_ZB = false;
   if (view === "add") { if (!W) startWizard(); return renderWizard(); }
   if (view === "settings") return renderSettings();
   const active = trips.filter(t => t.active !== false);
@@ -489,7 +489,7 @@ const infeasible = a => !!(a.watch && (a.watch.cancelled || !a.watch.ok));
 const gapOf = a => a.watch?.minGap ?? a.minGap;
 const bestIdx = list => {
   const pick = strict => { let b = -1, best = Infinity; (list || []).forEach((a, i) => { if (infeasible(a) || a.kind === "asplanned") return;
-    const g = gapOf(a); if (strict && g != null && g < Math.max(ownMin(), 3)) return;
+    const g = gapOf(a); if (strict && ((g != null && g < Math.max(ownMin(), 3)) || (CUR_ZB && a.zb))) return;   // nicht empfehlen: zu knapp oder Sparpreis gilt evtl. nicht
     const v = Date.parse(a.arr || a.dep); if (v < best) { best = v; b = i; } }); return b; };
   const s = pick(true); return s >= 0 ? s : pick(false); };
 function takeBtn(data, a, rec, text) {
@@ -667,7 +667,7 @@ function transferText(tr) {
 }
 
 function renderTrip(t, many) {
-  CUR_OWN = +t.minT || 0;
+  CUR_OWN = +t.minT || 0; CUR_ZB = t.ticket === "spar" && !t.zbLifted;
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
