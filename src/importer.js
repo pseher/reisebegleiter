@@ -1,7 +1,7 @@
 import { count } from "./stats.js";
 // Reise einlesen: Screenshot, PDF (Ticket, Buchungsbestätigung) oder Text/Link → KI liest Züge, Bahnhöfe, Zeiten
 // → jede Bahn-Teilstrecke wird wie bei der Suche der echten DB-Fahrt zugeordnet.
-import { search } from "./stations.js";
+import { search, byEva as byEvaSt } from "./stations.js";
 import { resolveLeg, connections } from "./routing.js";
 
 const MODEL = env => env.IMPORT_MODEL || "claude-haiku-5-5";
@@ -68,15 +68,39 @@ export function berlinIso(date, time) {
 }
 
 const NON_RAIL = /^(bus|sev|str|tram|u\s?\d|u-bahn|fähre|ferry|ast|ruf)/i;
-const station = name => { const n = String(name || "").replace(/\s*\((tief|oben|S|S-Bahn)\)\s*$/i, ""); return search(n)[0] || search(n.split(/[,(]/)[0])[0] || null; };
+// Haltestellen wie „Bahnhof, Nauen“ (Haltestelle, Ort) oder „Nauen, Bahnhof“: allgemeine Wörter allein ergeben keinen Treffer
+const GENERIC = /^(bahnhof|bf\.?|hbf\.?|hauptbahnhof|busbahnhof|zob|bahnhofsvorplatz|bahnhofstr(\.|aße)?)$/i;
+const fold = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ß/g, "ss");
+const words = s => fold(s).split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !GENERIC.test(w) && !["berlin"].includes(w) || /^\d+$/.test(w));
+// Passt der gefundene Bahnhof wirklich zum Namen? (mindestens ein gemeinsames, nicht allgemeines Wort)
+const fits = (hit, q) => { if (GENERIC.test(String(q).trim())) return false; const qw = words(q); if (!qw.length) return true; const hw = fold(hit.name); return qw.some(w => hw.includes(w)); };
+export function station(name) {
+  const n = String(name || "").replace(/\s*\((tief|oben|S|S-Bahn)\)\s*$/i, "").trim();
+  const m = /^([^,]+),\s*([^,]+)$/.exec(n);
+  if (m) {
+    const [a, b] = [m[1].trim(), m[2].trim()];
+    if (GENERIC.test(a)) return search(b).find(x => fits(x, b)) || null;          // „Bahnhof, Nauen“ → Nauen
+    if (GENERIC.test(b)) return search(a).find(x => fits(x, a)) || null;          // „Nauen, Bahnhof“ → Nauen
+    // „Markt, Nauen“: Bushaltestelle im Ort – nur ein Bahnhof, der wirklich in diesem Ort liegt und so heißt
+    const hit = search(`${b} ${a}`).find(x => fits(x, b) && fits(x, a)) || search(n).find(x => fits(x, b) && fits(x, a));
+    return hit || null;
+  }
+  for (const q of [n, n.split(/[,(]/)[0].trim(), m ? `${m[2].trim()} ${m[1].trim()}` : null].filter(Boolean)) {
+    const hit = search(q).find(x => fits(x, q)); if (hit) return hit;
+  }
+  return null;
+}
 
 // Erkannte Teilstrecke → Teilstrecke mit DB-Fahrtkennung
-export async function resolveExtracted(env, leg, cache) {
+export async function resolveExtracted(env, leg, cache, prevTo = null) {
   const depIso = berlinIso(leg.dep_date, leg.dep_time);
   let arrIso = berlinIso(leg.arr_date || leg.dep_date, leg.arr_time);
   if (depIso && arrIso && Date.parse(arrIso) < Date.parse(depIso)) arrIso = new Date(Date.parse(arrIso) + 864e5).toISOString();   // über Mitternacht
   if (!depIso) return null;
-  const f = station(leg.from), t = station(leg.to), label = String(leg.train || "").replace(/\s+/g, " ").trim();
+  let f = station(leg.from); const t = station(leg.to), label = String(leg.train || "").replace(/\s+/g, " ").trim();
+  // Umstieg: der Start dieser Teilstrecke liegt beim Ziel der vorigen (z. B. Bus ab „Bahnhof, Nauen“ nach Zug bis Nauen)
+  const km = (a, b) => (a?.lat != null && b?.lat != null ? Math.hypot((a.lat - b.lat) * 111, (a.lon - b.lon) * 68) : null);
+  if (prevTo && prevTo.eva && (!f || (km(f, prevTo) ?? 0) > 5)) { const pv = byEvaSt(prevTo.eva); if (pv) f = pv; }
   const rail = !NON_RAIL.test(label);
   const num = (label.match(/(\d{2,6})\s*$/) || [])[1] || "";
   // Keine Ankunftszeit (Ticket)? Beim Verbindungsplaner nachsehen: gleicher Zug, gleiche Abfahrt
@@ -134,7 +158,7 @@ export async function importTrip(env, { text = "", files = [] }) {
   for (const t of (data.trips || []).slice(0, 3)) {
     const legs = [];
     for (const l of (t.legs || []).slice(0, 8)) {
-      const r = await resolveExtracted(env, l, cache).catch(e => { console.log("Import-Teilstrecke:", e.message); return null; });
+      const r = await resolveExtracted(env, l, cache, legs[legs.length - 1]?.to || null).catch(e => { console.log("Import-Teilstrecke:", e.message); return null; });
       if (r) legs.push(r); else skipped.push(`${l.train || "?"} ${l.from || ""} → ${l.to || ""}`.trim());
     }
     if (legs.length) trips.push({ label: t.label || "", legs, estimated: legs.some(x => x.to.estimated) });

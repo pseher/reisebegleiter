@@ -212,3 +212,13 @@ test("Reiner bahn.de-Link (vbid) wird freundlich erklärt statt Fehler", async (
   assert.ok(!onlyBahnLink("Meine Reise: ICE 507 Berlin Hbf 12:00 → Leipzig 13:10 https://www.bahn.de/buchung/start?vbid=x"));
   await assert.rejects(importTrip({ MOCK: "1" }, { text: "https://www.bahn.de/buchung/start?vbid=b17ac62b" }), e => e.user && /Screenshot/.test(e.message));
 });
+
+test("Einlesen: Bushaltestellen wie „Bahnhof, Nauen“ werden dem richtigen Ort zugeordnet, nicht „Berlin Anhalter Bahnhof“", async () => {
+  const { station } = await import("../src/importer.js");
+  assert.equal(station("Bahnhof, Nauen")?.name, "Nauen");
+  assert.equal(station("Bahnhof, Stendal")?.name, "Stendal Hbf");
+  assert.equal(station("Berlin Jungfernheide (S)")?.eva, "8011167");
+  assert.equal(station("Bahnhof"), null);
+  assert.equal(station("Markt, Nauen"), null);
+  assert.equal(station("Berlin Hbf (tief)")?.name, "Berlin Hbf");
+});
