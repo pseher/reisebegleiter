@@ -51,6 +51,6 @@ export function nearby(lat, lon, maxM = 2500, limit = 4) {
 }
 
 export async function searchStations(env, q) {
-  if (env.MOCK === "1") { const f = fold(q); return MOCK_STATIONS.filter(s => fold(s.name).includes(f)).slice(0, 8); }
+  if (env.MOCK === "1") { const f = fold(q); return MOCK_STATIONS.filter(s => fold(s.name).includes(f)).sort((a, b) => fold(b.name).startsWith(f) - fold(a.name).startsWith(f)).slice(0, 8); }
   return search(q);
 }

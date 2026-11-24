@@ -270,8 +270,8 @@ export async function assess(env, trip, now, cache) {
     if (!fresh && st) { try { here = { mode: "cancel", idx: ci, at: now, list: await planFromHere(env, trip, v, st, now, "cancel", ci) }; } catch (e) { console.log("Ausfall-Suche:", e.message); } }
   }
   const d0 = diff(trip, v, { ...prev, alt }, now), state = d0.state;
-  // „Zug verpasst“: du kümmerst dich gerade selbst darum. Zeitfenster ohne Wahl: noch keine Meldungen (welche Fahrt du nimmst, ist offen)
-  const msgs = prev.missed || (prev.win && !prev.win.picked) ? [] : d0.msgs;
+  // „Zug verpasst“: du kümmerst dich gerade selbst darum. (Zeitfenster: die nächste Fahrt wird automatisch überwacht, mit Meldungen)
+  const msgs = prev.missed ? [] : d0.msgs;
   trip.state = { ...prev, ...state, alt, altAt, here, status: v.status, at: now };   // übrige Merker (z. B. undo, geo, bind…) behalten
   const last = v.legs[v.legs.length - 1];
   if ((v.phase === "done" && now > last.arr.rt + 30 * MIN) || now > last.arr.rt + 4 * 3600e3) trip.active = false;

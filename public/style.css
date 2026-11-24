@@ -323,3 +323,16 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .reg-open { margin: 4px 0 8px; }
 .hero-rec { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--card); color: var(--ink); }
 .hero-rec .btn { margin: 8px 0 0; }
+/* Lesbarkeit (Nutzertests): kräftigere Abzeichen, größere Kleintitel, Tippflächen ≥ 44 px */
+.badge.good { color: color-mix(in srgb, var(--ok) 72%, var(--ink)); }
+.badge.warn { color: color-mix(in srgb, var(--watch) 70%, var(--ink)); }
+.badge.bad { color: color-mix(in srgb, var(--lost) 80%, var(--ink)); }
+.badge { font-size: 14px; }
+.hero .k, .sec-h, .card .k { font-size: 13px; }
+.small-btn { min-height: 44px; }
+.gear { min-width: 44px; min-height: 44px; }
+/* Startseite: Nutzen auf einen Blick */
+.hero-h { font-size: 30px; line-height: 1.15; margin: 18px 0 8px; }
+.lead { font-size: 18px; line-height: 1.4; margin: 0 0 18px; }
+.big-btn { min-height: 58px; font-size: 18px; }
+.push-ask { font-size: 15px; }
