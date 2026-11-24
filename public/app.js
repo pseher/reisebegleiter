@@ -176,6 +176,8 @@ function windowCard(t) {
       ${infeasible(a) ? `<div class="small late" style="margin-top:6px">Geht so nicht mehr</div>` : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|win">Die nehme ich</button></div>`}</div></div>`).join("");
   return `<div class="tiles">${cur}${rows}</div>`;
 }
+// Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
+const canRegular = () => !!W && !W.editId && !W.multi && W.legs?.length > 0;
 // In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
 const REG = { open: false, name: "", days: [1, 2, 3, 4, 5], from: "", to: "", hol: true, ticket: "dticket", busy: false };
 function regularBox() {
@@ -1037,7 +1039,7 @@ function renderWizard() {
 
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
-      ${err}${W.editId ? "" : regularBox()}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      ${err}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
       <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>` : ""}${back}`;
     if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
@@ -1048,7 +1050,6 @@ function renderWizard() {
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
-    bindRegular();
   }
 
   else if (W.step === "pickTrip") {
@@ -1149,15 +1150,53 @@ function renderWizard() {
       <p class="muted small">${new Date(W.legs[0].from.plan).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Berlin" })}</p>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       ${tight ? `<div class="banner info small"><b>Knapper Umstieg in ${esc(cleanStop(tight.at))}: ${Math.max(0, tight.gap)} Min.</b> Nach dem Anlegen zeige ich dir Verbindungen, die etwas früher losfahren oder mehr Luft haben, und beobachte sie mit.</div>` : ""}
       <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
-        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` Gl. ${esc(l.from.platform)}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` Gl. ${esc(l.to.platform)}` : ""}</div>
+        <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` · ${esc(platWord(l, l.from.platform))}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` · ${esc(platWord(l, l.to.platform))}` : ""}</div>
         ${l.jid || l.tid ? "" : `<div class="small muted">Live-Zeiten, soweit der Verkehrsbetrieb sie liefert</div>`}</li>`).join("")}</ol></div>
       <button class="btn" id="done">${W.editId ? "Reise so ändern" : "Fertig – weiter"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
-    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); W.step = "ticket"; render(); };
+    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); W.step = canRegular() ? "regular" : "ticket"; render(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
+  }
+
+  else if (W.step === "regular") {
+    // Vor dem Ticket: regelmäßig überwachen? (z. B. Arbeitsweg) – mit Tagen und genauer Abfahrt oder Zeitfenster
+    const l0 = W.legs[0], dep = Date.parse(l0.from.plan), depHm = hm(dep), dow = ((new Date(new Date(dep).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" }) + "T12:00:00Z").getUTCDay() + 6) % 7) + 1;
+    if (!W.reg) {
+      $app.innerHTML = `<p class="steps">Deine Reise</p><h1>Fährst du das regelmäßig?</h1>
+        <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>
+        <ul class="list"><li><button id="regNo"><b>Nein, nur dieses Mal</b></button></li>
+          <li><button id="regYes"><b>Ja, regelmäßig überwachen</b><br><span class="small muted">z. B. zur Arbeit – an jedem Fahrtag lege ich die Fahrt automatisch an und überwache sie</span></button></li></ul>${back}`;
+      document.getElementById("regNo").onclick = () => { W.reg = null; W.step = "ticket"; render(); };
+      document.getElementById("regYes").onclick = () => {
+        const p = x => String(x).padStart(2, "0"), d = new Date(dep), mins = +depHm.slice(0, 2) * 60 + +depHm.slice(3), a = Math.max(0, Math.floor((mins - 15) / 15) * 15), b = Math.min(23 * 60 + 59, a + 60);
+        W.reg = { name: "", days: dow <= 5 ? [1, 2, 3, 4, 5] : [dow], kind: "fix", from: `${p(Math.floor(a / 60))}:${p(a % 60)}`, to: `${p(Math.floor(b / 60))}:${p(b % 60)}`, hol: true };
+        render(); };
+    } else {
+      const R = W.reg;
+      $app.innerHTML = `<p class="steps">Deine Reise</p><h1>Regelmäßig überwachen</h1>
+        <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}</p>${err}
+        <label class="small" for="wrName">Name</label>
+        <input class="txt" id="wrName" maxlength="40" placeholder="z. B. Arbeit hin" value="${esc(R.name)}">
+        <p class="small" style="margin:6px 0 0">An welchen Tagen?</p>${dayChips(R.days, "data-wrd")}
+        <p class="small" style="margin:8px 0 4px">Welche Abfahrt?</p>
+        <ul class="list"><li><button data-wrk="fix" aria-pressed="${R.kind === "fix"}"><b>${R.kind === "fix" ? "● " : "○ "}Genau diese: ${depHm}</b><br><span class="small muted">Immer dieselbe Verbindung</span></button></li>
+          <li><button data-wrk="win" aria-pressed="${R.kind === "win"}"><b>${R.kind === "win" ? "● " : "○ "}In einem Zeitfenster</b><br><span class="small muted">Ich zeige dir alle Fahrten darin – du tippst an, welche du nimmst</span></button></li></ul>
+        ${R.kind === "win" ? `<div class="win-row"><input type="time" id="wrFrom" value="${esc(R.from)}"><span>bis</span><input type="time" id="wrTo" value="${esc(R.to)}"></div>` : ""}
+        <label class="small chk"><input type="checkbox" id="wrHol" ${R.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
+        <button class="btn" id="wrNext">Weiter</button>
+        <button class="btn quiet" id="wrCancel">Doch nicht regelmäßig</button>${back}`;
+      const keep = () => { R.name = document.getElementById("wrName").value; R.from = document.getElementById("wrFrom")?.value || R.from; R.to = document.getElementById("wrTo")?.value || R.to; R.hol = document.getElementById("wrHol").checked; };
+      $app.querySelectorAll("[data-wrd]").forEach(b => b.onclick = () => { keep(); const d = +b.dataset.wrd; R.days = R.days.includes(d) ? R.days.filter(x => x !== d) : [...R.days, d].sort(); render(); });
+      $app.querySelectorAll("[data-wrk]").forEach(b => b.onclick = () => { keep(); R.kind = b.dataset.wrk; render(); });
+      document.getElementById("wrCancel").onclick = () => { W.reg = null; W.step = "ticket"; render(); };
+      document.getElementById("wrNext").onclick = () => { keep();
+        if (!R.days.length) { W.error = "Bitte mindestens einen Tag wählen."; return render(); }
+        if (R.kind === "win" && !(R.to > R.from)) { W.error = "Das Ende des Zeitfensters muss nach dem Beginn liegen."; return render(); }
+        W.error = ""; W.step = "ticket"; render(); };
+    }
   }
 
   else if (W.step === "ticket") {
@@ -1176,7 +1215,8 @@ function renderWizard() {
     else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
-    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : "leg";
+    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : canRegular() ? "regular" : "leg";
+    else if (W.step === "regular") { if (W.reg) W.reg = null; else W.step = "leg"; }   // Formular → Frage → Verbindung
     else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
     else if (W.step === "leg" && W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; }
     else if (W.step === "pickTrip") W.step = "route";
@@ -1266,7 +1306,20 @@ async function saveTrip(ticket) {
   }
   W.busy = "Reise wird angelegt …"; render();
   try {
-    for (const legs of W.multi || [W.legs]) await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket } });
+    let newId = null;
+    for (const legs of W.multi || [W.legs]) newId = (await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket } })).id || newId;
+    if (W.reg && newId && !W.multi) {
+      // gleich regelmäßig: genaue Abfahrt (aus dieser Reise) oder Zeitfenster (Start/Ziel dieser Reise)
+      const R = W.reg, f = W.legs[0].from, t = W.legs[W.legs.length - 1].to;
+      const r = await api("/api/routines", { method: "POST", body: R.kind === "win"
+        ? { tripId: newId, from: f, to: t, name: R.name.trim(), days: R.days, winFrom: R.from, winTo: R.to, ticket, holidays: R.hol, minT: MINT }
+        : { tripId: newId, name: R.name.trim(), days: R.days, holidays: R.hol } }).catch(e => { alert(`Die Reise ist angelegt, aber regelmäßig ging nicht: ${e.message}`); return null; });
+      if (r) {
+        ROUTINES = await api("/api/routines").catch(() => ROUTINES);
+        flash = `Reise angelegt. „${r.name}“ wird jetzt ${daysText(r.days)} ${r.win ? `zwischen ${r.win[0]} und ${r.win[1]}` : `um ${r.dep}`} überwacht – im Hintergrund, die Fahrt erscheint jeweils ca. 3 Std. vorher.`;
+        W = null; await loadTrips(); openId = null; return go("home");
+      }
+    }
     if (W.mode === "import" && !W.multi && W.imported?.length > 1 && W.pickedIdx != null) {
       const done = W.imported[W.pickedIdx];
       W.savedOne = done.label || "Die Fahrt";
@@ -1276,7 +1329,7 @@ async function saveTrip(ticket) {
     }
     const n = (W.multi || [W.legs]).length;
     flash = n > 1 ? `${n} Reisen angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Reise angelegt. Ich melde mich, wenn du etwas tun solltest.";
-    W = null; await loadTrips(); openId = n > 1 ? null : trips[0]?.id || null; go("home");
+    W = null; await loadTrips(); openId = n > 1 ? null : newId; go("home");
   } catch (e) { W.busy = null; W.error = e.message; render(); }
 }
 

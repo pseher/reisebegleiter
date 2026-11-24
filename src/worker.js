@@ -426,8 +426,11 @@ async function api(req, env, url) {
       const pl = s => ({ name: String(s.name || "").slice(0, 80), eva: /^\d{6,9}$/.test(String(s.eva || "")) ? String(s.eva) : "", ...coord(s), ...sid(s) });
       const from = pl(b.from), to = pl(b.to);
       if (!from.name || !to.name || (!from.eva && from.lat == null) || (!to.eva && to.lat == null)) return fail(400, "Start oder Ziel unbekannt.");
-      const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `${from.name} → ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
-        tpl: [{ jid: "", label: "", from, to }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made: [] });
+      // aus einer gerade angelegten Reise: deren Tag gilt als erledigt, die Reise gehört dazu
+      const t0 = b.tripId ? await ownTrip(env, dev, String(b.tripId)) : null, made = t0 ? [berlinDate(Date.parse(t0.legs[0].from.plan))] : [];
+      const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
+        tpl: [{ jid: "", label: "", from, to }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made });
+      if (t0) await db.update(env, "rb_trips", t0.id, { state: { ...(t0.state || {}), routine: r.id, rname: r.name } });
       return json(routineView(r), 201);
     }
     const t = await ownTrip(env, dev, String(b.tripId || ""));
