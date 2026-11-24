@@ -17,3 +17,7 @@ create table if not exists public.rb_routines (
 create index if not exists rb_routines_account_idx on public.rb_routines (account_id);
 alter table public.rb_routines enable row level security;
 revoke all on public.rb_routines from anon, authenticated;
+
+-- Zeitfenster („zwischen 07:00 und 08:00“): alle Fahrten im Fenster beobachten
+alter table public.rb_routines add column if not exists win_from text;
+alter table public.rb_routines add column if not exists win_to text;

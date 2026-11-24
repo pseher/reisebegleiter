@@ -54,3 +54,21 @@ test("Fahrplan geändert: nächstgelegene Verbindung mit Hinweis", async () => {
   assert.match(msgs[0].body, /ICE 509, ab 10:05 \(sonst 10:07\)/);
   assert.match((await db.tripsOf(env, acc.id))[0].state.rnote, /andere Verbindung/);
 });
+
+test("Zeitfenster: erste Fahrt überwachen, übrige zur Wahl, ohne Wahl keine Meldungen; verpasst → nächste", async () => {
+  const env = { MOCK: "1" };
+  const { refreshWindow } = await import("../src/routines.js");
+  const acc = await db.insert(env, "rb_accounts", { favs: [] });
+  await db.insert(env, "rb_routines", { account_id: acc.id, name: "Arbeit", days: [2], dep: "10:00", win_from: "10:00", win_to: "13:00",
+    tpl: [{ jid: "", label: "", from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" } }], ticket: "flex", min_t: 0, holidays: true, paused: false, skip: [], made: [] });
+  const t0 = wallToMs("2026-11-24", "10:00");
+  await makeDue(env, t0 - 2 * 3600e3);
+  const [t] = await db.tripsOf(env, acc.id);
+  assert.ok(t.state.win && !t.state.win.picked);
+  assert.equal(t.legs[0].label, "ICE 509");
+  assert.ok(t.state.win.list.length >= 2, "weitere Fahrten im Fenster");
+  // erste Abfahrt (10:05) vorbei, nichts gewählt → nächste Fahrt im Fenster
+  await refreshWindow(env, t, wallToMs("2026-11-24", "10:10"));
+  assert.equal(t.legs[0].label, "ICE 510");
+  assert.ok(!t.state.win.list.some(o => o.label === "ICE 510"));
+});

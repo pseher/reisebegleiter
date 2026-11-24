@@ -6,7 +6,7 @@ import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
 import { busLive } from "./buslive.js";
-import { makeDue } from "./routines.js";
+import { makeDue, refreshWindow } from "./routines.js";
 
 const MIN = 60e3;
 // Wie oft ein Halt geprüft wird – je näher, desto öfter (Minuten)
@@ -254,7 +254,8 @@ export async function assess(env, trip, now, cache) {
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
   }
   const d0 = diff(trip, v, { ...prev, alt }, now), state = d0.state;
-  const msgs = prev.missed ? [] : d0.msgs;         // „Zug verpasst“: du kümmerst dich gerade selbst darum
+  // „Zug verpasst“: du kümmerst dich gerade selbst darum. Zeitfenster ohne Wahl: noch keine Meldungen (welche Fahrt du nimmst, ist offen)
+  const msgs = prev.missed || (prev.win && !prev.win.picked) ? [] : d0.msgs;
   trip.state = { ...prev, ...state, alt, altAt, status: v.status, at: now };   // übrige Merker (z. B. undo, geo, bind…) behalten
   const last = v.legs[v.legs.length - 1];
   if ((v.phase === "done" && now > last.arr.rt + 30 * MIN) || now > last.arr.rt + 4 * 3600e3) trip.active = false;
@@ -286,7 +287,7 @@ export async function bindLate(env, trip, now, cache) {
 // Cron: jede Minute
 export async function runMonitor(env, now = Date.now()) {
   // Regelmäßige Fahrten: fällige Reisen anlegen, bevor überwacht wird
-  const rMsgs = await makeDue(env, now).catch(e => { console.log("Regelmäßig:", e.message); return []; });
+  const rMsgs = await makeDue(env, now, (opts, own) => watchAlts(env, opts, now, own || 0)).catch(e => { console.log("Regelmäßig:", e.message); return []; });
   const trips = await db.activeTrips(env), cache = new Map();
   for (const t of trips) await bindLate(env, t, now, cache).catch(() => {});
   const checks = trips.flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
@@ -294,6 +295,8 @@ export async function runMonitor(env, now = Date.now()) {
   const out = new Map();
   for (const t of trips) {
     const before = JSON.stringify(t.state || {});
+    if (t.state?.win && !t.state.win.picked) await refreshWindow(env, t, now, opts => watchAlts(env, opts, now, +t.legs[0]?.minT || 0, cache)).catch(e => console.log("Zeitfenster:", e.message));
+    if (!t.active) { await saveTrip(env, t).catch(() => {}); continue; }
     const { msgs } = await assess(env, t, now, cache);
     if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos

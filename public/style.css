@@ -315,3 +315,9 @@ button.link { padding: 10px 4px; }
 .chk input { width: 20px; height: 20px; }
 input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); box-sizing: border-box; margin-bottom: 6px; }
 .danger-t { color: var(--lost); }
+.win-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.win-row input[type=time] { flex: 1; min-width: 0; min-height: var(--tap); font: inherit; padding: 8px 10px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); }
+.win-row .chip { flex: 0 0 auto; }
+.sec-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; background: none; border: 0; cursor: pointer; font: inherit; padding: 0; }
+.sec-toggle .chev { color: var(--muted); }
+.reg-open { margin: 4px 0 8px; }

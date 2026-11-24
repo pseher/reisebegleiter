@@ -54,7 +54,8 @@ function view(trip, now = Date.now()) {
     const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   const sosV = st.sos && now - st.sos.at < 45 * MIN ? { ...st.sos, list: (st.sos.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs.slice((a.from ?? 0) + 1), a.legs || []) })) } : null;
-  return { id: trip.id, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  const win = st.win ? { from: st.win.from, to: st.win.to, picked: !!st.win.picked, list: (st.win.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs, a.legs || []) })) } : null;
+  return { id: trip.id, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
@@ -349,12 +350,30 @@ async function api(req, env, url) {
     const t = await ownTrip(env, dev, ma[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({}));
-    if (ma[2] === "undo") undoAdopt(t); else await adopt(env, t, +b.k || 0, +b.idx || 0, !!b.here, !!b.sos);
+    if (ma[2] === "undo") undoAdopt(t);
+    else if (b.win) {
+      // Zeitfenster: diese Fahrt nehmen → ab jetzt normal überwachen (mit Meldungen)
+      const w = t.state?.win; if (!w?.list?.[+b.idx]) return fail(400, "Diese Fahrt gibt es nicht mehr. Bitte neu wählen.");
+      t.state = { ...t.state, here: { list: w.list, mode: "start", at: Date.now() } };
+      await adopt(env, t, 0, +b.idx || 0, true, false);
+      t.state = { ...t.state, here: null, undo: null, win: { ...w, picked: true, list: [] } };
+    } else await adopt(env, t, +b.k || 0, +b.idx || 0, !!b.here, !!b.sos);
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
     await assess(env, t, now, cache);
     await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ends_at: t.ends_at, active: true, updated_at: new Date().toISOString() });
     return json(view(t, now));
+  }
+
+  // Zeitfenster: „Die nehme ich“ für die aktuell überwachte Fahrt bzw. wieder offen lassen
+  const mp = /^\/api\/trips\/([0-9a-f-]{36})\/pick$/i.exec(p);
+  if (mp && (method === "POST" || method === "DELETE")) {
+    const t = await ownTrip(env, dev, mp[1]);
+    if (!t?.state?.win) return fail(404, "Reise nicht gefunden");
+    t.state = { ...t.state, win: { ...t.state.win, picked: method === "POST", at: method === "POST" ? t.state.win.at : 0 } };
+    if (method === "DELETE") { const { refreshWindow } = await import("./routines.js"); await refreshWindow(env, t, Date.now()).catch(() => {}); }
+    await db.update(env, "rb_trips", t.id, { state: t.state, legs: t.legs, obs: t.obs || [], active: t.active, ends_at: t.ends_at });
+    return json(view(t, Date.now()));
   }
 
   const m = /^\/api\/trips\/([0-9a-f-]{36})$/i.exec(p);
@@ -397,10 +416,22 @@ async function api(req, env, url) {
   if (p === "/api/routines" && method === "GET") return json((await db.routinesOf(env, dev.account_id)).map(r => routineView(r)));
   if (p === "/api/routines" && method === "POST") {
     // aus einer angelegten Reise: gleiche Strecke, gleiche Abfahrtszeit, gewählte Tage
-    const b = await req.json().catch(() => ({})), t = await ownTrip(env, dev, String(b.tripId || ""));
-    if (!t) return fail(404, "Reise nicht gefunden");
+    const b = await req.json().catch(() => ({}));
     const days = cleanDays(b.days); if (!days.length) return fail(400, "Bitte mindestens einen Tag wählen.");
     if ((await db.routinesOf(env, dev.account_id)).length >= 12) return fail(400, "Höchstens 12 regelmäßige Fahrten.");
+    if (b.from && b.to) {
+      // direkt aus der Verbindungssuche: Start, Ziel, Tage und Zeitfenster
+      const hhmm = s => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(s)) ? String(s) : null), wf = hhmm(b.winFrom), wt = hhmm(b.winTo);
+      if (!wf || !wt || wt <= wf) return fail(400, "Bitte ein Zeitfenster wählen (bis muss nach von liegen).");
+      const pl = s => ({ name: String(s.name || "").slice(0, 80), eva: /^\d{6,9}$/.test(String(s.eva || "")) ? String(s.eva) : "", ...coord(s), ...sid(s) });
+      const from = pl(b.from), to = pl(b.to);
+      if (!from.name || !to.name || (!from.eva && from.lat == null) || (!to.eva && to.lat == null)) return fail(400, "Start oder Ziel unbekannt.");
+      const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `${from.name} → ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
+        tpl: [{ jid: "", label: "", from, to }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made: [] });
+      return json(routineView(r), 201);
+    }
+    const t = await ownTrip(env, dev, String(b.tripId || ""));
+    if (!t) return fail(404, "Reise nicht gefunden");
     const legs = (t.state?.undo?.legs && b.original ? t.state.undo.legs : t.legs), dep0 = Date.parse(legs[0].from.plan);
     const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${legs[legs.length - 1].to.name}`, days, dep: wallTime(dep0),
       tpl: legs.map(({ jid, tid, ...l }) => ({ ...l, jid: "" })), ticket: t.ticket, min_t: +legs[0].minT || 0, holidays: b.holidays !== false, paused: false, skip: [], made: [berlinDate(dep0)] });
@@ -425,6 +456,11 @@ async function api(req, env, url) {
       if (b.name != null) patch.name = cleanName(b.name) || r.name;
       if (b.days != null) { const d = cleanDays(b.days); if (!d.length) return fail(400, "Bitte mindestens einen Tag wählen."); patch.days = d; }
       if (b.holidays != null) patch.holidays = !!b.holidays;
+      if (b.winFrom && b.winTo && r.win_to) {
+        const ok = s => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s));
+        if (!ok(b.winFrom) || !ok(b.winTo) || b.winTo <= b.winFrom) return fail(400, "Bitte ein gültiges Zeitfenster wählen.");
+        Object.assign(patch, { win_from: b.winFrom, win_to: b.winTo, dep: b.winFrom });
+      }
       if (b.paused != null) patch.paused = !!b.paused;
       if (b.ticket && ["spar", "flex", "dticket", "bc100"].includes(b.ticket)) patch.ticket = b.ticket;
       await db.update(env, "rb_routines", r.id, patch);

@@ -117,7 +117,7 @@ function render0() {
 }
 
 const KICKER = { OK: "Alles im Plan", WATCH: "Knapp", RISK: "Achtung", LOST: "Handeln", DONE: "Angekommen" };
-const listState = t => (t.status === "WATCH" && !t.transfers.some(x => x.status === "WATCH") && t.finalDelay >= 3 ? `${t.finalDelay} Min. später` : KICKER[t.status] || "");
+const listState = t => (t.win && !t.win.picked && t.phase === "before" ? "Fahrt wählen" : t.status === "WATCH" && !t.transfers.some(x => x.status === "WATCH") && t.finalDelay >= 3 ? `${t.finalDelay} Min. später` : KICKER[t.status] || "");
 const heroKicker = t => (t.phase === "before" ? "Vor der Abfahrt" : t.phase === "done" ? "Reise beendet" : "Unterwegs");
 const day = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
 const inMin = iso => { const m = Math.round((Date.parse(iso) - Date.now()) / MIN);
@@ -145,25 +145,80 @@ function renderList(active) {
   // Gliederung: Heute (bis morgen früh) · Regelmäßig · Später (eingeklappt, wenn es viele sind)
   const soon = Date.now() + 18 * 3600e3, today = active.filter(t => Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => !today.includes(t));
   const item = t => `<li><button data-open="${t.id}">
-      <span class="sdot d-${t.status}"></span>
+      <span class="sdot d-${t.win && !t.win.picked && t.phase === "before" ? "OK" : t.status}"></span>
       <span class="tr-main"><b>${t.rname ? `<span class="rtag">↻ ${esc(t.rname)}</span> ` : ""}${route(t)}</b><span class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}</span></span>
       <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
   const showLater = LATER_OPEN || later.length <= 2;
   $app.innerHTML = `${flashBox()}
     <h1>${today.length ? "Heute" : "Deine Reisen"}</h1>
     ${today.length ? `<ul class="trips">${today.map(item).join("")}</ul>` : `<p class="muted small">${ROUTINES.length ? "Heute steht keine Fahrt an. Regelmäßige Fahrten erscheinen hier ca. 3 Std. vor der Abfahrt." : ""}</p>`}
-    ${ROUTINES.length ? `<h3 class="sec-h">Regelmäßig</h3><div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : ""}
+    ${ROUTINES.length ? `<button class="sec-h sec-toggle" data-rlist aria-expanded="${R_LIST_OPEN}">Regelmäßig · ${ROUTINES.length} <span class="chev">${R_LIST_OPEN ? "▴" : "▾"}</span></button>
+      ${R_LIST_OPEN ? `<div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : ""}` : ""}
     ${later.length ? `<h3 class="sec-h">Später</h3>${showLater ? `<ul class="trips">${later.map(item).join("")}</ul>` : ""}
       ${later.length > 2 ? `<button class="btn quiet small-btn" data-later>${LATER_OPEN ? "Weniger zeigen" : `${later.length} Reisen zeigen`}</button>` : ""}` : ""}
     <button class="btn sec" data-go="add">Reise hinzufügen</button>${pushCard()}`;
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
+  $app.querySelector("[data-rlist]")?.addEventListener("click", () => { R_LIST_OPEN = !R_LIST_OPEN; try { localStorage.setItem("rb_rlist", R_LIST_OPEN ? "1" : "0"); } catch {} render(); });
   bindRoutines();
   bindCommon();
 }
 
+// Zeitfenster: alle Fahrten im Fenster mit Live-Stand, du wählst, welche du nimmst
+function windowCard(t) {
+  if (!t.win || t.phase === "done") return "";
+  if (t.win.picked) return `<div class="banner info small row" style="align-items:center"><span style="flex:3">↻ Du nimmst diese Fahrt (Zeitfenster ${esc(t.win.from)}–${esc(t.win.to)}).</span><button class="chip" data-unpick="${t.id}" style="flex:0 0 auto">Andere wählen</button></div>`;
+  const cur = `<div class="cmp-row cur"><div class="cmp-tag">Nächste Fahrt</div><div class="cmp-main">${losZiel(t.legs[0].dep.rt, t.plan.arr)}${stepsHtml(planSteps(t))}
+      <div class="row cmp-act"><button class="btn small-btn" data-pick="${t.id}">Die nehme ich</button></div></div></div>`;
+  const zb0 = t.ticket === "spar" && !t.zbLifted;
+  const rows = (t.win.list || []).map((a, i) => `<div class="cmp-row"><div class="cmp-tag">Später im Fenster</div><div class="cmp-main">
+      ${losZiel(a.dep, a.arr)}${stepsHtml(altSteps(a))}<div class="cmp-live">${liveBadge(a)}${zb0 && a.zb ? ` ${zbBadge}` : ""}</div>
+      ${infeasible(a) ? `<div class="small late" style="margin-top:6px">Geht so nicht mehr</div>` : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|win">Die nehme ich</button></div>`}</div></div>`).join("");
+  return `<div class="tiles">${cur}${rows}</div>`;
+}
+// In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
+const REG = { open: false, name: "", days: [1, 2, 3, 4, 5], from: "", to: "", hol: true, ticket: "dticket", busy: false };
+function regularBox() {
+  if (!REG.open) return `<button class="btn quiet small-btn reg-open" id="regOpen">↻ Diese Strecke regelmäßig überwachen …</button>`;
+  if (!REG.from) { const d = new Date(W.when), p = x => String(x).padStart(2, "0"), hh = +d.toLocaleString("de-DE", { hour: "2-digit", hour12: false, timeZone: "Europe/Berlin" });
+    REG.from = `${p(hh)}:00`; REG.to = `${p(Math.min(23, hh + 1))}:${hh >= 23 ? "59" : "00"}`; }
+  return `<section class="card reg"><div class="card-h"><div class="k">Regelmäßig überwachen</div><button class="card-x" id="regX" aria-label="Schließen">✕</button></div>
+    <p class="small muted" style="margin:0 0 8px">An jedem Fahrtag beobachte ich alle Fahrten ${esc(cleanStop(W.rFrom.name))} → ${esc(cleanStop(W.rTo.name))} in deinem Zeitfenster. Du tippst an, welche du nimmst – sonst läuft alles im Hintergrund.</p>
+    <input class="txt" id="regName" maxlength="40" placeholder="Name, z. B. Arbeit hin" value="${esc(REG.name)}">
+    <p class="small muted" style="margin:4px 0 0">An welchen Tagen?</p>${dayChips(REG.days, "data-regd")}
+    <p class="small muted" style="margin:4px 0 0">Abfahrt zwischen</p>
+    <div class="win-row"><input type="time" id="regFrom" value="${esc(REG.from)}"><span>und</span><input type="time" id="regTo" value="${esc(REG.to)}"></div>
+    <p class="small muted" style="margin:8px 0 0">Ticket</p>
+    <div class="chips">${[["dticket", "Deutschlandticket"], ["flex", "Flexpreis"], ["spar", "Sparpreis"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-regt="${k}" aria-pressed="${REG.ticket === k}">${l}</button>`).join("")}</div>
+    <label class="small chk"><input type="checkbox" id="regHol" ${REG.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
+    <button class="btn" id="regSave" ${REG.busy ? "disabled" : ""}>${REG.busy ? "Speichere …" : `${esc(daysText(REG.days))}, ${esc(REG.from)}–${esc(REG.to)} überwachen`}</button></section>`;
+}
+function bindRegular() {
+  const $ = id => document.getElementById(id), keep = () => { REG.name = $("regName")?.value ?? REG.name; REG.from = $("regFrom")?.value || REG.from; REG.to = $("regTo")?.value || REG.to; };
+  $("regOpen")?.addEventListener("click", () => { REG.open = true; render(); });
+  $("regX")?.addEventListener("click", () => { REG.open = false; render(); });
+  $app.querySelectorAll("[data-regd]").forEach(b => b.onclick = () => { keep(); const d = +b.dataset.regd; REG.days = REG.days.includes(d) ? REG.days.filter(x => x !== d) : [...REG.days, d].sort(); render(); });
+  $app.querySelectorAll("[data-regt]").forEach(b => b.onclick = () => { keep(); REG.ticket = b.dataset.regt; render(); });
+  ["regFrom", "regTo"].forEach(id => $(id)?.addEventListener("change", () => { keep(); render(); }));
+  $("regHol")?.addEventListener("change", e => { REG.hol = e.target.checked; });
+  $("regSave")?.addEventListener("click", async () => {
+    keep();
+    if (!REG.days.length) return alert("Bitte mindestens einen Tag wählen.");
+    if (!(REG.to > REG.from)) return alert("Das Ende des Zeitfensters muss nach dem Beginn liegen.");
+    REG.busy = true; render();
+    const r = await rCall("/api/routines", { method: "POST", body: { from: W.rFrom, to: W.rTo, name: REG.name.trim(), days: REG.days, winFrom: REG.from, winTo: REG.to, ticket: REG.ticket, holidays: REG.hol, minT: MINT } });
+    REG.busy = false;
+    if (!r) return render();
+    Object.assign(REG, { open: false, name: "", days: [1, 2, 3, 4, 5], from: "", to: "", hol: true });
+    ROUTINES = await api("/api/routines").catch(() => ROUTINES);
+    W = null; flash = `„${r.name}“: ${daysText(r.days)} zwischen ${r.win[0]} und ${r.win[1]} – läuft jetzt im Hintergrund. Die Fahrt erscheint jeweils ca. 3 Std. vorher unter „Heute“.`;
+    openId = null; go("home");
+  });
+}
+
 // ---------- Regelmäßige Fahrten ----------
-let LATER_OPEN = false, R_OPEN = null;
+let LATER_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
+try { R_LIST_OPEN = localStorage.getItem("rb_rlist") === "1"; } catch {}
 const DOW = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 // [1,2,3,4,5] → „Mo–Fr“, alle → „täglich“, sonst „Mo, Mi, Fr“ (Folgen ab 3 Tagen zusammengefasst)
 function daysText(d) {
@@ -180,11 +235,12 @@ function routineRow(r) {
   const state = r.paused ? `<span class="badge">pausiert</span>` : nx ? `nächste: <b>${dateWord(nx.date)}</b>` : "keine Fahrt in den nächsten 3 Wochen";
   const off = !r.paused && r.todayOff && r.todayOff !== "kein Fahrtag" ? ` · heute nicht (${esc(r.todayOff)})` : "";
   return `<div class="rrow ${open ? "open" : ""}"><button class="rhead" data-ropen="${r.id}" aria-expanded="${open}">
-      <span class="tr-main"><b>↻ ${esc(r.name)}</b><span class="small muted">${daysText(r.days)} · ${esc(r.dep)} · ${esc(cleanStop(r.from))} → ${esc(cleanStop(r.to))}</span>
+      <span class="tr-main"><b>↻ ${esc(r.name)}</b><span class="small muted">${daysText(r.days)} · ${r.win ? `${esc(r.win[0])}–${esc(r.win[1])}` : esc(r.dep)} · ${esc(cleanStop(r.from))} → ${esc(cleanStop(r.to))}</span>
       <span class="small">${state}${off}</span></span><span class="chev">${open ? "▴" : "▾"}</span></button>
     ${open ? `<div class="rbody">
       <p class="small muted" style="margin:0 0 6px">${esc(r.label)}</p>
       <p class="small muted" style="margin:0">Fahrtage</p>${dayChips(r.days, `data-rday="${r.id}" data-d`)}
+      ${r.win ? `<p class="small muted" style="margin:6px 0 0">Zeitfenster (Abfahrt)</p><div class="win-row"><input type="time" id="rwf-${r.id}" value="${esc(r.win[0])}"><span>bis</span><input type="time" id="rwt-${r.id}" value="${esc(r.win[1])}"><button class="chip" data-rwin="${r.id}">Speichern</button></div>` : ""}
       <label class="small chk"><input type="checkbox" data-rhol="${r.id}" ${r.holidays ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
       ${nx && !r.paused ? `<button class="btn sec small-btn" data-rskip="${r.id}|${nx.date}">${dateWord(nx.date) === "heute" || dateWord(nx.date) === "morgen" ? `${dateWord(nx.date)[0].toUpperCase()}${dateWord(nx.date).slice(1)}` : `Am ${dateWord(nx.date)}`} nicht fahren</button>` : ""}
       ${r.skip.length ? `<p class="small" style="margin:8px 0 0">Ausgesetzt: ${r.skip.map(d => `<button class="chip" data-runskip="${r.id}|${d}" title="Wieder fahren">${dateWord(d)} ✕</button>`).join(" ")}</p>` : ""}
@@ -200,6 +256,8 @@ function bindRoutines() {
   $app.querySelectorAll("[data-rday]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rday), d = +b.dataset.d;
     const days = r.days.includes(d) ? r.days.filter(x => x !== d) : [...r.days, d]; if (!days.length) return alert("Mindestens ein Tag.");
     await rCall(`/api/routines/${r.id}`, { method: "PATCH", body: { days } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rwin]").forEach(b => b.onclick = async () => { const id = b.dataset.rwin;
+    await rCall(`/api/routines/${id}`, { method: "PATCH", body: { winFrom: document.getElementById(`rwf-${id}`).value, winTo: document.getElementById(`rwt-${id}`).value } }); reloadRoutines(); });
   $app.querySelectorAll("[data-rhol]").forEach(b => b.onchange = async () => { await rCall(`/api/routines/${b.dataset.rhol}`, { method: "PATCH", body: { holidays: b.checked } }); reloadRoutines(); });
   $app.querySelectorAll("[data-rpause]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rpause); await rCall(`/api/routines/${r.id}`, { method: "PATCH", body: { paused: !r.paused } }); reloadRoutines(); });
   $app.querySelectorAll("[data-rname]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rname), n = prompt("Name der Fahrt", r.name); if (!n) return;
@@ -333,7 +391,7 @@ const plainStop = n => cleanStop(n).replace(/^(S\+U|S|U)\s+/i, "").replace(/\s*\
 // Echtzeit je Teilstrecke: „pünktlich“, „+4 Min.“ oder „fällt aus“ – ohne Prognose nichts behaupten
 function stepLive(x) {
   if (x.c) return ` <span class="badge bad">fällt aus</span>`;
-  if (!x.live) return x.watched ? ` <span class="muted small">noch ohne Live-Daten</span>` : "";
+  if (!x.live) return "";   // „noch ohne Live-Daten“ steht einmal unter der Verbindung
   return (x.delay || 0) >= 2 ? ` <span class="badge warn">+${x.delay} Min.</span>` : ` <span class="badge good">pünktlich</span>`;
 }
 const stepTime = (rt, plan, live) => { const d = plan ? Math.round((Date.parse(rt) - Date.parse(plan)) / MIN) : 0;
@@ -552,13 +610,15 @@ function renderTrip(t, many) {
   const sheet = sheetId === t.id;
   $app.innerHTML = `${flashBox()}
     <div class="trip-head"><div class="row" style="align-items:flex-start"><h1 style="flex:1">${route(t)}</h1><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}" style="flex:0 0 auto;margin-top:10px">${isFav(t) ? "★" : "☆"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}" style="flex:0 0 auto;margin-top:10px">Ändern</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
-    <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
-      ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
+    ${t.win && !t.win.picked ? `<section class="hero s-OK"><div class="k">↻ ${esc(t.rname || "Regelmäßig")} · ${esc(t.win.from)}–${esc(t.win.to)}</div><h2>Welche Fahrt nimmst du?</h2>
+      <p>Ich beobachte alle Fahrten in deinem Zeitfenster. Tippe an, welche du nimmst – dann melde ich mich, wenn etwas nicht klappt.</p></section>` : `<section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
+      ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>`}
+    ${windowCard(t)}
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
-    ${nextCard(t.next, t)}
+    ${t.win && !t.win.picked && t.phase === "before" ? "" : nextCard(t.next, t)}
     ${sosButton(t)}
-    ${t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) + hereCard({ ...t, here: null }) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
+    ${t.win && !t.win.picked && t.phase === "before" ? "" : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) + hereCard({ ...t, here: null }) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: Verspätung bzw. verpasster Anschluss (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">Verlauf</h3>
     <div class="card flat">${timeline(t)}</div>
@@ -696,6 +756,11 @@ function pushCard() {
 }
 
 function bindCommon() {
+  $app.querySelectorAll("[data-pick]").forEach(b => b.onclick = async () => { b.disabled = true;
+    await api(`/api/trips/${b.dataset.pick}/pick`, { method: "POST" }).catch(e => alert(e.message));
+    flash = "Alles klar – ich überwache diese Fahrt und melde mich, wenn etwas nicht klappt."; await loadTrips().catch(() => {}); render(); scrollTo(0, 0); });
+  $app.querySelectorAll("[data-unpick]").forEach(b => b.onclick = async () => { b.disabled = true;
+    await api(`/api/trips/${b.dataset.unpick}/pick`, { method: "DELETE" }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); });
   $app.querySelectorAll("[data-linkjoin]").forEach(b => b.onclick = () => { DEV.join = true; DEV.err = ""; go("settings"); setTimeout(() => { document.getElementById("devices")?.scrollIntoView({ block: "center" }); document.getElementById("devIn")?.focus(); }, 80); });
   $app.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     if (!confirm("Reise beenden und nicht mehr überwachen?")) return;
@@ -704,6 +769,11 @@ function bindCommon() {
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
     const [id, k, idx, src] = b.dataset.adopt.split("|"), t = trips.find(x => x.id === id);
+    if (src === "win") {   // Zeitfenster: einfach wählen, ohne Rückfrage
+      b.disabled = true; b.textContent = "Wird übernommen …";
+      await api(`/api/trips/${id}/adopt`, { method: "POST", body: { win: true, idx: +idx } }).catch(e => alert(e.message));
+      flash = "Alles klar – ich überwache diese Fahrt und melde mich, wenn etwas nicht klappt."; await loadTrips().catch(() => {}); render(); scrollTo(0, 0); return;
+    }
     const zbWarn = t && t.ticket === "spar" && !t.zbLifted && b.dataset.zb ? "\n\nAchtung Sparpreis: Das ist ein anderer Fernzug. Er gilt erst, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden." : "";
     if (!confirm(`Diese Verbindung nehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nEs wird nichts gebucht. Ich überwache dann diese Verbindung – du kannst jederzeit zurück zum alten Plan.`)) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
@@ -954,7 +1024,7 @@ function renderWizard() {
 
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
-      ${err}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      ${err}${W.editId ? "" : regularBox()}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
       <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>` : ""}${back}`;
     if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
@@ -965,6 +1035,7 @@ function renderWizard() {
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
+    bindRegular();
   }
 
   else if (W.step === "pickTrip") {
