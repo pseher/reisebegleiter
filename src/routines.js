@@ -123,14 +123,18 @@ export async function makeDue(env, now = Date.now(), watch = null) {
   const list = await db.activeRoutines(env).catch(() => []), msgs = [], tripsCache = new Map();
   for (const r of list) {
     for (const date of [berlinDate(now), berlinDate(now + DAY)]) {
-      if ((r.made || []).includes(date) || offReason(r, date)) continue;
+      if (offReason(r, date)) continue;
       const at = wallToMs(date, r.dep);
       const until = r.win_to ? wallToMs(date, r.win_to) : at + 5 * MIN;   // ein angefangenes Zeitfenster wird trotzdem noch angelegt
       if (now < at - LEAD || now > until) continue;
-      r.made = [...(r.made || []), date].slice(-14);
+      if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
+      // Schon angelegt? Normalerweise ja – fehlt die Fahrt aber (z. B. Fehler beim Anlegen), einmal neu anlegen
+      const made = r.made || [], hasTrip = tripsCache.get(r.account_id).some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs?.[0]?.from?.plan)) === date);
+      if (made.includes(date) && (hasTrip || made.includes(`${date}!`))) continue;
+      r.made = [...made.filter(d => d !== date), made.includes(date) ? `${date}!` : date].slice(-14);
+      if (made.includes(date)) r.made.push(date);
       await db.update(env, "rb_routines", r.id, { made: r.made });   // zuerst merken: nie doppelt anlegen
       // Hast du für diese Strecke an dem Tag schon selbst eine Reise angelegt? Dann diese nehmen statt einer zweiten
-      if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
       const end = r.win_to ? wallToMs(date, r.win_to) : at + 60 * MIN, start = r.win_to ? at : at - 60 * MIN;
       const mine = tripsCache.get(r.account_id), keep = t => (mine.push(t), t);
       const own = mine.find(t => t.legs?.length && (!t.state?.routine || t.state.routine === r.id) && plain(t.legs[0].from.name) === plain(r.tpl[0].from.name) && plain(t.legs[t.legs.length - 1].to.name) === plain(r.tpl[r.tpl.length - 1].to.name)

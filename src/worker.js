@@ -392,7 +392,15 @@ async function api(req, env, url) {
   if (m) {
     const t = await ownTrip(env, dev, m[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
-    if (method === "DELETE") { await db.remove(env, "rb_trips", t.id); return json({ ok: true }); }
+    if (method === "DELETE") {
+      // Fahrt einer regelmäßigen Fahrt gelöscht = an dem Tag nicht fahren (sonst würde sie nie wieder angelegt – oder ungefragt neu)
+      const rid = t.state?.routine, d = berlinDate(Date.parse(t.legs[0].from.plan));
+      if (rid && d >= berlinDate(Date.now())) {
+        const r = await db.get(env, "rb_routines", rid).catch(() => null);
+        if (r && r.account_id === dev.account_id && !(r.skip || []).includes(d)) await db.update(env, "rb_routines", r.id, { skip: [...(r.skip || []), d].slice(-30) });
+      }
+      await db.remove(env, "rb_trips", t.id); return json({ ok: true });
+    }
     // Reise ändern: neue Verbindung (andere Zeit, anderer Start/Ziel) – Ticket bleibt, Überwachung beginnt neu
     if (method === "PUT") {
       const b = await req.json().catch(() => ({}));

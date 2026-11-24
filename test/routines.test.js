@@ -112,3 +112,15 @@ test("Gleiche Strecke zur gleichen Zeit kann man nicht doppelt anlegen", async (
   const r2 = await call("/api/routines", A, "POST", { ...body, name: "Nochmal" });
   assert.equal(r2.s, 409); assert.match(r2.j.error || JSON.stringify(r2.j), /schon überwacht/);
 });
+
+test("Fehlt die Fahrt trotz ‚angelegt‘-Vermerk, wird sie einmal nachgeholt; selbst gelöscht heißt: an dem Tag nicht fahren", async () => {
+  const env = { MOCK: "1" };
+  const acc = await db.insert(env, "rb_accounts", { favs: [] });
+  const r = await db.insert(env, "rb_routines", { account_id: acc.id, name: "Abends", days: [2], dep: "22:00", win_from: "22:00", win_to: "22:30",
+    tpl: [{ jid: "", label: "", from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" } }], ticket: "flex", min_t: 0, holidays: true, paused: false, skip: [], made: ["2026-11-24"] });
+  await makeDue(env, wallToMs("2026-11-24", "19:30"));
+  let mine = (await db.tripsOf(env, acc.id)).filter(t => t.state?.routine === r.id);
+  assert.equal(mine.length, 1, "nachgeholt");
+  await makeDue(env, wallToMs("2026-11-24", "19:40"));
+  assert.equal((await db.tripsOf(env, acc.id)).filter(t => t.state?.routine === r.id).length, 1, "nicht doppelt");
+});
