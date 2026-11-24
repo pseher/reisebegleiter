@@ -1,7 +1,7 @@
 // Speicher: Supabase (PlanFlink-Projekt, Tabellen rb_devices / rb_trips) über REST mit dem Secret Key.
 // Mit MOCK=1 ein Speicher im Arbeitsspeicher (nur für lokale Tests).
 
-const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map() };
+const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map() };
 
 function hdr(env) {
   const k = env.SUPABASE_SERVICE_KEY;
@@ -38,6 +38,15 @@ export async function remove(env, table, id) {
 export async function tripsOf(env, accountId) {
   if (mem(env)) return [...MEM.rb_trips.values()].filter(t => (t.account_id || t.device_id) === accountId && t.active).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
   return rest(env, `rb_trips?account_id=eq.${accountId}&active=eq.true&order=created_at.desc&limit=20`);
+}
+// Regelmäßige Fahrten
+export async function routinesOf(env, accountId) {
+  if (mem(env)) return [...MEM.rb_routines.values()].filter(r => r.account_id === accountId).sort((a, b) => a.dep < b.dep ? -1 : 1);
+  return rest(env, `rb_routines?account_id=eq.${accountId}&order=dep.asc&limit=20`);
+}
+export async function activeRoutines(env) {
+  if (mem(env)) return [...MEM.rb_routines.values()].filter(r => !r.paused);
+  return rest(env, "rb_routines?paused=eq.false&limit=500");
 }
 // Geräte eines oder mehrerer Konten
 export async function devicesOf(env, accountIds, select = "id,push,account_id,label,created_at,last_seen") {

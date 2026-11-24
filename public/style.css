@@ -299,3 +299,19 @@ button.link { padding: 10px 4px; }
 .link-code { background: var(--bg); border-radius: 12px; padding: 12px; margin: 4px 0 8px; }
 .code-big { font-size: 40px; font-weight: 800; letter-spacing: .08em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
 .code-in { width: 100%; font-size: 28px; font-weight: 700; letter-spacing: .1em; text-align: center; padding: 10px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--card); color: var(--text, inherit); margin-top: 4px; box-sizing: border-box; }
+/* Regelmäßige Fahrten */
+.rlist { padding: 0; overflow: hidden; }
+.rrow + .rrow { border-top: 1px solid var(--line); }
+.rhead { display: flex; width: 100%; gap: 10px; align-items: center; text-align: left; background: none; border: 0; padding: 14px 16px; font: inherit; color: var(--ink); cursor: pointer; }
+.rhead .tr-main { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.rhead .chev { color: var(--muted); }
+.rbody { padding: 0 16px 14px; }
+.rtag { font-weight: 600; color: var(--accent); }
+.chips.days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin: 4px 0 6px; }
+.chips.days .chip { min-width: 0; padding: 0 2px; justify-content: center; text-align: center; }
+.rbody .rbtns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.rbody .rbtns .btn { margin: 0; white-space: normal; }
+.chk { display: flex; align-items: center; gap: 8px; margin: 6px 0; min-height: 36px; }
+.chk input { width: 20px; height: 20px; }
+input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); box-sizing: border-box; margin-bottom: 6px; }
+.danger-t { color: var(--lost); }

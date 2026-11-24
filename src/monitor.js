@@ -6,6 +6,7 @@ import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
 import { busLive } from "./buslive.js";
+import { makeDue } from "./routines.js";
 
 const MIN = 60e3;
 // Wie oft ein Halt geprüft wird – je näher, desto öfter (Minuten)
@@ -284,6 +285,8 @@ export async function bindLate(env, trip, now, cache) {
 
 // Cron: jede Minute
 export async function runMonitor(env, now = Date.now()) {
+  // Regelmäßige Fahrten: fällige Reisen anlegen, bevor überwacht wird
+  const rMsgs = await makeDue(env, now).catch(e => { console.log("Regelmäßig:", e.message); return []; });
   const trips = await db.activeTrips(env), cache = new Map();
   for (const t of trips) await bindLate(env, t, now, cache).catch(() => {});
   const checks = trips.flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
@@ -296,6 +299,7 @@ export async function runMonitor(env, now = Date.now()) {
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
     if (msgs.length) out.set(acc, [...(out.get(acc) || []), ...msgs.slice(0, 4).map(m => ({ ...m, url: `/?trip=${encodeURIComponent(t.id)}` }))]);
   }
+  for (const m of rMsgs) { const { acc, ...msg } = m; out.set(acc, [...(out.get(acc) || []), msg]); }
   let sent = 0;
   if (out.size) {
     const devs = await db.devicesOf(env, [...out.keys()], "id,push,account_id");

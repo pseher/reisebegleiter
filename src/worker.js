@@ -8,6 +8,7 @@ import { evaluate, changesFV, isFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
 import { sos } from "./sos.js";
 import { vapid, b64u } from "./push.js";
+import { routineView, berlinDate, wallTime, offReason } from "./routines.js";
 
 const MIN = 60e3;
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
@@ -28,7 +29,9 @@ async function device(env, req) {
 // Reise gehört zum Konto dieses Geräts (alle verbundenen Geräte dürfen sie sehen und ändern)
 const ownTrip = async (env, dev, id) => { const t = await db.get(env, "rb_trips", id); return t && (t.account_id || t.device_id) === dev.account_id ? t : null; };
 const LABEL = s => String(s || "").replace(/[^\p{L}\p{N} .\-]/gu, "").slice(0, 30) || null;
-const CODE_MIN = 10;   // Verbindungscode gilt 10 Minuten
+const CODE_MIN = 10;
+const cleanDays = d => [...new Set((Array.isArray(d) ? d : []).map(Number).filter(x => x >= 1 && x <= 7))].sort();
+const cleanName = s => String(s || "").replace(/[<>]/g, "").trim().slice(0, 40);   // Verbindungscode gilt 10 Minuten
 
 // Fehlende Koordinaten von DB-Bahnhöfen aus der Stationsliste ergänzen (auch für ältere Reisen)
 const withCoords = s => { if (s.lat != null || !s.eva) return s; const b = byEva(s.eva); return b ? { ...s, lat: b.lat, lon: b.lon } : s; };
@@ -51,7 +54,7 @@ function view(trip, now = Date.now()) {
     const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   const sosV = st.sos && now - st.sos.at < 45 * MIN ? { ...st.sos, list: (st.sos.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs.slice((a.from ?? 0) + 1), a.legs || []) })) } : null;
-  return { id: trip.id, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  return { id: trip.id, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
@@ -388,6 +391,46 @@ async function api(req, env, url) {
       }
       return json({ ok: true });
     }
+  }
+
+  // ---------- Regelmäßige Fahrten ----------
+  if (p === "/api/routines" && method === "GET") return json((await db.routinesOf(env, dev.account_id)).map(r => routineView(r)));
+  if (p === "/api/routines" && method === "POST") {
+    // aus einer angelegten Reise: gleiche Strecke, gleiche Abfahrtszeit, gewählte Tage
+    const b = await req.json().catch(() => ({})), t = await ownTrip(env, dev, String(b.tripId || ""));
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const days = cleanDays(b.days); if (!days.length) return fail(400, "Bitte mindestens einen Tag wählen.");
+    if ((await db.routinesOf(env, dev.account_id)).length >= 12) return fail(400, "Höchstens 12 regelmäßige Fahrten.");
+    const legs = (t.state?.undo?.legs && b.original ? t.state.undo.legs : t.legs), dep0 = Date.parse(legs[0].from.plan);
+    const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${legs[legs.length - 1].to.name}`, days, dep: wallTime(dep0),
+      tpl: legs.map(({ jid, tid, ...l }) => ({ ...l, jid: "" })), ticket: t.ticket, min_t: +legs[0].minT || 0, holidays: b.holidays !== false, paused: false, skip: [], made: [berlinDate(dep0)] });
+    await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
+    return json(routineView(r), 201);
+  }
+  const mr = /^\/api\/routines\/([0-9a-f-]{36})(\/skip)?$/.exec(p);
+  if (mr) {
+    const r = await db.get(env, "rb_routines", mr[1]);
+    if (!r || r.account_id !== dev.account_id) return fail(404, "Regelmäßige Fahrt nicht gefunden");
+    if (mr[2] && method === "POST") {
+      // einen Tag aussetzen bzw. wieder fahren; ist die Reise für den Tag schon angelegt, wird sie beendet
+      const b = await req.json().catch(() => ({})), date = /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : null;
+      if (!date) return fail(400, "Datum fehlt");
+      const skip = b.on === false ? (r.skip || []).filter(d => d !== date) : [...new Set([...(r.skip || []), date])].filter(d => d >= berlinDate(Date.now())).slice(-30);
+      await db.update(env, "rb_routines", r.id, { skip });
+      if (b.on !== false) for (const t of await db.tripsOf(env, dev.account_id)) if (t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === date) await db.remove(env, "rb_trips", t.id);
+      return json(routineView({ ...r, skip }));
+    }
+    if (method === "PATCH") {
+      const b = await req.json().catch(() => ({})), patch = {};
+      if (b.name != null) patch.name = cleanName(b.name) || r.name;
+      if (b.days != null) { const d = cleanDays(b.days); if (!d.length) return fail(400, "Bitte mindestens einen Tag wählen."); patch.days = d; }
+      if (b.holidays != null) patch.holidays = !!b.holidays;
+      if (b.paused != null) patch.paused = !!b.paused;
+      if (b.ticket && ["spar", "flex", "dticket", "bc100"].includes(b.ticket)) patch.ticket = b.ticket;
+      await db.update(env, "rb_routines", r.id, patch);
+      return json(routineView({ ...r, ...patch }));
+    }
+    if (method === "DELETE") { await db.remove(env, "rb_routines", r.id); return json({ ok: true }); }   // bereits angelegte Reisen bleiben
   }
 
   // ---------- Geräte verbinden (ohne Anmeldung): Code auf dem einen Gerät zeigen, auf dem anderen eingeben ----------

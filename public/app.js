@@ -61,7 +61,9 @@ document.addEventListener("click", e => { const b = e.target.closest("[data-go]"
   if (b.dataset.go === "home" && view === "add" && W && (W.legs?.length || W.rFrom || W.imported) && !confirm("Eingaben verwerfen und zur Startseite?")) return;
   if (b.dataset.go === "home") W = null; go(b.dataset.go); });
 
+let ROUTINES = [];
 async function loadTrips() {
+  api("/api/routines").then(r => { const ch = JSON.stringify(r) !== JSON.stringify(ROUTINES); ROUTINES = r; if (ch && view === "home" && !openId) render(); }).catch(() => {});
   try { trips = (await api("/api/trips")).sort((a, b) => Date.parse(a.legs[0].dep.plan) - Date.parse(b.legs[0].dep.plan)); loadedAt = Date.now(); } catch (e) { if (!trips.length) throw e; }
 }
 function schedule() {
@@ -77,7 +79,7 @@ document.addEventListener("visibilitychange", async () => {
 // ---------- Zurück-Taste (Handy/Browser) ----------
 // Solange man nicht auf der Startseite ist, liegt ein Eintrag im Verlauf. „Zurück“ macht dann einen Schritt in der App.
 let guard = false, skipPop = false;
-const atRoot = () => view === "home" && (!openId || trips.filter(t => t.active !== false).length <= 1);
+const atRoot = () => view === "home" && (!openId || (trips.filter(t => t.active !== false).length <= 1 && !ROUTINES.length));
 function syncHistory() {
   if (!atRoot() && !guard) { history.pushState({ rb: 1 }, ""); guard = true; }
   else if (atRoot() && guard) { guard = false; skipPop = true; history.back(); }
@@ -108,7 +110,8 @@ function render0() {
   if (view === "settings") return renderSettings();
   const active = trips.filter(t => t.active !== false);
   if (openId && !active.some(t => t.id === openId)) openId = null;
-  if (!openId && active.length === 1) openId = active[0].id;
+  // nur eine Reise und nichts Regelmäßiges: gleich die Reise zeigen
+  if (!openId && active.length === 1 && !ROUTINES.length) openId = active[0].id;
   if (openId) return renderTrip(active.find(t => t.id === openId), active.length > 1);
   renderList(active);
 }
@@ -131,7 +134,7 @@ const route = t => `${esc(t.legs[0].dep.name)} → ${esc(t.legs[t.legs.length - 
 
 // Liste bei mehreren Reisen
 function renderList(active) {
-  if (!active.length) {
+  if (!active.length && !ROUTINES.length) {
     $app.innerHTML = `<h1>Bahnfahren ohne Stress</h1>
       <p class="muted">Lege deine Reise an. Ich prüfe unterwegs Verspätungen, Gleiswechsel und Anschlüsse und melde mich nur, wenn du etwas tun solltest.</p>
       <p class="muted">Wird ein Umstieg knapp, siehst du sofort deinen Plan neben den Möglichkeiten – sitzen bleiben, einen Zug früher oder später – und wann du jeweils ankommst.</p>
@@ -139,14 +142,103 @@ function renderList(active) {
       <button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät eingerichtet? Verbinden</button>${pushCard()}`;
     return bindCommon();
   }
-  $app.innerHTML = `${flashBox()}<h1>Deine Reisen</h1>
-    <ul class="trips">${active.map(t => `<li><button data-open="${t.id}">
+  // Gliederung: Heute (bis morgen früh) · Regelmäßig · Später (eingeklappt, wenn es viele sind)
+  const soon = Date.now() + 18 * 3600e3, today = active.filter(t => Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => !today.includes(t));
+  const item = t => `<li><button data-open="${t.id}">
       <span class="sdot d-${t.status}"></span>
-      <span class="tr-main"><b>${route(t)}</b><span class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}</span></span>
-      <span class="tr-state small">${esc(listState(t))}</span></button></li>`).join("")}</ul>
+      <span class="tr-main"><b>${t.rname ? `<span class="rtag">↻ ${esc(t.rname)}</span> ` : ""}${route(t)}</b><span class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}</span></span>
+      <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
+  const showLater = LATER_OPEN || later.length <= 2;
+  $app.innerHTML = `${flashBox()}
+    <h1>${today.length ? "Heute" : "Deine Reisen"}</h1>
+    ${today.length ? `<ul class="trips">${today.map(item).join("")}</ul>` : `<p class="muted small">${ROUTINES.length ? "Heute steht keine Fahrt an. Regelmäßige Fahrten erscheinen hier ca. 3 Std. vor der Abfahrt." : ""}</p>`}
+    ${ROUTINES.length ? `<h3 class="sec-h">Regelmäßig</h3><div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : ""}
+    ${later.length ? `<h3 class="sec-h">Später</h3>${showLater ? `<ul class="trips">${later.map(item).join("")}</ul>` : ""}
+      ${later.length > 2 ? `<button class="btn quiet small-btn" data-later>${LATER_OPEN ? "Weniger zeigen" : `${later.length} Reisen zeigen`}</button>` : ""}` : ""}
     <button class="btn sec" data-go="add">Reise hinzufügen</button>${pushCard()}`;
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
+  $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
+  bindRoutines();
   bindCommon();
+}
+
+// ---------- Regelmäßige Fahrten ----------
+let LATER_OPEN = false, R_OPEN = null;
+const DOW = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+// [1,2,3,4,5] → „Mo–Fr“, alle → „täglich“, sonst „Mo, Mi, Fr“ (Folgen ab 3 Tagen zusammengefasst)
+function daysText(d) {
+  const s = [...d].sort();
+  if (s.length === 7) return "täglich";
+  const runs = []; for (const x of s) { const r = runs[runs.length - 1]; if (r && x === r[1] + 1) r[1] = x; else runs.push([x, x]); }
+  return runs.map(([a, b]) => (b - a >= 2 ? `${DOW[a - 1]}–${DOW[b - 1]}` : a === b ? DOW[a - 1] : `${DOW[a - 1]}, ${DOW[b - 1]}`)).join(", ");
+}
+const dateWord = date => { const d = new Date(`${date}T12:00:00Z`), t = new Date(), f = x => x.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+  const tm = new Date(Date.now() + 864e5); return date === f(t) ? "heute" : date === f(tm) ? "morgen" : d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric", timeZone: "UTC" }); };
+const dayChips = (sel, attr) => `<div class="chips days">${DOW.map((n, i) => `<button class="chip" ${attr}="${i + 1}" aria-pressed="${sel.includes(i + 1)}">${n}</button>`).join("")}</div>`;
+function routineRow(r) {
+  const open = R_OPEN === r.id, nx = r.next;
+  const state = r.paused ? `<span class="badge">pausiert</span>` : nx ? `nächste: <b>${dateWord(nx.date)}</b>` : "keine Fahrt in den nächsten 3 Wochen";
+  const off = !r.paused && r.todayOff && r.todayOff !== "kein Fahrtag" ? ` · heute nicht (${esc(r.todayOff)})` : "";
+  return `<div class="rrow ${open ? "open" : ""}"><button class="rhead" data-ropen="${r.id}" aria-expanded="${open}">
+      <span class="tr-main"><b>↻ ${esc(r.name)}</b><span class="small muted">${daysText(r.days)} · ${esc(r.dep)} · ${esc(cleanStop(r.from))} → ${esc(cleanStop(r.to))}</span>
+      <span class="small">${state}${off}</span></span><span class="chev">${open ? "▴" : "▾"}</span></button>
+    ${open ? `<div class="rbody">
+      <p class="small muted" style="margin:0 0 6px">${esc(r.label)}</p>
+      <p class="small muted" style="margin:0">Fahrtage</p>${dayChips(r.days, `data-rday="${r.id}" data-d`)}
+      <label class="small chk"><input type="checkbox" data-rhol="${r.id}" ${r.holidays ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
+      ${nx && !r.paused ? `<button class="btn sec small-btn" data-rskip="${r.id}|${nx.date}">${dateWord(nx.date) === "heute" || dateWord(nx.date) === "morgen" ? `${dateWord(nx.date)[0].toUpperCase()}${dateWord(nx.date).slice(1)}` : `Am ${dateWord(nx.date)}`} nicht fahren</button>` : ""}
+      ${r.skip.length ? `<p class="small" style="margin:8px 0 0">Ausgesetzt: ${r.skip.map(d => `<button class="chip" data-runskip="${r.id}|${d}" title="Wieder fahren">${dateWord(d)} ✕</button>`).join(" ")}</p>` : ""}
+      <div class="rbtns"><button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren"}</button>
+        <button class="btn quiet small-btn" data-rname="${r.id}">Umbenennen</button></div>
+      <button class="btn quiet small-btn danger-t" data-rdel="${r.id}">Nicht mehr regelmäßig überwachen</button></div>` : ""}</div>`;
+}
+async function rCall(path, opts) { try { const v = await api(path, opts); return v; } catch (e) { alert(e.message); return null; } }
+async function reloadRoutines() { ROUTINES = await api("/api/routines").catch(() => ROUTINES); render(); }
+function bindRoutines() {
+  const R = id => ROUTINES.find(r => r.id === id);
+  $app.querySelectorAll("[data-ropen]").forEach(b => b.onclick = () => { R_OPEN = R_OPEN === b.dataset.ropen ? null : b.dataset.ropen; render(); });
+  $app.querySelectorAll("[data-rday]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rday), d = +b.dataset.d;
+    const days = r.days.includes(d) ? r.days.filter(x => x !== d) : [...r.days, d]; if (!days.length) return alert("Mindestens ein Tag.");
+    await rCall(`/api/routines/${r.id}`, { method: "PATCH", body: { days } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rhol]").forEach(b => b.onchange = async () => { await rCall(`/api/routines/${b.dataset.rhol}`, { method: "PATCH", body: { holidays: b.checked } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rpause]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rpause); await rCall(`/api/routines/${r.id}`, { method: "PATCH", body: { paused: !r.paused } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rname]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rname), n = prompt("Name der Fahrt", r.name); if (!n) return;
+    await rCall(`/api/routines/${r.id}`, { method: "PATCH", body: { name: n } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rskip]").forEach(b => b.onclick = async () => { const [id, date] = b.dataset.rskip.split("|");
+    if (!confirm(`${dateWord(date) === "heute" ? "Heute" : `Am ${dateWord(date)}`} nicht fahren?\n\nIch überwache diese Fahrt dann an dem Tag nicht.`)) return;
+    await rCall(`/api/routines/${id}/skip`, { method: "POST", body: { date } }); await loadTrips().catch(() => {}); reloadRoutines(); });
+  $app.querySelectorAll("[data-runskip]").forEach(b => b.onclick = async () => { const [id, date] = b.dataset.runskip.split("|");
+    await rCall(`/api/routines/${id}/skip`, { method: "POST", body: { date, on: false } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rdel]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rdel);
+    if (!confirm(`„${r.name}“ nicht mehr regelmäßig überwachen?\n\nSchon angelegte Fahrten bleiben, bis sie vorbei sind.`)) return;
+    await rCall(`/api/routines/${r.id}`, { method: "DELETE" }); R_OPEN = null; reloadRoutines(); });
+}
+// In den Einstellungen einer Reise: „Regelmäßig überwachen“
+const RF = { days: [1, 2, 3, 4, 5], name: "", hol: true };
+function routineForm(t) {
+  if (t.routine) { const r = ROUTINES.find(x => x.id === t.routine);
+    return `<p class="small" style="margin:12px 0 0">↻ Gehört zu <b>${esc(t.rname || r?.name || "einer regelmäßigen Fahrt")}</b>${r ? ` (${daysText(r.days)} · ${esc(r.dep)})` : ""}. Ändern auf der Startseite unter „Regelmäßig“.</p>`; }
+  if (t.phase === "done") return "";
+  return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig überwachen</p>
+    <p class="small muted" style="margin:0 0 6px">Z. B. für den Weg zur Arbeit: An jedem Fahrtag lege ich diese Verbindung ca. 3 Std. vorher an und überwache sie.</p>
+    <input class="txt" id="rfName" maxlength="40" placeholder="Name, z. B. Arbeit hin" value="${esc(RF.name)}">
+    ${dayChips(RF.days, "data-rfd")}
+    <label class="small chk"><input type="checkbox" id="rfHol" ${RF.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
+    <button class="btn sec" id="rfSave">${esc(daysText(RF.days))} um ${hm(t.legs[0].dep.plan)} überwachen</button></div>`;
+}
+function bindRoutineForm(t) {
+  const $ = id => document.getElementById(id);
+  $("rfName")?.addEventListener("input", e => { RF.name = e.target.value; });
+  $app.querySelectorAll("[data-rfd]").forEach(b => b.onclick = () => { const d = +b.dataset.rfd; RF.days = RF.days.includes(d) ? RF.days.filter(x => x !== d) : [...RF.days, d].sort(); render(); });
+  $("rfHol")?.addEventListener("change", e => { RF.hol = e.target.checked; });
+  $("rfSave")?.addEventListener("click", async () => {
+    if (!RF.days.length) return alert("Bitte mindestens einen Tag wählen.");
+    const r = await rCall("/api/routines", { method: "POST", body: { tripId: t.id, name: RF.name.trim(), days: RF.days, holidays: RF.hol } });
+    if (!r) return;
+    Object.assign(RF, { days: [1, 2, 3, 4, 5], name: "", hol: true });
+    await loadTrips().catch(() => {}); ROUTINES = await api("/api/routines").catch(() => ROUTINES);
+    flash = `„${r.name}“ wird jetzt ${daysText(r.days)} um ${r.dep} überwacht.`; sheetId = null; render(); scrollTo(0, 0);
+  });
 }
 
 // Der nächste Schritt – groß und eindeutig
@@ -463,6 +555,7 @@ function renderTrip(t, many) {
     <section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
       ${t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}</section>
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
+    ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${nextCard(t.next, t)}
     ${sosButton(t)}
     ${t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) + hereCard({ ...t, here: null }) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
@@ -477,6 +570,7 @@ function renderTrip(t, many) {
       <div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-tmt="${m}" aria-pressed="${(t.minT || 0) === m}">${l}</button>`).join("")}</div>
       <p class="small muted">Ticket (nur für den Hinweis zur Zugbindung)</p>
       <div class="chips">${[["spar", "Sparpreis"], ["flex", "Flexpreis"], ["dticket", "Deutschlandticket"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-tk="${k}" aria-pressed="${t.ticket === k}">${l}</button>`).join("")}</div>
+      ${routineForm(t)}
       <div class="danger-zone"><button class="btn danger" data-del="${t.id}">Reise beenden</button><p class="small muted" style="margin:4px 0 0">Die Reise wird nicht mehr überwacht und verschwindet aus der Liste.</p></div></section>` : ""}
     ${pushCard()}
     <button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`;
@@ -490,6 +584,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => patch({ minT: +b.dataset.tmt }));   // nur diese Reise
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
+  bindRoutineForm(t);
   bindCommon();
 }
 
