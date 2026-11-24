@@ -15,3 +15,4 @@ returns void language sql security definer set search_path = public as $$
 $$;
 revoke all on function public.rb_stats_add(timestamptz, int, int, int, int, int, int, int, int) from public, anon, authenticated;
 grant execute on function public.rb_stats_add(timestamptz, int, int, int, int, int, int, int, int) to service_role;
+revoke all on table public.rb_stats from anon, authenticated;

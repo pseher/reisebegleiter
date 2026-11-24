@@ -71,3 +71,23 @@ test("Abfragezähler: Überwachung zählt DB-Abfragen, Ansicht nur mit Admin-Sch
   const r = await call("/api/admin/stats", null, "GET", null, { "X-Admin-Key": "geheim-geheim-1234" });
   assert.equal(r.s, 200); assert.ok(r.j.rows.length && r.j.rows[0].db > 0 && r.j.rows[0].runs >= 1, JSON.stringify(r.j.rows));
 });
+
+test("Fremde kommen nicht an Fahrten, regelmäßige Fahrten oder Geräte anderer; Code-Raten wird auch über neue Geräte gebremst", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body, ip = "10.0.0.1") => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": ip, ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, B = (await call("/api/register", null, "POST", {})).j;
+  const T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const t = (await call("/api/trips", A, "POST", { ticket: "flex", legs: [{ jid: "a", label: "ICE 1", from: { eva: "8011160", name: "Berlin Hbf", plan: iso(20) }, to: { eva: "8010205", name: "Leipzig Hbf", plan: iso(90) } }] })).j;
+  const r = (await call("/api/routines", A, "POST", { from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" }, name: "X", days: [1], winFrom: "07:00", winTo: "08:00" })).j;
+  assert.equal((await call("/api/trips", B)).j.length, 0);
+  assert.equal((await call(`/api/trips/${t.id}`, B, "DELETE")).s, 404);
+  assert.equal((await call(`/api/trips/${t.id}/adopt`, B, "POST", { idx: 0 })).s, 404);
+  assert.equal((await call(`/api/routines/${r.id}`, B, "DELETE")).s, 404);
+  assert.equal((await call("/api/routines", B)).j.length, 0);
+  assert.equal((await call("/api/trips", { id: A.id, token: "falsch-falsch-falsch-falsch" })).s, 401);
+  // Raten mit immer neuen Geräten von derselben Adresse: nach 15 Versuchen ist Schluss
+  let last = 0;
+  for (let i = 0; i < 6; i++) { const X = (await call("/api/register", null, "POST", {}, "10.9.9.9")).j;
+    for (let k = 0; k < 3; k++) last = (await call("/api/link/join", X, "POST", { code: String(100000 + i * 10 + k) }, "10.9.9.9")).s; }
+  assert.equal(last, 429);
+});

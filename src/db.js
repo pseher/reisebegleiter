@@ -1,7 +1,7 @@
 // Speicher: Supabase (PlanFlink-Projekt, Tabellen rb_devices / rb_trips) über REST mit dem Secret Key.
 // Mit MOCK=1 ein Speicher im Arbeitsspeicher (nur für lokale Tests).
 
-const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map() };
+const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map(), rb_guard: new Map() };
 
 function hdr(env) {
   const k = env.SUPABASE_SERVICE_KEY;
@@ -106,4 +106,11 @@ export async function statsAdd(env, x) {
 export async function statsSince(env, sinceIso) {
   if (mem(env)) return [...MEM.rb_stats.values()].filter(r => r.hour >= sinceIso).sort((a, b) => (a.hour < b.hour ? 1 : -1));
   return rest(env, `rb_stats?hour=gte.${encodeURIComponent(sinceIso)}&order=hour.desc&limit=1000`);
+}
+
+// Zähler gegen Durchprobieren: true = erlaubt (höchstens max Versuche je sec Sekunden)
+export async function guard(env, key, sec, max) {
+  if (mem(env)) { const g = MEM.rb_guard.get(key), t = Date.now();
+    const cur = !g || t - g.t > sec * 1000 ? { n: 1, t } : { n: g.n + 1, t: g.t }; MEM.rb_guard.set(key, cur); return cur.n <= max; }
+  return (await rest(env, "rpc/rb_guard_hit", { method: "POST", body: JSON.stringify({ p_key: key, p_sec: sec, p_max: max }) })) !== false;
 }

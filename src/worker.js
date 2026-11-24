@@ -150,6 +150,7 @@ async function api(req, env, url) {
   }
 
   if (p === "/api/register" && method === "POST") {
+    if (!(await db.guard(env, `reg-ip:${req.headers.get("CF-Connecting-IP") || "?"}`, 3600, 60))) return fail(429, "Gerade zu viele neue Geräte von diesem Anschluss. Bitte später noch einmal.");
     const token = b64u(crypto.getRandomValues(new Uint8Array(24)));
     const b = await req.json().catch(() => ({}));
     const acc = await db.insert(env, "rb_accounts", { favs: [] });
@@ -538,6 +539,10 @@ async function api(req, env, url) {
     // Schutz vor Raten: höchstens 5 Fehlversuche je Viertelstunde
     const now = Date.now(), tr = dev.link_tries && now - Date.parse(dev.link_tries.t) < 15 * MIN ? dev.link_tries : { t: new Date(now).toISOString(), n: 0 };
     if (tr.n >= 5) return fail(429, "Zu viele Versuche. Bitte in 15 Minuten noch einmal – oder auf dem anderen Gerät einen neuen Code holen.");
+    // Zusätzlich je Internetanschluss und insgesamt begrenzen – sonst ließe sich mit immer neuen Geräten weiterraten
+    const ip = req.headers.get("CF-Connecting-IP") || "?";
+    if (!(await db.guard(env, `join-ip:${ip}`, 900, 15)) || !(await db.guard(env, "join-all", 900, 300)))
+      return fail(429, "Gerade zu viele Versuche. Bitte in einigen Minuten noch einmal – oder auf dem anderen Gerät einen neuen Code holen.");
     const src = code.length === 6 ? await db.deviceByLinkCode(env, await sha(`rb-link|${code}`)) : null;
     if (!src) { await db.update(env, "rb_devices", dev.id, { link_tries: { ...tr, n: tr.n + 1 } }).catch(() => {}); return fail(400, "Der Code stimmt nicht oder ist abgelaufen. Bitte auf dem anderen Gerät einen neuen Code holen."); }
     if (src.account_id === dev.account_id) return fail(400, "Die beiden Geräte sind schon verbunden.");
