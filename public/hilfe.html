@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#0f2a3d">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
-  <style>main.legal { max-width: 720px; margin: 0 auto; padding: 16px 18px 40px; line-height: 1.55; } main.legal h2 { font-size: 18px; margin: 22px 0 6px; } main.legal p, main.legal li { color: var(--ink); } main.legal ul { padding-left: 20px; } main.legal a { color: var(--accent); } main.legal details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; margin: 8px 0; } main.legal summary { cursor: pointer; font-weight: 600; padding: 10px 0; } main.legal .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 13px; font-weight: 600; } .t-ok { background: var(--ok-bg); color: var(--ok); } .t-w { background: var(--watch-bg); color: var(--watch); } .t-r { background: var(--risk-bg); color: var(--risk); } .t-l { background: var(--lost-bg); color: var(--lost); } #q { width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); margin: 6px 0 4px; }</style>
+  <style>main.legal { max-width: 720px; margin: 0 auto; padding: 16px 18px 40px; line-height: 1.55; } main.legal h2 { font-size: 18px; margin: 22px 0 6px; } main.legal p, main.legal li { color: var(--ink); } main.legal ul { padding-left: 20px; } main.legal a { color: var(--accent); } main.legal details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; margin: 8px 0; } main.legal summary { cursor: pointer; font-weight: 600; padding: 10px 0; } main.legal .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 13px; font-weight: 600; } .t-ok { background: var(--ok-bg); color: var(--ok); } .t-w { background: var(--watch-bg); color: var(--watch); } .t-r { background: var(--risk-bg); color: var(--risk); } .t-l { background: var(--lost-bg); color: var(--lost); } #q { width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); margin: 6px 0 4px; } main.legal figure.vid { margin: 16px auto 20px; max-width: 340px; text-align: center; } main.legal figure.vid video { width: 100%; aspect-ratio: 9 / 16; border-radius: 18px; background: #0f2a3d; display: block; } main.legal figure.vid figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }</style>
   <script>try { const t = localStorage.getItem("rb_theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch {}</script>
 </head>
 <body>
@@ -15,6 +15,8 @@
   <main class="legal">
     <h1>Hilfe</h1>
     <p>Umstiegsheld passt auf deine Fahrt mit Zug, S-Bahn, U-Bahn, Tram und Bus auf. Wird es knapp oder fällt etwas aus, sagt dir die App sofort Bescheid – und zeigt dir, wie du trotzdem ankommst.</p>
+    <figure class="vid"><video controls playsinline preload="none" poster="/video/poster.jpg" src="/video/umstiegsheld.mp4" aria-label="Umstiegsheld in 48 Sekunden"></video>
+      <figcaption>Umstiegsheld in 48 Sekunden</figcaption></figure>
     <input id="q" type="search" placeholder="Hilfe durchsuchen, z. B. „Sparpreis“ oder „Gerät“" aria-label="Hilfe durchsuchen">
 
     <h2>Die Startseite</h2>

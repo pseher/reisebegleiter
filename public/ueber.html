@@ -12,7 +12,7 @@
   main.legal .qs { list-style: none; padding: 0; margin: 10px 0 14px; } main.legal .qs li { padding: 8px 12px; margin: 6px 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; font-weight: 600; }
   main.legal .opts { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; } main.legal .opts li { display: flex; gap: 10px; align-items: baseline; } main.legal .opts b { flex: 0 0 26px; text-align: center; }
   main.legal .note { background: var(--ok-bg); border-radius: 12px; padding: 10px 14px; margin: 12px 0; }
-  main.legal p { margin: 0 0 12px; }</style>
+  main.legal p { margin: 0 0 12px; } main.legal figure.vid { margin: 16px auto 20px; max-width: 340px; text-align: center; } main.legal figure.vid video { width: 100%; aspect-ratio: 9 / 16; border-radius: 18px; background: #0f2a3d; display: block; } main.legal figure.vid figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }</style>
   <script>try { const t = localStorage.getItem("rb_theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch {}</script>
 </head>
 <body>
@@ -20,6 +20,8 @@
   <main class="legal">
     <h1>Über Umstiegsheld</h1>
     <p class="lead">Wie ein Blitzerfoto zu einer App wurde.</p>
+    <figure class="vid"><video controls playsinline preload="none" poster="/video/poster.jpg" src="/video/umstiegsheld.mp4" aria-label="Umstiegsheld in 48 Sekunden"></video>
+      <figcaption>Umstiegsheld in 48 Sekunden</figcaption></figure>
 
     <p>Ich bin Peter, wohne in Berlin und bin – sagen wir es freundlich – ein Mensch, der gern zügig ankommt.</p>
     <p>Etwas zu zügig, fand irgendwann auch die Bußgeldstelle. Seitdem macht mein Führerschein Urlaub. Ohne mich.</p>
