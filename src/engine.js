@@ -82,7 +82,8 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
     transfers.push({ i, at: a.name, eva: a.eva, gap, planGap, tightPlan, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
-      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depAt: d.name, walk, depRt: d.rt, arrRt: a.rt });
+      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depAt: d.name, walk,
+      fromLeg: { mode: legs[i].mode, label: legs[i].label }, toLeg: { mode: legs[i + 1].mode, label: legs[i + 1].label }, depRt: d.rt, arrRt: a.rt });
   }
   const openTransfers = transfers.filter(t => t.status !== "DONE");
   const lostAny = openTransfers.find(t => t.status === "LOST") || legs.find(l => l.dep.cancelled || l.arr.cancelled);
@@ -117,7 +118,7 @@ export function nextStep(v, now = Date.now()) {
     }
     if (now < l.dep.rt - MIN / 2) {                       // noch nicht eingestiegen
       return { i, kind: i === 0 ? "board" : "change", mode: l.mode, at: l.dep.rt, plan: l.dep.plan, delay: l.dep.delay, label: l.label, station: l.dep.name,
-        platform: l.dep.platform, platformChanged: !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform), platformPlan: l.dep.platformPlan,
+        platform: l.dep.platform, platformChanged: !isStreet(l) && !!(l.dep.platformPlan && l.dep.platform && l.dep.platformPlan !== l.dep.platform), platformPlan: l.dep.platformPlan,
         cancelled: l.dep.cancelled, from: i > 0 ? { platform: legs[i - 1].arr.platform, gap: transfers[i - 1]?.gap, name: legs[i - 1].arr.name, lat: legs[i - 1].arr.lat, lon: legs[i - 1].arr.lon } : null,
         dest: l.arr.name, lat: l.dep.lat, lon: l.dep.lon };
     }
@@ -126,17 +127,21 @@ export function nextStep(v, now = Date.now()) {
       const nx = legs[i + 1];
       return { i, depAt: l.dep.rt, kind: t ? "ride-change" : "ride-arrive", at: l.arr.rt, plan: l.arr.plan, delay: l.arr.delay, label: l.label, station: l.arr.name, lat: l.arr.lat, lon: l.arr.lon,
         platform: l.arr.platform, cancelled: l.arr.cancelled, then: t ? { label: t.toLabel, at: t.depRt, delay: nx.dep.delay, platform: t.depPl, gap: t.gap, station: nx.dep.name, lat: nx.dep.lat, lon: nx.dep.lon,
-          platformChanged: !!(nx.dep.platformPlan && nx.dep.platform && nx.dep.platformPlan !== nx.dep.platform), platformPlan: nx.dep.platformPlan, lost: t.status === "LOST", cancelled: nx.dep.cancelled } : null };
+          platformChanged: !isStreet(nx) && !!(nx.dep.platformPlan && nx.dep.platform && nx.dep.platformPlan !== nx.dep.platform), mode: nx.mode, platformPlan: nx.dep.platformPlan, lost: t.status === "LOST", cancelled: nx.dep.cancelled } : null };
     }
   }
   return null;
 }
 
 const mins = m => (m === 1 ? "1 Min." : `${m} Min.`);
+// Bus/Tram/Fähre halten an Steigen, nicht an Gleisen – und deren Positionswechsel sind keine Meldung wert
+export const isStreet = l => /BUS|TRAM|COACH|FERRY/i.test(l?.mode || "") || /^(Bus|Tram|STR|Fähre|ALT|AST)\b/i.test(String(l?.label || "").trim());
+export const platWord = (l, p) => (!p ? "" : isStreet(l) ? `Steig ${String(p).replace(/^(Pos\.?|Position|Steig|Bstg\.?)\s*/i, "")}` : `Gleis ${p}`);
 // „In Leipzig Hbf nur 4 Min. zum Umsteigen (Gleis 12 → 10).“ bzw. mit Fußweg zu einem anderen Halt
 function xferText(t, amount) {
   const other = t.depAt && cleanName(t.depAt) !== t.at;
-  const pl = t.arrPl && t.depPl ? ` (Gleis ${t.arrPl} → ${t.depPl})` : t.depPl ? ` (weiter von Gleis ${t.depPl})` : "";
+  const a = platWord(t.fromLeg, t.arrPl), d = platWord(t.toLeg, t.depPl);
+  const pl = a && d ? ` (${a} → ${d})` : d ? ` (weiter von ${d})` : "";
   return other ? `Von ${t.at} zu ${cleanName(t.depAt)}: ${amount} für Fußweg und Umstieg${t.walk ? `, davon ca. ${mins(t.walk)} zu Fuß` : ""}${pl}.`
     : `In ${t.at} ${amount} zum Umsteigen${pl}.`;
 }
@@ -199,7 +204,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
           : { title: t.toMust ? `⚠️ Fester Zug ${t.toLabel} gefährdet` : `⚠️ Anschluss in ${t.at} gefährdet`, body: `${t.gap >= 0 ? `Nur noch ${mins(t.gap)} zum Umsteigen` : "Keine Zeit zum Umsteigen"}${t.arrPl && t.depPl ? ` (Gleis ${t.arrPl} → ${t.depPl})` : ""}.${alt || " Ich behalte das im Blick."}`, tag: tag(`t${k}`), urgent: true });
         s.sent = s.conf;
       } else if ((s.conf === "OK" || s.conf === "WATCH") && (p.sent === "RISK" || p.sent === "LOST")) {
-        msgs.push({ title: `✅ Anschluss in ${t.at} klappt wieder`, body: `${mins(t.gap)} zum Umsteigen: weiter mit ${t.toLabel} um ${hm(t.depRt)}${t.depPl ? ` von Gleis ${t.depPl}` : ""}. Du musst nichts tun.`, tag: tag(`t${k}`) });
+        msgs.push({ title: `✅ Anschluss in ${t.at} klappt wieder`, body: `${mins(t.gap)} zum Umsteigen: weiter mit ${t.toLabel} um ${hm(t.depRt)}${t.depPl ? ` von ${platWord(t.toLeg, t.depPl)}` : ""}. Du musst nichts tun.`, tag: tag(`t${k}`) });
         s.sent = null;
       }
     }
@@ -210,7 +215,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
   v.legs.forEach(l => {
     const d = l.dep, key = `d${l.i}`, known = st.pl[key] ?? d.platformPlan;
     if (!d.platform || d.cancelled || d.rt < now || d.rt - now > 90 * MIN) return;
-    if (known && d.platform !== known) msgs.push({ title: `🔀 Gleiswechsel: ${l.label}`, body: `In ${d.name} jetzt Gleis ${d.platform} (statt ${known}), Abfahrt ${hm(d.rt)}.`, tag: tag(key), urgent: true });
+    if (known && d.platform !== known && !isStreet(l)) msgs.push({ title: `🔀 Gleiswechsel: ${l.label}`, body: `In ${d.name} jetzt Gleis ${d.platform} (statt ${known}), Abfahrt ${hm(d.rt)}.`, tag: tag(key), urgent: true });
     st.pl[key] = d.platform;
   });
 
@@ -236,7 +241,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     msgs.push(t?.status === "LOST"
       ? { title: `Gleich ${l.arr.name}`, body: `${t.reason === "cancel" ? `Dein Anschluss ${t.toLabel} fällt aus.` : `Dein Anschluss ${t.toLabel} ist nicht zu schaffen.`} In der App siehst du, wie du weiterkommst.`, tag: tag(`r${i}`) }
       : t
-      ? { title: `Gleich ${l.arr.name} – umsteigen`, body: `Weiter mit ${t.toLabel}${t.depPl ? ` von Gleis ${t.depPl}` : ""} um ${hm(t.depRt)} – ${mins(Math.max(0, t.gap))} Zeit.`, tag: tag(`r${i}`) }
+      ? { title: `Gleich ${l.arr.name} – umsteigen`, body: `Weiter mit ${t.toLabel}${t.depPl ? ` von ${platWord(t.toLeg, t.depPl)}` : ""} um ${hm(t.depRt)} – ${mins(Math.max(0, t.gap))} Zeit.`, tag: tag(`r${i}`) }
       : { title: `Gleich ${l.arr.name}`, body: `Ankunft ca. ${hm(l.arr.rt)}${l.arr.platform ? `, Gleis ${l.arr.platform}` : ""}. Bitte aussteigen.`, tag: tag(`r${i}`) });
   });
 

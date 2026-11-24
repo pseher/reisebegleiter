@@ -144,3 +144,15 @@ test("„Zug verpasst“: Status Handeln, kein Umsteigen-Hinweis, keine Meldunge
   assert.equal(v.status, "LOST"); assert.match(v.title, /verpasst/); assert.equal(v.next.kind, "missed");
   assert.equal(evaluate(t, T0 + 400 * MIN).phase, "enroute");   // nie „Angekommen“ mit dem verpassten Zug
 });
+
+import { platWord, isStreet } from "../src/engine.js";
+test("Busse haben Steige statt Gleise, Steigwechsel wird nicht gemeldet", () => {
+  assert.equal(platWord({ label: "Bus M29", mode: "BUS" }, "Pos. 8+9"), "Steig 8+9");
+  assert.equal(platWord({ label: "RE 1" }, "4"), "Gleis 4");
+  assert.equal(isStreet({ label: "Tram M10" }), true); assert.equal(isStreet({ label: "S 7" }), false);
+  const T = Date.now() + 30 * MIN, iso2 = m => new Date(T + m * MIN).toISOString();
+  const t = { id: "b", ticket: "flex", state: {}, obs: [{ dep: { rt: iso2(0), pl: "Pos. 8+9", t: 1, live: true } }],
+    legs: [{ jid: "", tid: "x", label: "Bus M29", mode: "BUS", from: { eva: "", name: "Roseneck", plan: iso2(0), platform: "Pos. 3" }, to: { eva: "", name: "Halensee", plan: iso2(8) } }] };
+  const now = Date.now(), v = evaluate(t, now), d = diff(t, v, { pl: {} }, now);
+  assert.ok(!d.msgs.some(m => /Gleiswechsel/.test(m.title)), JSON.stringify(d.msgs));
+});
