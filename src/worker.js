@@ -205,9 +205,13 @@ async function api(req, env, url) {
     const files = (Array.isArray(b.files) ? b.files : []).filter(f => f && typeof f.data === "string" && f.data.length < 7e6).slice(0, 3);
     const text = String(b.text || "").slice(0, 8000);
     if (!files.length && text.trim().length < 10) return fail(400, "Bitte einen Screenshot, ein PDF oder einen Text mit der Verbindung einfügen.");
-    const day = new Date().toISOString().slice(0, 10), use = dev.usage?.day === day ? dev.usage.n : 0, limit = +(env.IMPORT_DAILY_LIMIT || 15);
+    const day = new Date().toISOString().slice(0, 10), use = dev.usage?.day === day ? dev.usage.n : 0, limit = +(env.IMPORT_DAILY_LIMIT || 10);
     if (use >= limit) return fail(429, `Heute schon ${limit} Reisen eingelesen. Morgen geht es weiter – oder die Verbindung über „Von / Nach“ suchen.`);
-    await db.update(env, "rb_devices", dev.id, { usage: { day, n: use + 1 } }).catch(() => {});   // ohne Spalte „usage“: kein Limit
+    // Gesamt-Deckel für alle zusammen (Kostenbremse), Standard 150 Einlesungen am Tag
+    const all = +(env.IMPORT_GLOBAL_LIMIT || 150), since = new Date(Date.parse(day + "T00:00:00Z")).toISOString();
+    const usedAll = (await db.statsSince(env, since).catch(() => [])).reduce((a, x) => a + (x.ai || 0), 0);
+    if (usedAll >= all) return fail(429, "Das Einlesen ist für heute ausgelastet. Bitte die Verbindung über „Von / Nach“ suchen – das geht genauso.");
+    await db.update(env, "rb_devices", dev.id, { usage: { day, n: use + 1 } }).catch(() => {});
     return json(await importTrip(env, { text, files }));
   }
 

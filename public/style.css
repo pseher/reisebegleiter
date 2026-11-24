@@ -391,3 +391,4 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .foot-legal { max-width: 720px; margin: 8px auto 0; padding: 14px 18px calc(18px + env(safe-area-inset-bottom)); text-align: center; font-size: 13px; color: var(--muted); }
 .foot-legal a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; padding: 6px 4px; display: inline-block; }
 .foot-legal span { margin: 0 4px; } .foot-legal p { margin: 2px 0 0; font-size: 12px; }
+.foot-legal nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 14px; }
