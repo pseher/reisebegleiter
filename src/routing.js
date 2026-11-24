@@ -67,13 +67,30 @@ export async function connections(env, from, to, timeMs, minT = 0, arriveBy = fa
   const a = pointOf(from), b = pointOf(to);
   if (!a || !b) throw new Error("Bahnhof unbekannt");
   const fromEva = a.eva || "", toEva = b.eva || "";
-  const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
-    numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, minT | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
-  const seen = new Set();
-  const list = simplify(data).filter(c => !c.legs.some(l => l.mode === "COACH" || l.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
-    .filter(c => { const k = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
-    .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep)).slice(0, 8);
-  await rideOn(env, list, minT).catch(e => console.log("Weiterfahren:", e.message));
+  const search = async mt => {
+    const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
+      numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, mt | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
+    const seen = new Set();
+    const l = simplify(data).filter(c => !c.legs.some(x => x.mode === "COACH" || x.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
+      .filter(c => { const k = c.legs.map(x => `${x.label}@${x.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep)).slice(0, 8);
+    await rideOn(env, l, mt).catch(e => console.log("Weiterfahren:", e.message));
+    return l;
+  };
+  let list = await search(minT);
+  // Der Planer zählt einen Fußweg als Umstiegszeit. Wird daraus durch „sitzen bleiben“ ein kürzerer Umstieg als deine Mindestzeit,
+  // lieber die Verbindung mit gleicher Ankunft nehmen, die deine Umstiegszeit wirklich einhält (z. B. einen Bus früher).
+  const minT0 = Math.max(0, minT | 0);
+  const gapsOk = c => c.legs.slice(1).every((x, i) => Math.round((Date.parse(x.from.rt || x.from.plan) - Date.parse(c.legs[i].to.rt || c.legs[i].to.plan)) / MIN) - (c.legs[i].walk || 0) >= Math.min(minT0, 2) &&
+    Math.round((Date.parse(x.from.rt || x.from.plan) - Date.parse(c.legs[i].to.rt || c.legs[i].to.plan)) / MIN) >= minT0);
+  if (minT0 > 0 && list.some(c => !gapsOk(c))) {
+    const more = await search(minT0 + 4).catch(() => []);
+    const arrOf = c => Date.parse(c.legs[c.legs.length - 1].to.plan);
+    const seen = new Set();
+    list = list.map(c => gapsOk(c) ? c : more.filter(m => gapsOk(m) && arrOf(m) <= arrOf(c) + MIN).sort((x, y) => arrOf(y) - arrOf(x) || Date.parse(y.dep) - Date.parse(x.dep))[0] || c)
+      .filter(c => { const k = c.legs.map(x => `${x.label}@${x.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep));
+  }
   return list;
 }
 

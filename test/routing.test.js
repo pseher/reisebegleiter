@@ -60,3 +60,26 @@ test("Weiterfahren auch bei hoher eigener Umstiegszeit, wenn es nicht später is
   try { await rideOn({ TRANSITOUS_URL: "http://127.0.0.1:9" }, [c], 10); } finally { globalThis.fetch = orig; }
   assert.equal(c.legs[0].to.name, "S+U Heidelberger Platz");
 });
+
+test("Umstiegszeit 8: Verbindung, die nur per Fußweg auf 8 Min. kommt, wird durch eine mit echten 8 Min. ersetzt", async () => {
+  const { connections } = await import("../src/routing.js");
+  const T = m => new Date(Date.UTC(2026, 10, 24, 9, m)).toISOString();
+  const P = (name, lat, lon, t) => ({ name, lat, lon, scheduledDeparture: t, scheduledArrival: t, departure: t, arrival: t });
+  const it = (busDep, busArr, stopName, lat, lon, walkMin) => ({ startTime: T(busDep), endTime: T(35), duration: 1800, legs: [
+    { mode: "BUS", routeShortName: "249", tripId: `b${busDep}`, from: P("Berkaer Str.", 52.47, 13.29, T(busDep)), to: P(stopName, lat, lon, T(busArr)), scheduledStartTime: T(busDep), scheduledEndTime: T(busArr), startTime: T(busDep), endTime: T(busArr) },
+    ...(walkMin ? [{ mode: "WALK", duration: walkMin * 60, distance: walkMin * 68 }] : []),
+    { mode: "SUBURBAN", routeShortName: "S42", tripId: "s42", from: P("Heidelberger Platz", 52.4797, 13.3122, T(23)), to: P("Südkreuz", 52.475, 13.365, T(35)), scheduledStartTime: T(23), scheduledEndTime: T(35), startTime: T(23), endTime: T(35) }] });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async url => {
+    const u = new URL(url);
+    if (u.pathname.includes("/trip")) return new Response(JSON.stringify({ legs: [{ intermediateStops: [], to: { name: "S+U Heidelberger Platz", lat: 52.4798, lon: 13.312, scheduledArrival: T(16), arrival: T(16) } }] }), { status: 200 });
+    const mt = +u.searchParams.get("minTransferTime");
+    const its = mt <= 8 ? [it(10, 15, "Mecklenburgische Str.", 52.481, 13.305, 8)] : [it(0, 6, "S+U Heidelberger Platz", 52.4798, 13.312, 0)];
+    return new Response(JSON.stringify({ itineraries: its }), { status: 200 });
+  };
+  try {
+    const list = await connections({ TRANSITOUS_URL: "http://x" }, { lat: 52.47, lon: 13.29 }, { lat: 52.475, lon: 13.365 }, Date.parse(T(0)), 8);
+    assert.equal(list.length, 1);
+    assert.equal(list[0].legs[0].from.plan, T(0), "einen Bus früher");
+  } finally { globalThis.fetch = orig; }
+});
