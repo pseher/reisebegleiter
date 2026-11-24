@@ -241,7 +241,7 @@ function stepsHtml(steps) {
 // Teilstrecken einer Möglichkeit (MOTIS) mit Echtzeit aus der Beobachtung
 const altSteps = a => (a.legs || []).map((l, i) => { const w = a.watch?.legs?.[i], d = w?.delay || 0, shift = ms => new Date(Date.parse(ms) + Math.max(0, d) * MIN).toISOString();
   const dep = w?.dep || l.from.rt || shift(l.from.plan), arr = w?.arr || l.to.rt || shift(l.to.plan);
-  const live = w ? !!w.live : !!l.live;
+  const live = !!w?.live;
   return { label: l.label, mode: l.mode, from: l.from.name, to: l.to.name, pl: l.from.track || "", walk: l.walk || 0, dep, arr, depPlan: l.from.plan, arrPlan: l.to.plan,
     live, watched: !!w, c: !!(w?.c || l.cancelled), delay: Math.round((Date.parse(dep) - Date.parse(l.from.plan)) / MIN) }; });
 // Deine Reise in derselben Form
@@ -258,7 +258,13 @@ const fmtSpan = m => (m >= 120 ? `${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 6
 
 // Knopf „Diese Verbindung nehmen“: nur die empfohlene Möglichkeit gefüllt, nicht machbare ohne Knopf
 const infeasible = a => !!(a.watch && (a.watch.cancelled || !a.watch.ok));
-const bestIdx = list => { let b = -1, best = Infinity; (list || []).forEach((a, i) => { if (infeasible(a) || a.kind === "asplanned") return; const v = Date.parse(a.arr || a.dep); if (v < best) { best = v; b = i; } }); return b; };
+// Empfehlung: früheste Ankunft – aber möglichst ohne Umstieg, der rot (zu knapp) angezeigt wird
+const gapOf = a => a.watch?.minGap ?? a.minGap;
+const bestIdx = list => {
+  const pick = strict => { let b = -1, best = Infinity; (list || []).forEach((a, i) => { if (infeasible(a) || a.kind === "asplanned") return;
+    const g = gapOf(a); if (strict && g != null && g < Math.max(MINT, 3)) return;
+    const v = Date.parse(a.arr || a.dep); if (v < best) { best = v; b = i; } }); return b; };
+  const s = pick(true); return s >= 0 ? s : pick(false); };
 function takeBtn(data, a, rec, text) {
   if (infeasible(a)) return `<div class="small late" style="margin-top:6px">Geht so nicht mehr – nicht wählbar</div>`;
   return `<div class="row cmp-act"><button class="btn ${rec ? "" : "sec"} small-btn" data-adopt="${data}" data-zb="${a.zb ? "1" : ""}" data-adopt-text="${esc(text)}">Diese Verbindung nehmen</button></div>`;
