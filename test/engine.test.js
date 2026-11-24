@@ -178,3 +178,15 @@ test("Prüfhäufigkeit: pünktlich seltener, bei Verspätung jede Minute, ein Pr
   const sides = dueChecks(t, T0 - 20 * 60e3).map(c => `${c.i}${c.side}`);
   assert.deepEqual(sides, ["0dep", "1dep"]);                             // vor der Abfahrt keine Ankunftsabfrage
 });
+
+test("Zug ins Ausland: nach der Abfahrt kommt die Ankunft über Transitous (live), vorher nur die Abfahrt bei der DB", async () => {
+  const { dueChecks, observe } = await import("../src/monitor.js");
+  const T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const t = { id: "x", legs: [{ jid: "j1", label: "EC 177", from: { eva: "8010089", name: "Dresden-Neustadt", plan: iso(-20), lat: 51.065, lon: 13.74 },
+    to: { eva: "", name: "Wien Hbf", plan: iso(40), lat: 48.185, lon: 16.376, abroad: true } }], obs: [{ dep: { rt: iso(-18), live: true, t: T - 20 * 60e3 } }] };
+  const c = dueChecks(t, T);
+  assert.deepEqual(c.map(x => x.side), ["abroad"]);
+  await observe({ MOCK: "1" }, c, T, new Map());
+  assert.equal(t.obs[0].arr.live, true); assert.ok(t.legs[0].tid);
+  const v = evaluate(t, T); assert.equal(v.legs[0].abroadLive, true);
+});

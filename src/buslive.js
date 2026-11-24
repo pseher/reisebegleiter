@@ -2,7 +2,8 @@ import { count } from "./stats.js";
 // Echtzeit für Bus, Tram, U-Bahn (Teilstrecken ohne DB-Fahrtkennung).
 // 1. Transitous/MOTIS: Fahrt per tripId abrufen (dort fließen GTFS-RT-Feeds ein, z. B. VBB).
 // 2. Rückfall Berlin/Brandenburg: VBB-Auskunft über v6.vbb.transport.rest (Gemeinschaftsdienst, ohne Garantie).
-import { motisGet } from "./routing.js";
+import { motisGet, stopsNear, stopDepartures } from "./routing.js";
+import { byEva } from "./stations.js";
 
 const MIN = 60e3;
 const fold = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ß/g, "ss").replace(/[^a-z0-9]/g, "");
@@ -13,7 +14,8 @@ const inVBB = s => s?.lat != null && s.lat > 51.3 && s.lat < 53.6 && s.lon > 11.
 function findStop(it, s, kind) {
   const places = [];
   for (const l of it.legs || []) places.push(l.from, ...(l.intermediateStops || []), l.to);
-  const p = places.find(x => x && s.stopId && x.stopId === s.stopId) || places.find(x => x && fold(x.name) === fold(s.name));
+  const near = x => s.lat != null && x?.lat != null && Math.hypot((x.lat - s.lat) * 111, (x.lon - s.lon) * 68) < 0.5;   // gleicher Ort, anderer Name (z. B. „Wien Hbf“/„Wien Hauptbahnhof“)
+  const p = places.find(x => x && s.stopId && x.stopId === s.stopId) || places.find(x => x && fold(x.name) === fold(s.name)) || places.find(near);
   if (!p) return null;
   const plan = kind === "dep" ? p.scheduledDeparture || p.departure : p.scheduledArrival || p.arrival;
   const rt = kind === "dep" ? p.departure || p.scheduledDeparture : p.arrival || p.scheduledArrival;
@@ -68,4 +70,28 @@ export async function busLive(env, leg, now, cache = new Map()) {
     if (x) out[side] = { rt: x.rt, c: !!x.cancelled, live: !!x.live, t: now, src: x.src, ...(x.track ? { pl: x.track } : {}) };
   }
   return out;
+}
+
+// Zug mit Ziel im Ausland: Ankunft über Transitous (dort fließen offene Echtzeit-Feeds der Nachbarländer ein, z. B. Schweiz, Niederlande).
+// Kennt die Teilstrecke die Transitous-Fahrt noch nicht, wird sie an der Abfahrt über Zugnummer und Zeit gesucht.
+const digitsOf = s => (String(s || "").match(/(\d{2,6})\s*$/) || [])[1] || "";
+export async function findTid(env, leg) {
+  const from = leg.from.lat != null ? leg.from : { ...leg.from, ...(byEva(leg.from.eva) || {}) };
+  if (from.lat == null) return "";
+  const dep = Date.parse(leg.from.plan), num = digitsOf(leg.label);
+  for (const st of (await stopsNear(env, from.lat, from.lon).catch(() => [])).slice(0, 2)) {
+    const list = await stopDepartures(env, st, dep - 3 * MIN).catch(() => []);
+    const hit = list.find(x => Math.abs(Date.parse(x.plan) - dep) <= 2 * MIN && num && digitsOf(x.label) === num)
+      || list.find(x => Math.abs(Date.parse(x.plan) - dep) <= 1 * MIN && fold(x.label) === fold(leg.label));
+    if (hit?.tripId) return hit.tripId;
+  }
+  return "";
+}
+export async function abroadLive(env, leg, now) {
+  if (env.MOCK === "1") return { tid: leg.tid || "mock_trip_abroad", arr: { rt: new Date(Date.parse(leg.to.plan) + 6 * MIN).toISOString(), c: false, live: true, t: now, src: "test" } };
+  const tid = leg.tid || await findTid(env, leg).catch(() => "");
+  if (!tid) return { tid: "" };
+  const m = await viaMotis(env, { ...leg, tid }).catch(() => null);
+  if (!m?.arr) return { tid };
+  return { tid, arr: { rt: m.arr.rt, c: !!m.arr.cancelled, live: !!m.live, t: now, src: "transitous", ...(m.arr.track ? { pl: m.arr.track } : {}) } };
 }

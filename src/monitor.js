@@ -6,7 +6,7 @@ import { connections, resolveConnection, resolveLeg, rideOn } from "./routing.js
 import { search as searchStationsSync, byEva } from "./stations.js";
 import * as db from "./db.js";
 import { sendPush } from "./push.js";
-import { busLive } from "./buslive.js";
+import { busLive, abroadLive } from "./buslive.js";
 import { makeDue, refreshWindow } from "./routines.js";
 
 const MIN = 60e3;
@@ -55,7 +55,14 @@ export function dueChecks(trip, now, force = false) {
     // Die Ankunftsprognose vor der Abfahrt ergibt sich aus der Abfahrtsverspätung.
     const ob = trip.obs?.[i] || {}, depEff = ob.dep?.rt ? Date.parse(ob.dep.rt) : Date.parse(leg.from.plan);
     const side = now < depEff - MIN ? "dep" : "arr";
-    if (side === "arr" && !leg.to.eva) return;   // Ziel im Ausland: Ankunft ergibt sich aus der Verspätung bei der Abfahrt
+    if (side === "arr" && !leg.to.eva) {   // Ziel im Ausland: Ankunft über Transitous (offene Feeds der Nachbarländer)
+      const o = ob.arr || {}, eff = o.rt ? Date.parse(o.rt) : Date.parse(leg.to.plan);
+      if (eff < now - 3 * MIN || o.miss >= 6) return;                       // vorbei oder dort keine Daten
+      const iv = checkEvery(trip, i, "arr", eff - now);
+      if (!iv || (!force && o.t && now - o.t < iv * MIN - 20e3)) return;
+      out.push({ trip, i, side: "abroad", leg, dist: eff - now });
+      return;
+    }
     const s = side === "dep" ? leg.from : leg.to, o = ob[side] || {};
     const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;
     if (eff < now - 3 * MIN) return;                                       // schon vorbei
@@ -77,6 +84,14 @@ export async function observe(env, checks, now, cache) {
       if (r.dep) o.dep = r.dep;
       if (r.arr) o.arr = r.arr;
       o.bt = now; c.trip._dirty = true;
+      return;
+    }
+    if (c.side === "abroad") {
+      const r = await abroadLive(env, c.leg, now).catch(e => { console.log("Ausland-Echtzeit:", e.message); return {}; });
+      const obs = (c.trip.obs ||= []), o = (obs[c.i] ||= {}), prev = o.arr || {};
+      if (r.tid && !c.trip.legs[c.i].tid) { c.trip.legs[c.i] = { ...c.trip.legs[c.i], tid: r.tid }; c.trip._legsDirty = true; }
+      o.arr = r.arr?.live ? r.arr : { ...prev, t: now, miss: (prev.miss || 0) + 1 };
+      c.trip._dirty = true;
       return;
     }
     const kind = c.side === "dep" ? "dep" : "arr";

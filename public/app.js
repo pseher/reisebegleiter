@@ -719,7 +719,7 @@ function timeline(t) {
           : isTrain(l) ? "Zu diesem Zug habe ich (noch) keine Live-Daten der Bahn – angezeigt wird der Fahrplan. Ich versuche es weiter."
           : Date.parse(l.dep.rt) < Date.now() ? "Für diese Fahrt liefert der Verkehrsbetrieb keine Live-Zeiten – angezeigt wird der Fahrplan."
           : "Live-Zeiten kommen, sobald der Verkehrsbetrieb sie liefert (meist ab 2 Std. vorher)."}</div>`}
-        ${l.abroad && l.jid ? `<div class="muted">Ankunft im Ausland: geschätzt aus der Verspätung bei der Abfahrt.</div>` : ""}
+        ${l.abroad && l.jid ? `<div class="muted">${l.abroadLive ? "Ankunft im Ausland: live über Transitous (offene Daten der Nachbarländer)." : "Ankunft im Ausland: geschätzt aus der Verspätung bei der Abfahrt – Live-Daten von dort gibt es für diese Strecke (noch) nicht."}</div>` : ""}
         ${t.legs.length > 1 && Date.parse(l.dep.rt) > Date.now() ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr fest einplanen" : `${kindWord(l)} fest einplanen`}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];

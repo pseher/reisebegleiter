@@ -57,7 +57,7 @@ export function evaluate(trip, now = Date.now()) {
   const legs = trip.legs.map((l, i) => {
     const dep = stop(l, trip.obs?.[i], "from");
     const ob = trip.obs?.[i] || {};
-    return { i, label: l.label, jid: l.jid, mode: l.mode || "", live: !!l.jid || !!ob.dep?.live || !!ob.arr?.live, must: !!l.must, abroad: !!l.to.abroad, dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
+    return { i, label: l.label, jid: l.jid, mode: l.mode || "", live: !!l.jid || !!ob.dep?.live || !!ob.arr?.live, must: !!l.must, abroad: !!l.to.abroad, abroadLive: !!(l.to.abroad && ob.arr?.live), dep, arr: carryDelay(dep, stop(l, trip.obs?.[i], "to")) };
   });
   const n = legs.length, first = legs[0], last = legs[n - 1];
   const transfers = [];
