@@ -72,3 +72,19 @@ test("Zeitfenster: erste Fahrt überwachen, übrige zur Wahl, ohne Wahl keine Me
   assert.equal(t.legs[0].label, "ICE 510");
   assert.ok(!t.state.win.list.some(o => o.label === "ICE 510"));
 });
+
+test("Zeitfenster: gewählte spätere Fahrt gilt nicht als Verspätung", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return r.json(); };
+  const A = await call("/api/register", null, "POST", {});
+  const dev = await db.get(env, "rb_devices", A.id);
+  const day = berlinDate(Date.now() + 864e5), dow = isoDow(day);
+  await db.insert(env, "rb_routines", { account_id: dev.account_id, name: "Fenster", days: [dow], dep: "10:00", win_from: "10:00", win_to: "13:00",
+    tpl: [{ jid: "", label: "", from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" } }], ticket: "flex", min_t: 0, holidays: false, paused: false, skip: [], made: [] });
+  await makeDue(env, wallToMs(day, "10:00") - 2 * 3600e3);
+  const [t] = await call("/api/trips", A);
+  assert.ok(t.win && t.win.list.length);
+  const v = await call(`/api/trips/${t.id}/adopt`, A, "POST", { win: true, idx: t.win.list.length - 1 });
+  assert.ok(v.win.picked);
+  assert.ok(!(v.finalDelay >= 3), "keine Verspätung durch die eigene Wahl: " + v.finalDelay);
+});

@@ -66,9 +66,11 @@ export async function mergeAccount(env, from, to) {
   if (mem(env)) {
     for (const t of MEM.rb_trips.values()) if ((t.account_id || t.device_id) === from) t.account_id = to;
     for (const d of MEM.rb_devices.values()) if (d.account_id === from) d.account_id = to;
+    for (const r of MEM.rb_routines.values()) if (r.account_id === from) r.account_id = to;
     MEM.rb_accounts.delete(from); return;
   }
   await rest(env, `rb_trips?account_id=eq.${from}`, { method: "PATCH", body: JSON.stringify({ account_id: to }) });
+  await rest(env, `rb_routines?account_id=eq.${from}`, { method: "PATCH", body: JSON.stringify({ account_id: to }) });
   await rest(env, `rb_devices?account_id=eq.${from}`, { method: "PATCH", body: JSON.stringify({ account_id: to }) });
   await rest(env, `rb_accounts?id=eq.${from}`, { method: "DELETE" });
 }

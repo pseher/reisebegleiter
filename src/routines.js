@@ -115,8 +115,10 @@ export async function refreshWindow(env, t, now, watch) {
 }
 
 // Fällige Reisen anlegen (vom Cron jede Minute aufgerufen). Gibt Meldungen je Konto zurück.
+// gleiche Strecke? („S Halensee (Berlin)“ = „Halensee“)
+const plain = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
 export async function makeDue(env, now = Date.now(), watch = null) {
-  const list = await db.activeRoutines(env).catch(() => []), msgs = [];
+  const list = await db.activeRoutines(env).catch(() => []), msgs = [], tripsCache = new Map();
   for (const r of list) {
     for (const date of [berlinDate(now), berlinDate(now + DAY)]) {
       if ((r.made || []).includes(date) || offReason(r, date)) continue;
@@ -124,6 +126,12 @@ export async function makeDue(env, now = Date.now(), watch = null) {
       if (now < at - LEAD || now > at + 5 * MIN) continue;
       r.made = [...(r.made || []), date].slice(-14);
       await db.update(env, "rb_routines", r.id, { made: r.made });   // zuerst merken: nie doppelt anlegen
+      // Hast du für diese Strecke an dem Tag schon selbst eine Reise angelegt? Dann diese nehmen statt einer zweiten
+      if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
+      const end = r.win_to ? wallToMs(date, r.win_to) : at + 60 * MIN, start = r.win_to ? at : at - 60 * MIN;
+      const own = tripsCache.get(r.account_id).find(t => t.legs?.length && plain(t.legs[0].from.name) === plain(r.tpl[0].from.name) && plain(t.legs[t.legs.length - 1].to.name) === plain(r.tpl[r.tpl.length - 1].to.name)
+        && Date.parse(t.legs[0].from.plan) >= start - 5 * MIN && Date.parse(t.legs[0].from.plan) <= end + 5 * MIN);
+      if (own) { if (!own.state?.routine) await db.update(env, "rb_trips", own.id, { state: { ...(own.state || {}), routine: r.id, rname: r.name } }); continue; }
       if (r.win_to) {   // Zeitfenster: erste Fahrt im Fenster überwachen, die übrigen zur Auswahl
         const list = await windowConns(env, r, date).catch(e => { console.log("Zeitfenster:", e.message); return []; });
         if (!list.length) { msgs.push({ acc: r.account_id, title: `↻ ${r.name}: keine Verbindung`, body: `Zwischen ${r.win_from} und ${r.win_to} habe ich keine Verbindung gefunden. Bitte selbst prüfen.`, tag: `r-${r.id}` }); continue; }

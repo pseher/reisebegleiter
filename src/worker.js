@@ -46,8 +46,8 @@ function view(trip, now = Date.now()) {
   const undoZb = canUndo && changesFV(st.undo.legs, trip.legs);       // nur dann betrifft die Änderung die Zugbindung
   // Zugbindung je Möglichkeit immer frisch bewerten (auch für früher gespeicherte Ergebnisse)
   const hasFV = trip.legs.some(isFV);
-  const hereRaw = st.here && now - st.here.at < (st.here.mode === "missed" ? 3 * 3600e3 : 30 * MIN) ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
-  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : hereRaw?.mode === "missed" ? trip.legs.slice(st.missed?.i || 0) : trip.legs, restFV = restLegs.some(isFV);
+  const hereRaw = st.here && now - st.here.at < (st.here.mode === "missed" || st.here.mode === "cancel" ? 3 * 3600e3 : 30 * MIN) ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
+  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : hereRaw?.mode === "missed" ? trip.legs.slice(st.missed?.i || 0) : hereRaw?.mode === "cancel" ? trip.legs.slice(hereRaw.idx || 0) : trip.legs, restFV = restLegs.some(isFV);
   const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = restFV && changesFV(restLegs, a.legs || []);
     return { ...a, zb, kind: a.kind === "asplanned" && hereRaw.mode !== "missed" ? a.kind : restFV && !zb ? "samefv" : "here" }; }) } : null;
   const altZb = (a, k) => { if (!hasFV || !a.legs) return false;
@@ -356,7 +356,8 @@ async function api(req, env, url) {
       const w = t.state?.win; if (!w?.list?.[+b.idx]) return fail(400, "Diese Fahrt gibt es nicht mehr. Bitte neu wählen.");
       t.state = { ...t.state, here: { list: w.list, mode: "start", at: Date.now() } };
       await adopt(env, t, 0, +b.idx || 0, true, false);
-      t.state = { ...t.state, here: null, undo: null, win: { ...w, picked: true, list: [] } };
+      // frei gewählt: Maßstab ist die gewählte Fahrt (nicht „später als geplant“)
+      t.state = { ...t.state, here: null, undo: null, origArr: null, zbAt: null, win: { ...w, picked: true, list: [] } };
     } else await adopt(env, t, +b.k || 0, +b.idx || 0, !!b.here, !!b.sos);
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
@@ -450,7 +451,11 @@ async function api(req, env, url) {
       const b = await req.json().catch(() => ({})), date = /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : null;
       if (!date) return fail(400, "Datum fehlt");
       const skip = b.on === false ? (r.skip || []).filter(d => d !== date) : [...new Set([...(r.skip || []), date])].filter(d => d >= berlinDate(Date.now())).slice(-30);
-      await db.update(env, "rb_routines", r.id, { skip });
+      // wieder fahren: Tag als „noch nicht angelegt“ markieren, damit die Fahrt neu erscheint (falls es sie nicht mehr gibt)
+      let made = r.made || [];
+      if (b.on === false && !(await db.tripsOf(env, dev.account_id)).some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === date)) made = made.filter(d => d !== date);
+      await db.update(env, "rb_routines", r.id, { skip, made });
+      if (b.on === false) { const { makeDue } = await import("./routines.js"); await makeDue(env, Date.now()).catch(() => {}); }
       if (b.on !== false) for (const t of await db.tripsOf(env, dev.account_id)) if (t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === date) await db.remove(env, "rb_trips", t.id);
       return json(routineView({ ...r, skip }));
     }
@@ -522,6 +527,14 @@ async function api(req, env, url) {
     await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
     await db.update(env, "rb_devices", dev.id, { link_tries: null });
     return json({ ok: true });
+  }
+  // Einstellungen des Kontos (z. B. übliche Umstiegszeit) – gleich auf allen Geräten
+  if (p === "/api/prefs" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json(a?.prefs || {}); }
+  if (p === "/api/prefs" && method === "PUT") {
+    const b = await req.json().catch(() => ({})), a = await db.get(env, "rb_accounts", dev.account_id), prefs = { ...(a?.prefs || {}) };
+    if (b.minT != null) prefs.minT = Math.min(30, Math.max(0, Math.round(+b.minT) || 0));
+    await db.update(env, "rb_accounts", dev.account_id, { prefs });
+    return json(prefs);
   }
   // Favoriten gehören zum Konto, damit sie auf allen Geräten gleich sind
   if (p === "/api/favs" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json(a?.favs || []); }

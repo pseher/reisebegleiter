@@ -140,3 +140,12 @@ test("Pflichtzug: Anschluss weg → eigene Überschrift und Meldung", () => {
   const r1 = diff(t, v, {}, now), r2 = diff(t, evaluate(t, now + 60e3), r1.state, now + 60e3);
   assert.ok([...r1.msgs, ...r2.msgs].some(m => /Fester Zug ICE 1601 nicht mehr erreichbar/.test(m.title)));
 });
+
+test("Anschluss rechnerisch zu spät (nur geschätzt): ‚wohl nicht zu schaffen‘, Zugbindung absehbar aufgehoben", async () => {
+  const { headline } = await import("../src/engine.js");
+  const t = trip([{ dep: { rt: iso(22), t: 1, live: true }, arr: { t: 1 } }, {}], "spar");
+  const v = evaluate(t, T0 - 60 * 60e3);
+  assert.equal(v.status, "RISK");
+  assert.equal(v.zbLifted, true);
+  assert.match(headline(v, t, T0 - 60 * 60e3).title, /wohl nicht zu schaffen/);
+});

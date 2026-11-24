@@ -48,3 +48,13 @@ test("Code raten wird nach 5 Fehlversuchen gesperrt", async () => {
   for (let i = 0; i < 5; i++) assert.equal((await call("/api/link/join", { auth: C, method: "POST", body: { code: "11111" + i } })).status, 400);
   assert.equal((await call("/api/link/join", { auth: C, method: "POST", body: { code: "111119" } })).status, 429);
 });
+
+test("Verbinden übernimmt regelmäßige Fahrten des beitretenden Geräts", async () => {
+  const A = (await call("/api/register", { method: "POST", body: {} })).data, B = (await call("/api/register", { method: "POST", body: {} })).data;
+  const t = await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(5)], ticket: "flex" } });
+  assert.equal((await call("/api/routines", { auth: A, method: "POST", body: { tripId: t.data.id, days: [1, 2, 3], name: "Test" } })).status, 201);
+  const { code } = (await call("/api/link/start", { auth: B, method: "POST" })).data;
+  assert.equal((await call("/api/link/join", { auth: A, method: "POST", body: { code } })).status, 200);
+  assert.equal((await call("/api/routines", { auth: A })).data.length, 1);
+  assert.equal((await call("/api/routines", { auth: B })).data.length, 1);
+});
