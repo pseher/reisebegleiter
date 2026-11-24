@@ -117,3 +117,16 @@ test("Eine Teilstrecke früher fahren: frühere Busse finden und nur diese Teils
   const v = (await call(`/api/trips/${t.id}/earlier`, A, "POST", { leg: 0, tid: l[l.length - 1].tid, dep: l[l.length - 1].from.plan })).j;
   assert.ok(v.legs, JSON.stringify(v)); assert.equal(v.legs.length, 2); assert.ok(Math.abs(Date.parse(v.legs[0].dep.plan) - Date.parse(l[l.length - 1].from.plan)) < 60e3); assert.equal(v.legs[1].label, "RE 1"); assert.equal(v.ticket || "dticket", "dticket");
 });
+
+test("Reise ändern mit fester Fahrt: neue Anreise, der feste Zug und alles danach bleiben", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.9", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const bus = (dep, arr) => ({ jid: "", tid: `b${dep}`, label: "Bus M29", mode: "BUS", from: { eva: "", name: "S Halensee", plan: iso(dep), lat: 52.4964, lon: 13.2903 }, to: { eva: "", name: "U Adenauerplatz", plan: iso(arr), lat: 52.4999, lon: 13.3074 } });
+  const re = { jid: "b", label: "RE 1", from: { eva: "8010406", name: "Berlin-Charlottenburg", plan: iso(70) }, to: { eva: "8010224", name: "Magdeburg Hbf", plan: iso(170) } };
+  const t = (await call("/api/trips", A, "POST", { ticket: "dticket", legs: [bus(40, 46), re] })).j;
+  const v = (await call(`/api/trips/${t.id}`, A, "PUT", { keepFrom: 1, legs: [bus(25, 31)] })).j;
+  assert.equal(v.legs.length, 2); assert.equal(v.legs[0].dep.plan, iso(25)); assert.equal(v.legs[1].label, "RE 1"); assert.equal(v.legs[1].dep.plan, iso(70));
+  const bad = await call(`/api/trips/${t.id}`, A, "PUT", { keepFrom: 1, legs: [bus(70, 80)] });
+  assert.equal(bad.s, 400); assert.match(bad.j.error, /festen Zug/);
+});

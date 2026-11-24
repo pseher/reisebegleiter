@@ -281,7 +281,7 @@ async function api(req, env, url) {
     const from = pt(url.searchParams.get("from")), to = pt(url.searchParams.get("to"));
     if (!from || !to) return fail(400, "Start oder Ziel fehlt");
     const t = Date.parse((url.searchParams.get("time") || "").replace(" ", "+")) || Date.now();
-    return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0));
+    return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0, url.searchParams.get("arrive") === "1"));
   }
   // Gewählte Verbindung → Teilstrecken mit DB-Fahrtkennungen
   if (p === "/api/resolve" && method === "POST") {
@@ -478,8 +478,11 @@ async function api(req, env, url) {
     // Reise ändern: neue Verbindung (andere Zeit, anderer Start/Ziel) – Ticket bleibt, Überwachung beginnt neu
     if (method === "PUT") {
       const b = await req.json().catch(() => ({}));
-      const legs = Array.isArray(b.legs) ? b.legs : [];
-      const bad = checkLegs(legs); if (bad) return fail(400, bad);
+      let legs = Array.isArray(b.legs) ? b.legs : [];
+      // feste Fahrt: neue Anreise + Rest der bisherigen Reise ab dieser Fahrt (unverändert)
+      const kf = Number.isInteger(b.keepFrom) && b.keepFrom > 0 && b.keepFrom < t.legs.length ? b.keepFrom : null;
+      if (kf != null) legs = [...legs, ...t.legs.slice(kf)];
+      const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && kf != null ? "Mit dieser Verbindung erreichst du den festen Zug nicht." : bad);
       return json(await replaceLegs(env, t, legs, b.ticket));
     }
     if (method === "PATCH") {
