@@ -1370,10 +1370,10 @@ function renderWizard() {
     if (!W.reg) {
       const wk = dow <= 5, quick = wk ? "Mo–Fr" : DOW[dow - 1];
       // Über „Mein Weg“ gekommen: es ist schon klar, dass es regelmäßig ist – nur noch die Tage
-      $app.innerHTML = `<p class="steps">${W.regIntent ? "Neue regelmäßige Fahrt" : "Deine Fahrt"}</p><h1>${W.regIntent ? "An welchen Tagen?" : "Fährst du das öfter?"}</h1>
+      $app.innerHTML = `<p class="steps">${W.regIntent ? "Neue regelmäßige Fahrt" : "Deine Fahrt"}</p><h1>${W.regIntent ? "An welchen Tagen?" : "Einmal oder öfter?"}</h1>
         <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>
-        <button class="btn big-btn" id="regQuick">${W.regIntent ? `Jeden ${quick} um ${depHm}` : `Ja, jeden ${quick} um ${depHm}`}</button>
-        ${W.regIntent ? "" : `<button class="btn sec" id="regNo">Nur dieses Mal</button>`}
+        ${W.regIntent ? `<button class="btn big-btn" id="regQuick">Jeden ${quick} um ${depHm}</button>`
+          : `<button class="btn big-btn" id="regNo">Nur diese Fahrt</button><button class="btn sec" id="regQuick">Regelmäßig: jeden ${quick} um ${depHm}</button>`}
         <button class="btn quiet" id="regYes">Andere Tage oder Zeitfenster …</button>${back}`;
       document.getElementById("regNo")?.addEventListener("click", () => { W.reg = null; toTicket(); });
       document.getElementById("regQuick").onclick = () => { W.reg = { name: "", days: wk ? [1, 2, 3, 4, 5] : [dow], kind: "fix", from: "", to: "", hol: true }; toTicket(); };
