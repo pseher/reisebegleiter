@@ -229,7 +229,7 @@ function regularBox() {
     REG.from = `${p(hh)}:00`; REG.to = `${p(Math.min(23, hh + 1))}:${hh >= 23 ? "59" : "00"}`; }
   return `<section class="card reg"><div class="card-h"><div class="k">Regelmäßig überwachen</div><button class="card-x" id="regX" aria-label="Schließen">✕</button></div>
     <p class="small muted" style="margin:0 0 8px">An jedem Fahrtag beobachte ich alle Fahrten ${esc(cleanStop(W.rFrom.name))} → ${esc(cleanStop(W.rTo.name))} in deinem Zeitfenster. Du tippst an, welche du nimmst – sonst läuft alles im Hintergrund.</p>
-    <input class="txt" id="regName" maxlength="40" placeholder="Name, z. B. Arbeit hin" value="${esc(REG.name)}">
+    <input class="txt" id="regName" maxlength="40" placeholder="Name, z. B. Schule oder Arbeit" value="${esc(REG.name)}">
     <p class="small muted" style="margin:4px 0 0">An welchen Tagen?</p>${dayChips(REG.days, "data-regd")}
     <p class="small muted" style="margin:4px 0 0">Abfahrt zwischen</p>
     <div class="win-row"><input type="time" id="regFrom" value="${esc(REG.from)}"><span>und</span><input type="time" id="regTo" value="${esc(REG.to)}"></div>
@@ -333,7 +333,7 @@ function routineForm(t) {
   if (t.phase === "done") return "";
   return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig überwachen</p>
     <p class="small muted" style="margin:0 0 6px">Z. B. für den Weg zur Arbeit: An jedem Fahrtag lege ich diese Verbindung ca. 3 Std. vorher an und überwache sie.</p>
-    <input class="txt" id="rfName" maxlength="40" placeholder="Name, z. B. Arbeit hin" value="${esc(RF.name)}">
+    <input class="txt" id="rfName" maxlength="40" placeholder="Name, z. B. Schule oder Arbeit" value="${esc(RF.name)}">
     ${dayChips(RF.days, "data-rfd")}
     <label class="small chk"><input type="checkbox" id="rfHol" ${RF.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
     <button class="btn sec" id="rfSave">${esc(daysText(RF.days))} um ${hm(t.legs[0].dep.plan)} überwachen</button></div>`;
