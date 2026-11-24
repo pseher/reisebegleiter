@@ -32,3 +32,19 @@ test("Testdaten: Berlin → München mit Umstieg, Bahn-Teilstrecken bekommen Fah
   assert.match(legs[0].jid, /^mock-5/); assert.match(legs[1].jid, /^mock-16/);
   assert.equal(legs[0].to.eva, "8010205"); assert.equal(legs[1].from.eva, "8010205");
 });
+
+test("Weiterfahren statt laufen: derselbe Bus fährt bis zum Umstieg", async () => {
+  const { rideOn } = await import("../src/routing.js");
+  const T = m => new Date(Date.UTC(2026, 10, 24, 8, 55 + m)).toISOString();
+  const c = { legs: [
+    { label: "Bus 310", mode: "BUS", tripId: "t310", walk: 6, from: { name: "Berkaer Str./Breite Str.", plan: T(0) }, to: { name: "Mecklenburgische Str./Binger Str.", lat: 52.4810, lon: 13.3050, plan: T(5) } },
+    { label: "S 42", mode: "SUBURBAN", from: { name: "Heidelberger Platz", lat: 52.4797, lon: 13.3122, plan: T(23) }, to: { name: "Südkreuz", plan: T(30) } }] };
+  // Testdaten: Trip-Halte nach der Ankunft – der Bus erreicht „S+U Heidelberger Platz“ 1 Min. später
+  const env = { MOCK: "0", TRANSITOUS_URL: "http://127.0.0.1:9" };
+  const routing = await import("../src/routing.js");
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ legs: [{ intermediateStops: [], to: { name: "S+U Heidelberger Platz", lat: 52.4798, lon: 13.3120, scheduledArrival: T(6), arrival: T(6), stopId: "x" } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  try { await rideOn(env, [c], 0); } finally { globalThis.fetch = orig; }
+  assert.equal(c.legs[0].to.name, "S+U Heidelberger Platz");
+  assert.equal(c.legs[0].walk, 0);
+});

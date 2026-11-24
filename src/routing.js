@@ -70,9 +70,31 @@ export async function connections(env, from, to, timeMs, minT = 0, arriveBy = fa
   const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
     numItineraries: "6", searchWindow: "5400", minTransferTime: String(Math.max(0, Math.min(30, minT | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
   const seen = new Set();
-  return simplify(data).filter(c => !c.legs.some(l => l.mode === "COACH" || l.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
+  const list = simplify(data).filter(c => !c.legs.some(l => l.mode === "COACH" || l.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
     .filter(c => { const k = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep)).slice(0, 8);
+  await rideOn(env, list, minT).catch(e => console.log("Weiterfahren:", e.message));
+  return list;
+}
+
+// Der Planer schickt dich manchmal eine Station zu früh raus und lässt dich laufen, obwohl derselbe Bus/dieselbe Bahn
+// bis zum Umstieg weiterfährt (gleich schnell → für ihn gleichwertig). Dann lieber sitzen bleiben: Fahrt bis dorthin verlängern.
+const distM = (a, b) => (a?.lat == null || b?.lat == null ? Infinity : Math.hypot((a.lat - b.lat) * 111320, (a.lon - b.lon) * 111320 * Math.cos(a.lat * Math.PI / 180)));
+const plainStopName = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
+export async function rideOn(env, list, minT = 0) {
+  const cache = new Map();
+  for (const c of list.slice(0, 6)) for (let i = 0; i < c.legs.length - 1; i++) {
+    const l = c.legs[i], nx = c.legs[i + 1];
+    if (!l.tripId || !l.walk || l.walk < 2 || distM(l.to, nx.from) < 120) continue;
+    if (!cache.has(l.tripId)) cache.set(l.tripId, await tripStops(env, l.tripId, Date.parse(l.to.plan)).catch(() => []));
+    const need = Math.max(2, Math.min(minT || 0, 10)) * 60e3, dep = Date.parse(nx.from.rt || nx.from.plan);
+    const hit = cache.get(l.tripId).find(s => (distM(s, nx.from) < 250 || (plainStopName(s.name) && plainStopName(s.name) === plainStopName(nx.from.name))) && Date.parse(s.rt || s.plan) + need <= dep);
+    if (!hit) continue;
+    const walk = distM(hit, nx.from) < 120 ? 0 : Math.max(1, Math.round(distM(hit, nx.from) * 1.3 / 75));
+    if (walk >= l.walk) continue;
+    l.to = { ...l.to, name: hit.name, lat: hit.lat, lon: hit.lon, stopId: hit.stopId || "", plan: hit.plan, rt: hit.rt || hit.plan, track: hit.track || "" };
+    l.walk = walk; l.rideOn = true;
+  }
 }
 
 // Bahn-Teilstrecke → OpenBoards-Fahrt (journeyId) an Abfahrts- und Ankunftsbahnhof
