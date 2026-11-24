@@ -768,7 +768,7 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
-  const justMade = /^(Reise angelegt|\d+ Reisen angelegt)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
+  const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
   $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
       <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button></div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
@@ -1164,6 +1164,26 @@ const gapTag = (g, own, at) => { const ownM = Math.max(+own || 0, 2), where = at
   if (g < ownM) return `<span class="late">Umstieg${where} ${g} Min. – zu knapp${own > g ? ` (du brauchst ${own})` : ""}</span>`;
   if (g < Math.max(ownM + 5, 8)) return `<span class="warn-t">Umstieg${where} ${g} Min. – knapp</span>`;
   return `<span class="ok-t">Umstieg${where} ${g} Min. – entspannt</span>`; };
+// „Einmal oder öfter?“ als kleine Auswahl unter der Verbindung (Standard: nur diesmal)
+function repInfo() {
+  const dep = Date.parse(W.legs[0].from.plan), dow = ((new Date(new Date(dep).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" }) + "T12:00:00Z").getUTCDay() + 6) % 7) + 1, wk = dow <= 5;
+  return { dep, depHm: hm(dep), dow, days: wk ? [1, 2, 3, 4, 5] : [dow], quick: wk ? "Mo–Fr" : DOW[dow - 1] };
+}
+function repeatBlock() {
+  if (!canRegular() || W.regPreset || W.regIntent || W.multi) return "";
+  const r = repInfo(), q = W.reg && W.reg.kind === "fix" && !W.reg.custom;
+  return `<p class="small" style="margin:12px 2px 4px"><b>Öfter so fahren?</b></p><div class="chips">
+    <button class="chip" data-rep="once" aria-pressed="${!W.reg}">Nur diesmal</button>
+    <button class="chip" data-rep="quick" aria-pressed="${!!q}">Jeden ${r.quick} um ${r.depHm}</button>
+    <button class="chip" data-rep="more" aria-pressed="${!!(W.reg && !q)}">${W.reg && !q ? `${esc(daysText(W.reg.days))}${W.reg.kind === "win" ? ` ${W.reg.from}–${W.reg.to}` : ""} ✎` : "Andere Tage …"}</button></div>
+    ${W.reg ? `<p class="small muted" style="margin:4px 2px 0">Ich lege die Fahrt dann an jedem dieser Tage automatisch an und überwache sie. Jederzeit unter „Regelmäßige Fahrten“ abschaltbar.</p>` : ""}`;
+}
+// Mitteilungen gleich beim Anlegen mit erlauben (nur wo das ohne Umweg geht)
+function pushTick() {
+  if (W.editId || !("Notification" in window) || !("serviceWorker" in navigator) || (isIOS && !standalone)) return "";
+  if (Notification.permission !== "default") return "";
+  return `<label class="small chk" style="margin:12px 2px 0"><input type="checkbox" id="pushTick" ${W.pushNo ? "" : "checked"}> <span>Mir aufs Handy Bescheid geben, wenn etwas nicht klappt</span></label>`;
+}
 function connList(list) {
   if (!list.length) return `<p class="muted">Keine Verbindung gefunden.</p><button class="btn sec" id="otherTime">Andere Zeit wählen</button>`;
   const own = W?.editId ? W.minT : MINT, R = W?.editId && W.ref, K = keepInfo();
@@ -1437,13 +1457,24 @@ function renderWizard() {
     $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>
       <p class="muted small">${new Date(W.legs[0].from.plan).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Berlin" })}</p>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       ${tight ? `<div class="banner info small"><b>Knapper Umstieg in ${esc(cleanStop(tight.at))}: ${Math.max(0, tight.gap)} Min.</b> Nach dem Anlegen zeige ich dir Verbindungen, die etwas früher losfahren oder mehr Luft haben, und beobachte sie mit.</div>` : ""}
-      <div class="card"><ol class="tl">${W.legs.map(l => `<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
+      <div class="card"><ol class="tl">${W.legs.map((l, i) => `${i ? `<li class="xfer-note small">${gapTag(Math.round((Date.parse(l.from.plan) - Date.parse(W.legs[i - 1].to.plan)) / MIN), W.editId ? W.minT : MINT, W.legs[i - 1].to.name)}</li>` : ""}<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
         <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` · ${esc(platWord(l, l.from.platform))}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` · ${esc(platWord(l, l.to.platform))}` : ""}</div>
         ${l.jid || l.tid ? "" : `<div class="small muted">Live-Zeiten, soweit der Verkehrsbetrieb sie liefert</div>`}</li>`).join("")}${keepInfo() ? `<li class="xfer-note small">${gapTag(Math.round((Date.parse(keepInfo().dep) - Date.parse(W.legs[n - 1].to.plan)) / MIN), W.minT, keepInfo().at.name)}</li>` : ""}${keepTail()}</ol></div>
-      <button class="btn" id="done">${W.editId ? "Reise so ändern" : "Fertig – weiter"}</button>
+      ${repeatBlock()}${pushTick()}
+      <button class="btn" id="done">${W.editId ? "Reise so ändern" : W.multi || (W.legs.some(isFVc) && !W.quick) ? "Weiter" : W.reg ? "Regelmäßig anlegen" : "Fahrt anlegen"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}${back}`;
-    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); if (canRegular() && !W.regPreset) { W.step = "regular"; render(); } else toTicket(); };
+    // Pendler: „einmal oder regelmäßig“ und Mitteilungen direkt hier – kein eigener Schritt mehr
+    $app.querySelectorAll("[data-rep]").forEach(b => b.onclick = () => { const v = b.dataset.rep, r = repInfo();
+      if (v === "once") W.reg = null;
+      else if (v === "quick") W.reg = { name: "", days: r.days, kind: "fix", from: "", to: "", hol: true };
+      else { W.reg = null; W.step = "regular"; W.regMore = true; }
+      render(); });
+    document.getElementById("pushTick")?.addEventListener("change", e => { W.pushNo = !e.target.checked; });
+    document.getElementById("done").onclick = () => {
+      if (!W.editId && !W.pushNo && document.getElementById("pushTick")) W.pushAsk = Notification.requestPermission().catch(() => "default");   // im selben Tipp fragen (sonst blockt der Browser)
+      if (W.editId) return saveTrip(W.editTicket);
+      if (W.regIntent && !W.regPreset && !W.reg) { W.step = "regular"; render(); } else toTicket(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
   }
@@ -1451,6 +1482,10 @@ function renderWizard() {
   else if (W.step === "regular") {
     // Vor dem Ticket: regelmäßig überwachen? (z. B. Arbeitsweg) – mit Tagen und genauer Abfahrt oder Zeitfenster
     const l0 = W.legs[0], dep = Date.parse(l0.from.plan), depHm = hm(dep), dow = ((new Date(new Date(dep).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" }) + "T12:00:00Z").getUTCDay() + 6) % 7) + 1;
+    if (!W.reg && W.regMore) {   // aus „Andere Tage …“ unter der Verbindung: gleich das Formular
+      const p = x => String(x).padStart(2, "0"), mins = +depHm.slice(0, 2) * 60 + +depHm.slice(3), a = Math.max(0, Math.floor((mins - 15) / 15) * 15), b = Math.min(23 * 60 + 59, a + 60);
+      W.reg = { name: "", days: dow <= 5 ? [1, 2, 3, 4, 5] : [dow], kind: "fix", from: `${p(Math.floor(a / 60))}:${p(a % 60)}`, to: `${p(Math.floor(b / 60))}:${p(b % 60)}`, hol: true, custom: true };
+    }
     if (!W.reg) {
       const wk = dow <= 5, quick = wk ? "Mo–Fr" : DOW[dow - 1];
       // Über „Mein Weg“ gekommen: es ist schon klar, dass es regelmäßig ist – nur noch die Tage
@@ -1477,16 +1512,16 @@ function renderWizard() {
           <li><button data-wrk="win" aria-pressed="${R.kind === "win"}"><b>${R.kind === "win" ? "● " : "○ "}In einem Zeitfenster</b><br><span class="small muted">Ich zeige dir alle Fahrten darin – du tippst an, welche du nimmst</span></button></li></ul>
         ${R.kind === "win" ? `<div class="win-row"><input type="time" id="wrFrom" value="${esc(R.from)}"><span>bis</span><input type="time" id="wrTo" value="${esc(R.to)}"></div>` : ""}
         <label class="small chk"><input type="checkbox" id="wrHol" ${R.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
-        <button class="btn" id="wrNext">Weiter</button>
-        <button class="btn quiet" id="wrCancel">Doch nicht regelmäßig</button>${back}`;
+        <button class="btn" id="wrNext">${W.regMore ? "Übernehmen" : "Weiter"}</button>
+        <button class="btn quiet" id="wrCancel">${W.regMore ? "Doch nur diesmal" : "Doch nicht regelmäßig"}</button>${back}`;
       const keep = () => { R.name = document.getElementById("wrName").value; R.from = document.getElementById("wrFrom")?.value || R.from; R.to = document.getElementById("wrTo")?.value || R.to; R.hol = document.getElementById("wrHol").checked; };
       $app.querySelectorAll("[data-wrd]").forEach(b => b.onclick = () => { keep(); const d = +b.dataset.wrd; R.days = R.days.includes(d) ? R.days.filter(x => x !== d) : [...R.days, d].sort(); render(); });
       $app.querySelectorAll("[data-wrk]").forEach(b => b.onclick = () => { keep(); R.kind = b.dataset.wrk; render(); });
-      document.getElementById("wrCancel").onclick = () => { W.reg = null; toTicket(); };
+      document.getElementById("wrCancel").onclick = () => { W.reg = null; if (W.regMore) { W.regMore = false; W.step = "leg"; return render(); } toTicket(); };
       document.getElementById("wrNext").onclick = () => { keep();
         if (!R.days.length) { W.error = "Bitte mindestens einen Tag wählen."; return render(); }
         if (R.kind === "win" && !(R.to > R.from)) { W.error = "Das Ende des Zeitfensters muss nach dem Beginn liegen."; return render(); }
-        W.error = ""; toTicket(); };
+        W.error = ""; if (W.regMore) { R.custom = true; W.regMore = false; W.step = "leg"; return render(); } toTicket(); };
     }
   }
 
@@ -1510,7 +1545,8 @@ function renderWizard() {
     else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
-    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : canRegular() && !W.regPreset ? "regular" : "leg";
+    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : W.regIntent && !W.regPreset ? "regular" : "leg";
+    else if (W.step === "regular" && W.regMore) { W.reg = null; W.regMore = false; W.step = "leg"; }   // „Andere Tage …“ abgebrochen
     else if (W.step === "regular") { if (W.reg) W.reg = null; else W.step = "leg"; }   // Formular → Frage → Verbindung
     else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
     else if (W.step === "leg" && W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; }
@@ -1624,6 +1660,7 @@ async function saveTrip(ticket) {
       if (r) {
         ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win ? `${r.win[0]}–${r.win[1]}` : r.dep}. Die Fahrt erscheint jeweils ein paar Stunden vorher hier.`;
+        if (W.pushAsk) W.pushAsk.then(x => (x === "granted" ? enablePush() : null)).catch(() => {});
         const fromReg = W.regIntent; W = null; await loadTrips(); openId = null; return go(fromReg ? "routines" : "home");
       }
     }
@@ -1634,6 +1671,7 @@ async function saveTrip(ticket) {
       W.pickedIdx = null; W.ticketGuess = ticket; W.busy = null; W.saving = false; W.step = "pickTrip";
       await loadTrips().catch(() => {}); return render();
     }
+    if (W.pushAsk) { const ask0 = W.pushAsk; ask0.then(r => (r === "granted" ? enablePush().then(() => render()) : null)).catch(() => {}); }
     const n = (W.multi || [W.legs]).length;
     flash = n > 1 ? `${n} Reisen angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Reise angelegt. Ich melde mich, wenn du etwas tun solltest.";
     W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home");
