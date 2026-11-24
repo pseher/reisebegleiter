@@ -73,6 +73,17 @@ async function departures(env, eva, fromMs) {
       seen.add(e.jid); out.push(e);
     }
   }
+  // Bus, Tram und U-Bahn an Haltestellen direkt am Bahnhof dazunehmen (die DB-Tafel kennt nur Züge)
+  const st = byEva(eva), until = out.length ? Math.max(fromMs + 30 * MIN, Date.parse(out[out.length - 1].rt)) : fromMs + 60 * MIN;
+  if (st?.lat != null) {
+    const stops = (await stopsNear(env, st.lat, st.lon).catch(() => [])).filter(x => x.dist <= 400 && x.id).slice(0, 2);
+    const lists = await Promise.all(stops.map(x => stopDepartures(env, x, fromMs).then(l => l.map(e => ({ ...e, stop: { id: x.id, name: x.name, lat: x.lat, lon: x.lon } }))).catch(() => [])));
+    const tids = new Set();
+    for (const e of lists.flat()) {
+      if (/RAIL|SUBURBAN|REGIONAL|HIGHSPEED|LONG_DISTANCE|NIGHT_RAIL/i.test(e.mode) || tids.has(e.tripId) || Date.parse(e.rt) > until) continue;
+      tids.add(e.tripId); out.push(e);
+    }
+  }
   return out.sort((a, b) => Date.parse(a.rt) - Date.parse(b.rt));
 }
 

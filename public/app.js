@@ -1322,7 +1322,7 @@ function renderWizard() {
     const base = W.legs.length ? Date.parse(W.legs[n - 1].to.plan) : Date.now();
     $app.innerHTML = `${head}<h1>${W.station.eva ? "Welcher Zug" : "Was fährst du"} ab ${esc(W.station.name)}?</h1>
       ${W.legs.length ? `<p class="muted small">Ankunft dort laut Plan ${hm(W.legs[n - 1].to.plan)}.</p>` : whenPicker("from")}
-      ${err}${W.list && W.from > Date.now() + 5 * MIN && !W.legs.length ? `<button class="btn sec" id="earlier">↑ Frühere Züge</button>` : ""}
+      ${err}${W.list && W.from > Date.now() + 5 * MIN && !W.legs.length ? `<button class="btn sec" id="earlier">↑ Frühere Fahrten</button>` : ""}
       <div id="trains">${W.list ? trainList(W.list) : `<div class="spinner"></div>`}</div>
       ${W.list ? `<button class="btn sec" id="later">↓ Spätere Fahrten</button>` : ""}${back}`;
     if (!W.legs.length) bindWhen("from", () => { W.list = null; });
@@ -1347,14 +1347,15 @@ function renderWizard() {
 
   else if (W.step === "exit" && W.train.tripId) {
     const tr = W.train;
-    $app.innerHTML = `${head}<h1>Wo steigst du aus?</h1><p class="muted">${esc(tr.label)} ab ${hm(tr.rt)}${tr.platform ? ` · ${esc(tr.platform)}` : ""}</p>
+    $app.innerHTML = `${head}<h1>Wo steigst du aus?</h1><p class="muted">${esc(tr.label)} ab ${hm(tr.rt)}${tr.stop ? ` · ${esc(cleanStop(tr.stop.name))}` : ""}${tr.platform ? ` · ${esc(platWord(tr, tr.platform))}` : ""}</p>
       ${err}<div>${W.tripStops ? `<ul class="list">${W.tripStops.map((s, i) => `<li><button data-ts="${i}"><b>${esc(s.name)}</b> <span class="small muted">an ${hm(s.plan)}</span></button></li>`).join("") || `<li><p class="muted">Keine Halte bekannt.</p></li>`}</ul>` : `<div class="spinner"></div>`}</div>${back}`;
     if (!W.tripStops) api(`/api/tripstops?trip=${encodeURIComponent(tr.tripId)}&after=${encodeURIComponent(tr.plan)}`)
       .then(l => { W.tripStops = l; }).catch(e => { W.tripStops = []; W.error = e.message; }).then(render);
     $app.querySelectorAll("[data-ts]").forEach(b => b.onclick = () => {
       const s = W.tripStops[+b.dataset.ts], st = W.station;
       W.legs.push({ jid: "", tid: tr.tripId, label: tr.label, mode: tr.mode || "",
-        from: { eva: st.eva || "", name: st.name, plan: tr.plan, platform: tr.platform || "", lat: st.lat, lon: st.lon, stopId: tr.stopId || st.id || "" },
+        from: tr.stop ? { eva: "", name: tr.stop.name, plan: tr.plan, platform: tr.platform || "", lat: tr.stop.lat, lon: tr.stop.lon, stopId: tr.stopId || tr.stop.id }
+          : { eva: st.eva || "", name: st.name, plan: tr.plan, platform: tr.platform || "", lat: st.lat, lon: st.lon, stopId: tr.stopId || st.id || "" },
         to: { eva: s.eva || "", name: s.name, plan: s.plan, platform: s.track || "", lat: s.lat, lon: s.lon, stopId: s.stopId || "" } });
       W.tripStops = null; W.step = "leg"; W.error = ""; render();
     });
@@ -1461,12 +1462,19 @@ function renderWizard() {
   };
 }
 
+// Richtung einer Abfahrt; die Ringbahn hat kein Ziel
+function dirText(e) {
+  const d = (e.direction || []).map(x => x.name).filter(Boolean).join(" / "), lb = String(e.label || "").replace(/\s+/g, "");
+  if (/^S41$/i.test(lb) && (!d || /ring/i.test(d) || cleanStop(d) === cleanStop(W.station?.name || ""))) return "Ring im Uhrzeigersinn";
+  if (/^S42$/i.test(lb) && (!d || /ring/i.test(d) || cleanStop(d) === cleanStop(W.station?.name || ""))) return "Ring gegen den Uhrzeigersinn";
+  return d ? `nach ${esc(d)}` : "";
+}
 function trainList(list) {
   if (!list.length) return `<p class="muted">Keine Abfahrten in diesem Zeitraum gefunden.</p>`;
   return `<ul class="list">${list.map((e, i) => `<li><button data-j="${i}" ${e.cancelled ? "disabled" : ""}><div class="train">
     <span class="t">${hm(e.rt)}</span><span class="l">${esc(e.label)}${e.cancelled ? ` <span class="late">fällt aus</span>` : ""}</span>
     <span class="pl">${esc(platWord(e, e.platform))}</span>
-    <span class="d">${e.rt !== e.plan && Date.parse(e.rt) - Date.parse(e.plan) >= MIN ? `<span class="late">+${Math.round((Date.parse(e.rt) - Date.parse(e.plan)) / MIN)}</span> · ` : ""}nach ${esc(e.direction.map(d => d.name).filter(Boolean).join(" / ") || "?")}</span>
+    <span class="d">${e.rt !== e.plan && Date.parse(e.rt) - Date.parse(e.plan) >= MIN ? `<span class="late">+${Math.round((Date.parse(e.rt) - Date.parse(e.plan)) / MIN)}</span> · ` : ""}${dirText(e)}${e.stop && cleanStop(e.stop.name) !== cleanStop(W.station?.name || "") ? `<br><span class="small muted">ab ${esc(cleanStop(e.stop.name))}</span>` : ""}</span>
   </div></button></li>`).join("")}</ul>`;
 }
 

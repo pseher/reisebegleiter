@@ -91,3 +91,13 @@ test("Fremde kommen nicht an Fahrten, regelmäßige Fahrten oder Geräte anderer
     for (let k = 0; k < 3; k++) last = (await call("/api/link/join", X, "POST", { code: String(100000 + i * 10 + k) }, "10.9.9.9")).s; }
   assert.equal(last, 429);
 });
+
+test("Abfahrtstafel am Bahnhof zeigt auch Busse von der Haltestelle nebenan", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth) => { const r = await worker.fetch(new Request(`http://x${path}`, { headers: { "CF-Connecting-IP": "10.0.0.7", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}) } }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await worker.fetch(new Request("http://x/api/register", { method: "POST", headers: { "CF-Connecting-IP": "10.0.0.7" } }), env, { waitUntil: p => p }).then(r => r.json()));
+  const l = (await call(`/api/departures?eva=8011160&time=${encodeURIComponent(new Date().toISOString())}`, A)).j;
+  const bus = l.filter(e => e.mode === "BUS");
+  assert.ok(bus.length && bus.every(e => e.tripId && e.stop?.name === "Mommsenstraße"), JSON.stringify(l.slice(0, 3)));
+  assert.ok(l.every((e, i) => !i || Date.parse(l[i - 1].rt) <= Date.parse(e.rt)));
+});
