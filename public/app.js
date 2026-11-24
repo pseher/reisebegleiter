@@ -208,7 +208,12 @@ function renderList(active) {
   const row = t => `<li class="crow-li"><button data-open="${t.id}" class="crow"><span class="sdot d-${t.status}"></span>
       <span class="tr-main"><b>${hm(t.legs[0].dep.rt)} ${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`}</b>${Date.parse(t.legs[0].dep.plan) > soon ? `<span class="muted small">${day(t.legs[0].dep.plan)}</span>` : ""}</span>
       <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
-  $app.innerHTML = `${flashBox()}
+  // Alte Adresse (…workers.dev): Hinweis auf den Umzug mit Anleitung zum Mitnehmen
+  const moved = /workers\.dev$/.test(location.hostname) ? `<section class="card move"><div class="k">Neue Adresse</div>
+      <p style="margin:0 0 8px">Umstiegsheld wohnt jetzt unter <b>umstiegsheld.de</b>. So nimmst du deine Fahrten und Favoriten mit:</p>
+      <ol class="small" style="margin:0 0 10px;padding-left:20px"><li>Hier: Einstellungen → „Gerät hinzufügen“ → Code anzeigen.</li><li>umstiegsheld.de öffnen → Einstellungen → „Code eingeben“.</li><li>Dort Mitteilungen erlauben und die App neu zum Startbildschirm hinzufügen.</li></ol>
+      <div class="row"><button class="btn sec small-btn" data-go="settings">Code anzeigen</button><a class="btn small-btn" href="https://umstiegsheld.de/" target="_blank" rel="noopener">umstiegsheld.de öffnen</a></div></section>` : "";
+  $app.innerHTML = `${flashBox()}${moved}
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
     ${cur ? jetztCard(cur) : ""}
     ${tiles(cur)}
