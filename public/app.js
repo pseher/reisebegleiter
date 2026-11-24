@@ -562,6 +562,8 @@ function losZiel(dep, arr, refDep, refArr) {
 }
 const fmtSpan = m => (m >= 120 ? `${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 60} Min.` : ""}` : `${m} Min.`);
 
+// Umstiegszeit für die Suche: eingestellte Zeit, mit „Mehr Puffer“ 10 Min. mehr (mind. 15)
+const searchMin = () => { const base = W?.editId ? +W.minT || 0 : MINT; return W?.buf ? Math.max(15, Math.max(base, 5) + 10) : base; };
 // Fahrrad, Rollstuhl & Co. sind (noch) nicht berücksichtigt – dezent darauf hinweisen
 const SPECIAL = `<p class="small muted special-note">🚲 ♿ Fahrrad, Rollstuhl oder großes Gepäck? Das berücksichtige ich noch nicht – bitte bei der Bahn bzw. deinem Verkehrsverbund prüfen. <a href="/hilfe.html">Mehr</a></p>`;
 // Knopf „Diese Verbindung nehmen“: nur die empfohlene Möglichkeit gefüllt, nicht machbare ohne Knopf
@@ -1263,13 +1265,16 @@ function renderWizard() {
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      ${W.conns ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
+        ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
       <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
       ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>${SPECIAL}` : ""}${back}`;
-    if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${W.editId ? W.minT : MINT}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
+    if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     // eine Stunde früher suchen (nicht vor jetzt)
     const ec = document.getElementById("earlierC");
     if (ec) ec.onclick = () => { const first = W.conns[0] ? Date.parse(W.conns[0].legs[0].from.plan) : W.when; W.when = Math.max(Date.now(), Math.min(W.when, first) - 60 * MIN); W.conns = null; render(); };
+    document.getElementById("bufC")?.addEventListener("click", () => { W.buf = !W.buf; W.conns = null; render(); });
     const lc = document.getElementById("laterC");
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
