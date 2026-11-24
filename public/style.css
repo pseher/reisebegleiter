@@ -400,3 +400,8 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .d-pend { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); } .crow.pend b { color: var(--muted); }
 .buf-chip { display: block; width: 100%; margin: 0 0 10px; text-align: center; }
 .buf-chip { white-space: normal; }
+/* Früher fahren (eine Teilstrecke) */
+.early-btn { margin: 2px 0 8px 74px; font-size: .85rem; }
+.early { margin: 4px 0 10px; padding: 10px 12px; }
+.early .list { margin: 8px 0 0; }
+.early .btn.quiet { margin-top: 4px; }

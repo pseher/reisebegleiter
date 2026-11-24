@@ -101,3 +101,19 @@ test("Abfahrtstafel am Bahnhof zeigt auch Busse von der Haltestelle nebenan", as
   assert.ok(bus.length && bus.every(e => e.tripId && e.stop?.name === "Mommsenstraße"), JSON.stringify(l.slice(0, 3)));
   assert.ok(l.every((e, i) => !i || Date.parse(l[i - 1].rt) <= Date.parse(e.rt)));
 });
+
+test("Eine Teilstrecke früher fahren: frühere Busse finden und nur diese Teilstrecke tauschen", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.8", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, B = (await call("/api/register", null, "POST", {})).j;
+  const T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const t = (await call("/api/trips", A, "POST", { ticket: "dticket", legs: [
+    { jid: "", tid: "orig", label: "Bus M19", mode: "BUS", from: { eva: "", name: "Mommsenstraße", plan: iso(40), lat: 52.5045, lon: 13.3066, stopId: "mock_mommsen" }, to: { eva: "", name: "Adenauerplatz", plan: iso(46), lat: 52.4999, lon: 13.3074 } },
+    { jid: "b", label: "RE 1", from: { eva: "8010406", name: "Berlin-Charlottenburg", plan: iso(70) }, to: { eva: "8010224", name: "Magdeburg Hbf", plan: iso(170) } }] })).j;
+  const l = (await call(`/api/trips/${t.id}/earlier?leg=0`, A)).j;
+  assert.ok(l.length >= 2 && l.every(c => Date.parse(c.from.plan) < Date.parse(iso(40)) && c.to.name === "Adenauerplatz"), JSON.stringify(l));
+  assert.equal((await call(`/api/trips/${t.id}/earlier?leg=0`, B)).s, 404);
+  assert.equal((await call(`/api/trips/${t.id}/earlier`, A, "POST", { leg: 0, tid: "erfunden", dep: iso(5) })).s, 409);
+  const v = (await call(`/api/trips/${t.id}/earlier`, A, "POST", { leg: 0, tid: l[l.length - 1].tid, dep: l[l.length - 1].from.plan })).j;
+  assert.ok(v.legs, JSON.stringify(v)); assert.equal(v.legs.length, 2); assert.ok(Math.abs(Date.parse(v.legs[0].dep.plan) - Date.parse(l[l.length - 1].from.plan)) < 60e3); assert.equal(v.legs[1].label, "RE 1"); assert.equal(v.ticket || "dticket", "dticket");
+});

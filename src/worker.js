@@ -105,6 +105,52 @@ function checkLegs(legs) {
   return "";
 }
 
+// Frühere Fahrten für EINE Teilstrecke (z. B. einen Bus früher zum Umstieg), Rest der Reise bleibt
+const lineKey = l => String(l.label || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
+const plainN = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
+async function earlierFor(env, t, i) {
+  const L = t.legs[i], dep = Date.parse(L.from.plan), now = Date.now();
+  if (!L || dep < now) return [];
+  let stop = L.from.stopId ? { id: L.from.stopId } : null;
+  if (!stop && L.from.lat != null) stop = (await stopsNear(env, L.from.lat, L.from.lon).catch(() => []))[0] || null;
+  if (!stop) return [];
+  // nicht vor der Ankunft der vorigen Teilstrecke (plus Umstiegszeit) – sonst wäre der Anschluss weg
+  const P = t.legs[i - 1], earliest = P ? Date.parse(P.to.plan) + Math.max(2, +L.minT || 0, +P.walk || 0) * MIN : 0;
+  const from = Math.max(now, dep - 60 * MIN, earliest);
+  const deps = (await stopDepartures(env, stop, from).catch(() => [])).filter(e => !e.cancelled && Date.parse(e.plan) < dep - MIN && Date.parse(e.plan) >= now - MIN);
+  // gleiche Linie zuerst, sonst andere Linien; die letzten vor deiner Abfahrt sind die interessantesten
+  const key = lineKey(L), cand = [...deps.filter(e => lineKey(e) === key).reverse(), ...deps.filter(e => lineKey(e) !== key).reverse()].slice(0, 8);
+  const near = (a, b) => a.lat != null && b.lat != null && Math.hypot((a.lat - b.lat) * 111, (a.lon - b.lon) * 68) < 0.15;
+  const out = await Promise.all(cand.map(async e => {
+    const st = await tripStops(env, e.tripId, Date.parse(e.plan)).catch(() => []);
+    const hit = st.find(s => (L.to.stopId && s.stopId === L.to.stopId) || plainN(s.name) === plainN(L.to.name) || near(s, L.to));
+    if (!hit || Date.parse(hit.plan) > Date.parse(L.to.plan) + MIN) return null;
+    return { jid: "", tid: e.tripId, label: e.label, mode: e.mode || L.mode || "", walk: L.walk || 0, minT: L.minT || 0,
+      from: { eva: L.from.eva || "", name: L.from.name, plan: e.plan, platform: e.platform || "", lat: L.from.lat, lon: L.from.lon, stopId: e.stopId || stop.id },
+      to: { eva: L.to.eva || hit.eva || "", name: L.to.name, plan: hit.plan, platform: hit.track || "", lat: L.to.lat ?? hit.lat, lon: L.to.lon ?? hit.lon, stopId: hit.stopId || L.to.stopId || "" } };
+  }));
+  const seen = new Set();
+  return out.filter(Boolean).filter(c => { const k = `${lineKey(c)}@${c.from.plan}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => Date.parse(a.from.plan) - Date.parse(b.from.plan)).slice(-5);
+}
+
+// Reise mit neuen Teilstrecken: Ticket und Zugehörigkeit bleiben, Überwachung beginnt neu
+async function replaceLegs(env, t, legs, ticket) {
+  const minT = +t.legs[0]?.minT || 0;
+  t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
+  // Zugehörigkeit zu einer regelmäßigen Fahrt bleibt beim Ändern erhalten (das Zeitfenster ist nach einer festen Wahl erledigt)
+  const st0 = t.state || {}, keepSt = Object.fromEntries(["routine", "rname"].filter(k => st0[k]).map(k => [k, st0[k]]));
+  if (st0.win) keepSt.win = { ...st0.win, picked: true, list: [] };
+  t.obs = []; t.state = keepSt; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
+  if (["spar", "flex", "dticket", "bc100"].includes(ticket)) t.ticket = ticket;
+  const now = Date.now(), cache = new Map();
+  await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
+  await assess(env, t, now, cache);
+  t.state = { ...t.state, rem: {}, start: null, pl: {}, zb: false };
+  await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ticket: t.ticket, active: true, ends_at: t.ends_at, updated_at: new Date().toISOString() });
+  return view(t, now);
+}
+
 async function api(req, env, url) {
   const p = url.pathname, method = req.method;
 
@@ -399,6 +445,23 @@ async function api(req, env, url) {
     return json(view(t, Date.now()));
   }
 
+  // Eine Teilstrecke früher fahren: Liste holen (GET) bzw. eine davon übernehmen (POST {leg, pick})
+  const me = /^\/api\/trips\/([0-9a-f-]{36})\/earlier$/i.exec(p);
+  if (me) {
+    const t = await ownTrip(env, dev, me[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    if (method === "GET") { const i = +url.searchParams.get("leg"); if (!(i >= 0 && i < t.legs.length)) return fail(400, "Teilstrecke fehlt"); return json(await earlierFor(env, t, i)); }
+    if (method === "POST") {
+      const b = await req.json().catch(() => ({})), i = +b.leg;
+      if (!(i >= 0 && i < t.legs.length)) return fail(400, "Teilstrecke fehlt");
+      // nur aus der frisch ermittelten Liste übernehmen (nichts vom Gerät ungeprüft speichern)
+      const c = (await earlierFor(env, t, i)).find(x => x.tid === b.tid && Math.abs(Date.parse(x.from.plan) - Date.parse(b.dep)) <= MIN);
+      if (!c) return fail(409, "Diese Fahrt ist nicht mehr wählbar. Bitte die Liste neu laden.");
+      const legs = t.legs.map((l, k) => (k === i ? c : l)), bad = checkLegs(legs); if (bad) return fail(400, bad);
+      return json(await replaceLegs(env, t, legs, t.ticket));
+    }
+  }
+
   const m = /^\/api\/trips\/([0-9a-f-]{36})$/i.exec(p);
   if (m) {
     const t = await ownTrip(env, dev, m[1]);
@@ -417,19 +480,7 @@ async function api(req, env, url) {
       const b = await req.json().catch(() => ({}));
       const legs = Array.isArray(b.legs) ? b.legs : [];
       const bad = checkLegs(legs); if (bad) return fail(400, bad);
-      const minT = +t.legs[0]?.minT || 0;
-      t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
-      // Zugehörigkeit zu einer regelmäßigen Fahrt bleibt beim Ändern erhalten (das Zeitfenster ist nach einer festen Wahl erledigt)
-      const st0 = t.state || {}, keepSt = Object.fromEntries(["routine", "rname"].filter(k => st0[k]).map(k => [k, st0[k]]));
-      if (st0.win) keepSt.win = { ...st0.win, picked: true, list: [] };
-      t.obs = []; t.state = keepSt; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
-      if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) t.ticket = b.ticket;
-      const now = Date.now(), cache = new Map();
-      await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
-      await assess(env, t, now, cache);
-      t.state = { ...t.state, rem: {}, start: null, pl: {}, zb: false };
-      await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ticket: t.ticket, active: true, ends_at: t.ends_at, updated_at: new Date().toISOString() });
-      return json(view(t, now));
+      return json(await replaceLegs(env, t, legs, b.ticket));
     }
     if (method === "PATCH") {
       const b = await req.json().catch(() => ({}));
