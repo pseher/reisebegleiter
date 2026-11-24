@@ -68,7 +68,11 @@ function schedule() {
   clearTimeout(timer);
   timer = setTimeout(async () => { if (view === "home" && document.visibilityState === "visible") { await loadTrips().catch(() => {}); render(); } schedule(); }, 60e3);
 }
-document.addEventListener("visibilitychange", async () => { if (document.visibilityState === "visible" && view === "home" && Date.now() - loadedAt > 30e3) { await loadTrips().catch(() => {}); render(); } });
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible") return;
+  // Favoriten können auf einem anderen Gerät geändert worden sein
+  if (typeof syncFavs === "function" && view !== "add") syncFavs(true).catch(() => {});
+  if (view === "home" && Date.now() - loadedAt > 30e3) { await loadTrips().catch(() => {}); render(); } });
 
 // ---------- Zurück-Taste (Handy/Browser) ----------
 // Solange man nicht auf der Startseite ist, liegt ein Eintrag im Verlauf. „Zurück“ macht dann einen Schritt in der App.
