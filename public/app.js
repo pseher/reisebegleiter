@@ -176,6 +176,14 @@ function windowCard(t) {
       ${infeasible(a) ? `<div class="small late" style="margin-top:6px">Geht so nicht mehr</div>` : `<div class="row cmp-act"><button class="btn sec small-btn" data-adopt="${t.id}|0|${i}|win">Die nehme ich</button></div>`}</div></div>`).join("");
   return `<div class="tiles">${cur}${rows}</div>`;
 }
+// Ticket-Frage nur, wenn Fernverkehr dabei ist (Zugbindung gibt es nur dort) – bei Bus, S-/U-Bahn, Tram, Regionalzug gleich anlegen
+const FV_RE_C = /^(ICE|IC|EC|ECE|ICD|RJX?|NJ|EN|TGV|EST|D)\s?\d/i;
+const isFVc = l => FV_RE_C.test(String(l?.label || "").trim()) || ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL"].includes(l?.mode);
+function toTicket() {
+  const all = (W.multi || [W.legs]).flat();
+  if (!all.some(isFVc)) return saveTrip("flex");
+  W.step = "ticket"; render();
+}
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
 const canRegular = () => !!W && !W.editId && !W.multi && W.legs?.length > 0;
 // In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
@@ -1063,7 +1071,7 @@ function renderWizard() {
     document.getElementById("doneImp")?.addEventListener("click", () => { W = null; go("home"); });
     $app.querySelectorAll("[data-it]").forEach(b => b.onclick = () => { W.multi = null; W.pickedIdx = +b.dataset.it; W.legs = W.imported[W.pickedIdx].legs; W.step = "leg"; render(); });
     const at = document.getElementById("allTrips");
-    if (at) at.onclick = () => { W.multi = future.map(t => t.legs); W.legs = W.multi[0]; W.step = "ticket"; render(); };
+    if (at) at.onclick = () => { W.multi = future.map(t => t.legs); W.legs = W.multi[0]; toTicket(); };
   }
 
   else if (W.step === "station") {
@@ -1155,7 +1163,7 @@ function renderWizard() {
       <button class="btn" id="done">${W.editId ? "Reise so ändern" : "Fertig – weiter"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}`;
-    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); W.step = canRegular() ? "regular" : "ticket"; render(); };
+    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); if (canRegular()) { W.step = "regular"; render(); } else toTicket(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
     return;
@@ -1169,7 +1177,7 @@ function renderWizard() {
         <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>
         <ul class="list"><li><button id="regNo"><b>Nein, nur dieses Mal</b></button></li>
           <li><button id="regYes"><b>Ja, regelmäßig überwachen</b><br><span class="small muted">z. B. zur Arbeit – an jedem Fahrtag lege ich die Fahrt automatisch an und überwache sie</span></button></li></ul>${back}`;
-      document.getElementById("regNo").onclick = () => { W.reg = null; W.step = "ticket"; render(); };
+      document.getElementById("regNo").onclick = () => { W.reg = null; toTicket(); };
       document.getElementById("regYes").onclick = () => {
         const p = x => String(x).padStart(2, "0"), d = new Date(dep), mins = +depHm.slice(0, 2) * 60 + +depHm.slice(3), a = Math.max(0, Math.floor((mins - 15) / 15) * 15), b = Math.min(23 * 60 + 59, a + 60);
         W.reg = { name: "", days: dow <= 5 ? [1, 2, 3, 4, 5] : [dow], kind: "fix", from: `${p(Math.floor(a / 60))}:${p(a % 60)}`, to: `${p(Math.floor(b / 60))}:${p(b % 60)}`, hol: true };
@@ -1191,11 +1199,11 @@ function renderWizard() {
       const keep = () => { R.name = document.getElementById("wrName").value; R.from = document.getElementById("wrFrom")?.value || R.from; R.to = document.getElementById("wrTo")?.value || R.to; R.hol = document.getElementById("wrHol").checked; };
       $app.querySelectorAll("[data-wrd]").forEach(b => b.onclick = () => { keep(); const d = +b.dataset.wrd; R.days = R.days.includes(d) ? R.days.filter(x => x !== d) : [...R.days, d].sort(); render(); });
       $app.querySelectorAll("[data-wrk]").forEach(b => b.onclick = () => { keep(); R.kind = b.dataset.wrk; render(); });
-      document.getElementById("wrCancel").onclick = () => { W.reg = null; W.step = "ticket"; render(); };
+      document.getElementById("wrCancel").onclick = () => { W.reg = null; toTicket(); };
       document.getElementById("wrNext").onclick = () => { keep();
         if (!R.days.length) { W.error = "Bitte mindestens einen Tag wählen."; return render(); }
         if (R.kind === "win" && !(R.to > R.from)) { W.error = "Das Ende des Zeitfensters muss nach dem Beginn liegen."; return render(); }
-        W.error = ""; W.step = "ticket"; render(); };
+        W.error = ""; toTicket(); };
     }
   }
 
