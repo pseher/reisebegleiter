@@ -50,7 +50,7 @@ async function ask(env, model, content) {
     body: JSON.stringify({ model, max_tokens: 2000, system: SYSTEM.replace("{TODAY}", new Date().toISOString().slice(0, 10)),
       tools: [TOOL], tool_choice: { type: "tool", name: "reise" }, messages: [{ role: "user", content }] }),
   });
-  if (!r.ok) throw new Error(`KI: HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`KI: HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const j = await r.json();
   return j.content?.find(c => c.type === "tool_use")?.input || { trips: [] };
 }
@@ -104,19 +104,31 @@ export async function resolveExtracted(env, leg, cache) {
   return r;
 }
 
+const userErr = msg => Object.assign(new Error(msg), { user: true });
+// Nur ein Buchungs-/Teilen-Link von bahn.de (…?vbid=…) ohne weiteren Text: darin steht die Verbindung nicht drin
+export const onlyBahnLink = text => { const t = String(text || "").trim();
+  return /^https?:\/\/(www\.)?(bahn\.de|int\.bahn\.de)\/\S*$/i.test(t) && !/\d{1,2}:\d{2}/.test(t); };
+
 export async function importTrip(env, { text = "", files = [] }) {
   let data;
+  if (!files.length && onlyBahnLink(text))
+    throw userErr("In diesem Link steht die Verbindung selbst nicht drin – die Bahn speichert sie nur auf ihrer Seite. So klappt es: in der DB-App bei der Verbindung „Teilen“ → „Text kopieren“ und hier einfügen, oder einfach einen Screenshot der Reiseübersicht.");
   if (env.MOCK === "1") data = mockExtraction(text);
   else {
-    if (!env.ANTHROPIC_KEY) throw new Error("Import ist auf dem Server noch nicht eingerichtet (ANTHROPIC_KEY fehlt).");
+    if (!env.ANTHROPIC_KEY) { console.log("Import: ANTHROPIC_KEY fehlt"); throw userErr("Das Einlesen ist gerade nicht verfügbar. Bitte die Verbindung über „Von / Nach“ suchen."); }
     const content = [];
     for (const f of files.slice(0, 3)) {
       if (f.type === "application/pdf") content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } });
       else if (/^image\/(png|jpeg|webp|gif)$/.test(f.type)) content.push({ type: "image", source: { type: "base64", media_type: f.type, data: f.data } });
     }
     content.push({ type: "text", text: text ? `Geteilter Text:\n${String(text).slice(0, 6000)}` : "Lies die Reise aus den Anhängen." });
-    data = await ask(env, MODEL(env), content).catch(() => ({ trips: [] }));
-    if (!data.trips?.some(t => t.legs?.length)) data = await ask(env, MODEL_STRONG(env), content);
+    let fail = null;
+    data = await ask(env, MODEL(env), content).catch(e => { fail = e; console.log("Import (schnell):", e.message); return { trips: [] }; });
+    if (!data.trips?.some(t => t.legs?.length)) {
+      const d2 = await ask(env, MODEL_STRONG(env), content).catch(e => { console.log("Import (stark):", e.message); return null; });
+      if (d2) data = d2;
+      else if (fail) throw userErr("Das Einlesen klappt gerade nicht. Bitte gleich noch einmal versuchen – oder die Verbindung über „Von / Nach“ suchen.");
+    }
   }
   const cache = new Map(), trips = [], skipped = [];
   for (const t of (data.trips || []).slice(0, 3)) {

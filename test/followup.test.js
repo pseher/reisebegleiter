@@ -205,3 +205,10 @@ test("Mehrere Meldungen einer Fahrt → eine Mitteilung, die dringende zuerst", 
   const m = bundle([{ title: "🛤️ Gleiswechsel", body: "Jetzt Gleis 5." }, { title: "❌ Anschluss in Leipzig klappt nicht", body: "ICE 1601 fährt schon.", urgent: true }]);
   assert.match(m.title, /klappt nicht/); assert.match(m.body, /Außerdem: Gleiswechsel: Jetzt Gleis 5/); assert.equal(m.urgent, true);
 });
+
+test("Reiner bahn.de-Link (vbid) wird freundlich erklärt statt Fehler", async () => {
+  const { importTrip, onlyBahnLink } = await import("../src/importer.js");
+  assert.ok(onlyBahnLink("https://www.bahn.de/buchung/start?vbid=b17ac62b-7275-4637-97c3-9ea72ec58a25"));
+  assert.ok(!onlyBahnLink("Meine Reise: ICE 507 Berlin Hbf 12:00 → Leipzig 13:10 https://www.bahn.de/buchung/start?vbid=x"));
+  await assert.rejects(importTrip({ MOCK: "1" }, { text: "https://www.bahn.de/buchung/start?vbid=b17ac62b" }), e => e.user && /Screenshot/.test(e.message));
+});
