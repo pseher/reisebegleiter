@@ -396,3 +396,4 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 /* Hinweise: Text oben über die ganze Breite, Knöpfe darunter */
 .banner.hint, .banner.push-ask { flex-wrap: wrap; gap: 8px 10px; }
 .banner.hint > span, .banner.push-ask > span { flex: 1 1 100% !important; }
+.special-note { margin: 12px 2px 4px; } .special-note a { color: var(--accent); }
