@@ -149,3 +149,12 @@ test("Anschluss rechnerisch zu spät (nur geschätzt): ‚wohl nicht zu schaffen
   assert.equal(v.zbLifted, true);
   assert.match(headline(v, t, T0 - 60 * 60e3).title, /wohl nicht zu schaffen/);
 });
+
+test("eigene Umstiegszeit 8, Umstieg genau 8 Min., pünktlich: nicht knapp", () => {
+  const t = trip([], "flex"); t.legs = t.legs.map(l => ({ ...l, minT: 8 }));
+  const legs = t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: new Date(Date.parse(t.legs[0].to.plan) + 8 * 60e3).toISOString() } } : l);
+  const v = evaluate({ ...t, legs }, T0 - 120 * 60e3);
+  assert.equal(v.transfers[0].gap, 8); assert.equal(v.transfers[0].status, "OK");
+  const legs7 = t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: new Date(Date.parse(t.legs[0].to.plan) + 7 * 60e3).toISOString() } } : l);
+  assert.equal(evaluate({ ...t, legs: legs7 }, T0 - 120 * 60e3).transfers[0].status, "RISK");
+});

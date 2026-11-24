@@ -75,7 +75,7 @@ export function evaluate(trip, now = Date.now()) {
     const own = +trip.legs[i].minT || 0;
     const usual = walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform);
     const need = Math.max(2, own, Math.min(usual, planGap));
-    const tightPlan = planGap < Math.max(own, usual) + 3;              // schon im Fahrplan knapp → Ausweichmöglichkeiten bereithalten
+    const tightPlan = own > 0 ? planGap < own : planGap < usual + 3;   // schon im Fahrplan knapp → Ausweichmöglichkeiten bereithalten (mit eigener Umstiegszeit: erst darunter)
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until, a.delay), spare = gap - need;
     let status, reason = "";
     const cancel = a.cancelled || d.cancelled || legs[i].dep.cancelled;
@@ -84,6 +84,8 @@ export function evaluate(trip, now = Date.now()) {
     else if (a.cancelled || d.cancelled || legs[i].dep.cancelled) { status = "LOST"; reason = "cancel"; }
     // rechnerisch nicht zu schaffen: mit echter Ankunftsprognose oder kurz vorher sicher verpasst; nur geschätzt und noch weit weg → gefährdet (kann aufgeholt werden)
     else if (gap < 0 && (until <= 45 || !a.estimated)) { status = "LOST"; reason = "late"; }
+    // Eigene Umstiegszeit eingestellt: genau so viel Zeit ist ausreichend – knapp erst darunter (Puffer nur, wenn der Zug schon verspätet ist)
+    else if (own > 0) { const g2 = a.delay >= 3 ? growth : 0; status = spare < g2 ? "RISK" : a.delay >= 3 && spare < g2 + 2 ? "WATCH" : "OK"; }
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
