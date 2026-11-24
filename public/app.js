@@ -198,7 +198,7 @@ function tiles(cur) {
   const tile = (attr, icon, title, sub, cls = "") => `<button class="tile ${cls}" ${attr}><span class="ti-ic" aria-hidden="true">${icon}</span><b>${title}</b><span>${sub}</span></button>`;
   return `<div class="tiles4">
     ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach")}
-    ${tile("data-regstart", "↻", "Mein Weg", "Schule, Arbeit …")}
+    ${tile("data-regstart", "↻", "Mein Weg", "Regelmäßig überwachen")}
     ${tile("data-tticket", "🎫", "Ticket einfügen", "Foto, PDF, DB-Link")}
     ${sosTrip ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS", `Ich sitze ${vehicleOf(sosTrip.legs[ridingLeg(sosTrip)]).im}`, "sos") : tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt", "quick")}
   </div>`;
@@ -1258,12 +1258,13 @@ function renderWizard() {
     const l0 = W.legs[0], dep = Date.parse(l0.from.plan), depHm = hm(dep), dow = ((new Date(new Date(dep).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" }) + "T12:00:00Z").getUTCDay() + 6) % 7) + 1;
     if (!W.reg) {
       const wk = dow <= 5, quick = wk ? "Mo–Fr" : DOW[dow - 1];
-      $app.innerHTML = `<p class="steps">Deine Fahrt</p><h1>Fährst du das öfter?</h1>
+      // Über „Mein Weg“ gekommen: es ist schon klar, dass es regelmäßig ist – nur noch die Tage
+      $app.innerHTML = `<p class="steps">${W.regIntent ? "Mein Weg" : "Deine Fahrt"}</p><h1>${W.regIntent ? "An welchen Tagen?" : "Fährst du das öfter?"}</h1>
         <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>
-        <button class="btn big-btn" id="regQuick">Ja, ${quick} überwachen</button>
-        <button class="btn sec" id="regNo">Nur dieses Mal</button>
+        <button class="btn big-btn" id="regQuick">${W.regIntent ? `${quick} um ${depHm}` : `Ja, ${quick} überwachen`}</button>
+        ${W.regIntent ? "" : `<button class="btn sec" id="regNo">Nur dieses Mal</button>`}
         <button class="btn quiet" id="regYes">Andere Tage oder Zeitfenster …</button>${back}`;
-      document.getElementById("regNo").onclick = () => { W.reg = null; toTicket(); };
+      document.getElementById("regNo")?.addEventListener("click", () => { W.reg = null; toTicket(); });
       document.getElementById("regQuick").onclick = () => { W.reg = { name: "", days: wk ? [1, 2, 3, 4, 5] : [dow], kind: "fix", from: "", to: "", hol: true }; toTicket(); };
       document.getElementById("regYes").onclick = () => {
         const p = x => String(x).padStart(2, "0"), d = new Date(dep), mins = +depHm.slice(0, 2) * 60 + +depHm.slice(3), a = Math.max(0, Math.floor((mins - 15) / 15) * 15), b = Math.min(23 * 60 + 59, a + 60);
