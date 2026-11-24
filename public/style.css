@@ -336,3 +336,22 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .lead { font-size: 18px; line-height: 1.4; margin: 0 0 18px; }
 .big-btn { min-height: 58px; font-size: 18px; }
 .push-ask { font-size: 15px; }
+/* Startseite als Cockpit */
+.hero.jetzt { display: block; width: 100%; text-align: left; font: inherit; color: var(--ink); cursor: pointer; margin: 6px 0 12px; }
+.jetzt .jk { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; opacity: .9; }
+.jetzt .jt { margin: 4px 0 2px; } .jetzt .jt b { font-size: 34px; line-height: 1.1; } .jetzt .jt span { font-size: 16px; }
+.jetzt .js { font-size: 15px; color: var(--muted); }
+.tiles4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-height: 88px; cursor: pointer; }
+.tile b { font-size: 17px; } .tile span { font-size: 13px; color: var(--muted); }
+.tile .ti-ic { font-size: 22px; line-height: 1; color: var(--accent); margin-bottom: 4px; }
+.tile.sos { background: var(--lost-bg); border-color: var(--lost); } .tile.sos b, .tile.sos .ti-ic, .tile.sos span { color: var(--lost); }
+.tile.quick .ti-ic { color: var(--muted); }
+.sec-row { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.sec-row .link { text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 14px; min-height: 36px; }
+.trips.compact { margin: 0; background: var(--card); border-radius: var(--r); overflow: hidden; }
+.trips.compact li + li { margin-top: 0; border-top: 1px solid var(--line); }
+.trips.compact .crow { border-radius: 0; padding: 12px 14px; min-height: 48px; }
+.rchips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
+.rchip { font: inherit; font-size: 14px; padding: 8px 12px; min-height: 40px; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); cursor: pointer; }
+.rchip.off { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }

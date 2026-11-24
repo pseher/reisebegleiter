@@ -93,7 +93,7 @@ document.addEventListener("visibilitychange", async () => {
 let guard = false, skipPop = false;
 // Aufgeklappte Möglichkeiten/Einstellungen zählen als eigener Schritt: „Zurück“ klappt sie erst zu, statt die App zu verlassen
 const subOpen = () => !!(openCmp || sheetId || document.querySelector("[data-hide]"));
-const atRoot = () => view === "home" && (!openId || (trips.filter(t => t.active !== false).length <= 1 && !ROUTINES.length && !subOpen()));
+const atRoot = () => view === "home" && !openId;
 function syncHistory() {
   if (!atRoot() && !guard) { history.pushState({ rb: 1 }, ""); guard = true; }
   else if (atRoot() && guard) { guard = false; skipPop = true; history.back(); }
@@ -130,8 +130,6 @@ function render0() {
   if (view === "settings") return renderSettings();
   const active = trips.filter(t => t.active !== false);
   if (openId && !active.some(t => t.id === openId)) openId = null;
-  // nur eine Reise und nichts Regelmäßiges: gleich die Reise zeigen
-  if (!openId && active.length === 1 && !ROUTINES.length) openId = active[0].id;
   if (openId) return renderTrip(active.find(t => t.id === openId), active.length > 1);
   renderList(active);
 }
@@ -154,36 +152,69 @@ const route = t => `${esc(t.legs[0].dep.name)} → ${esc(t.legs[t.legs.length - 
 
 // Liste bei mehreren Reisen
 function renderList(active) {
-  if (!active.length && !ROUTINES.length) {
-    $app.innerHTML = `${flashBox()}<h1 class="hero-h">Dein Weg. Ich pass auf.</h1>
-      <p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>
-      <button class="btn big-btn" data-regstart>Arbeits- oder Schulweg einrichten</button>
-      <button class="btn sec" data-go="add">Einzelne Fahrt</button>
-      <button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät? Verbinden</button>`;
-    return bindCommon();
-    return bindCommon();
-  }
-  // Gliederung: Heute (bis morgen früh) · Regelmäßig · Später (eingeklappt, wenn es viele sind)
-  const soon = Date.now() + 18 * 3600e3, today = active.filter(t => Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => !today.includes(t));
-  const item = t => `<li><button data-open="${t.id}">
-      <span class="sdot d-${t.win && !t.win.picked && t.phase === "before" ? "OK" : t.status}"></span>
-      <span class="tr-main"><b>${t.rname ? `<span class="rtag">↻ ${esc(t.rname)}</span> ` : ""}${route(t)}</b><span class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${hm(t.legs[t.legs.length - 1].arr.rt)}</span></span>
+  const fresh = !active.length && !ROUTINES.length;
+  // „Jetzt“: die laufende oder nächste Fahrt der kommenden Stunden
+  const now = Date.now(), cur = active.filter(t => t.phase !== "done" && (t.phase === "enroute" || Date.parse(t.legs[0].dep.rt) - now < 6 * 3600e3))
+    .sort((a, b) => (a.phase === "enroute" ? -1 : 0) - (b.phase === "enroute" ? -1 : 0) || Date.parse(a.legs[0].dep.rt) - Date.parse(b.legs[0].dep.rt))[0];
+  const soon = now + 18 * 3600e3, today = active.filter(t => t !== cur && Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => t !== cur && !today.includes(t));
+  const row = t => `<li><button data-open="${t.id}" class="crow"><span class="sdot d-${t.status}"></span>
+      <span class="tr-main"><b>${hm(t.legs[0].dep.rt)} ${t.rname ? esc(t.rname) : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`}</b>${Date.parse(t.legs[0].dep.plan) > soon ? `<span class="muted small">${day(t.legs[0].dep.plan)}</span>` : ""}</span>
       <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
-  const showLater = LATER_OPEN || later.length <= 2;
-  $app.innerHTML = `${flashBox()}${pushCard()}
-    <h1>${today.length ? "Heute" : "Deine Reisen"}</h1>
-    ${today.length ? `<ul class="trips">${today.map(item).join("")}</ul>` : `<p class="muted small">${ROUTINES.length ? "Heute steht keine Fahrt an. Regelmäßige Fahrten erscheinen hier ca. 3 Std. vor der Abfahrt." : ""}</p>`}
-    ${ROUTINES.length ? `<button class="sec-h sec-toggle" data-rlist aria-expanded="${R_LIST_OPEN}">Regelmäßig · ${ROUTINES.length} <span class="chev">${R_LIST_OPEN ? "▴" : "▾"}</span></button>
-      ${R_LIST_OPEN ? `<div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : ""}` : ""}
-    ${later.length ? `<h3 class="sec-h">Später</h3>${showLater ? `<ul class="trips">${later.map(item).join("")}</ul>` : ""}
-      ${later.length > 2 ? `<button class="btn quiet small-btn" data-later>${LATER_OPEN ? "Weniger zeigen" : `${later.length} Reisen zeigen`}</button>` : ""}` : ""}
-    <button class="btn sec" data-go="add">Fahrt hinzufügen</button>
-    ${ROUTINES.length ? "" : `<button class="btn quiet" data-regstart>Arbeits- oder Schulweg einrichten</button>`}`;
+  const chips = ROUTINES.map(r => `<button class="rchip ${r.paused ? "off" : ""}" data-rgo="${r.id}">↻ ${esc(r.name)} · ${r.paused ? "pausiert" : `${daysText(r.days)} ${r.win ? r.win[0] : r.dep}`}</button>`).join("");
+  $app.innerHTML = `${flashBox()}
+    ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
+    ${cur ? jetztCard(cur) : ""}
+    ${tiles(cur)}
+    ${fresh ? "" : pushCard()}
+    ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
+    ${ROUTINES.length ? `<div class="sec-row"><span>Regelmäßig</span><button class="link" data-rlist>${R_LIST_OPEN ? "Fertig" : "Verwalten ›"}</button></div>
+      ${R_LIST_OPEN ? `<div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>` : `<div class="rchips">${chips}</div>`}` : ""}
+    ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
+      ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
+    ${fresh ? `<button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät? Verbinden</button>` : ""}`;
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
-  $app.querySelector("[data-rlist]")?.addEventListener("click", () => { R_LIST_OPEN = !R_LIST_OPEN; try { localStorage.setItem("rb_rlist", R_LIST_OPEN ? "1" : "0"); } catch {} render(); });
+  $app.querySelector("[data-rlist]")?.addEventListener("click", () => { R_LIST_OPEN = !R_LIST_OPEN; R_OPEN = null; render(); });
+  $app.querySelectorAll("[data-rgo]").forEach(b => b.onclick = () => { R_LIST_OPEN = true; R_OPEN = b.dataset.rgo; render(); document.querySelector(`[data-ropen="${b.dataset.rgo}"]`)?.scrollIntoView({ block: "center" }); });
+  bindTiles(cur);
   bindRoutines();
   bindCommon();
+}
+
+// Die laufende/nächste Fahrt groß – Ampelfarbe, Uhrzeit, Steig/Gleis, ein Satz
+function jetztCard(t) {
+  const n = t.next, lbl = n ? (/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label) : "";
+  const when = t.phase === "enroute" ? "unterwegs" : inMin(t.legs[0].dep.rt);
+  const what = !n ? "" : n.cancelled ? `<span class="late">${esc(lbl)} fällt aus</span>` : `${esc(lbl)}${n.platform ? ` · ${esc(platWord(n, n.platform))}` : ""}`;
+  return `<button class="hero jetzt s-${t.status}" data-open="${t.id}">
+    <div class="jk"><span>${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`} · ${esc(when)}</span><span>${esc(listState(t))}</span></div>
+    ${n ? `<div class="jt"><b>${hm(n.at)}</b> <span>${what}</span></div>` : ""}
+    <div class="js">${esc(t.status === "OK" ? (n?.then && !n.then.lost ? `Umstieg ${cleanStop(n.then.station || "")} klappt · ${n.then.gap} Min.` : t.title) : t.title)}${t.status === "LOST" ? " – tippen für Plan B" : ""}</div></button>`;
+}
+
+// Vier Kacheln: alles, was man starten kann
+function tiles(cur) {
+  const sosTrip = trips.find(t => t.active !== false && sosAvailable(t));
+  const tile = (attr, icon, title, sub, cls = "") => `<button class="tile ${cls}" ${attr}><span class="ti-ic" aria-hidden="true">${icon}</span><b>${title}</b><span>${sub}</span></button>`;
+  return `<div class="tiles4">
+    ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach")}
+    ${tile("data-regstart", "↻", "Mein Weg", "Schule, Arbeit …")}
+    ${tile("data-tticket", "🎫", "Ticket einfügen", "Foto, PDF, DB-Link")}
+    ${sosTrip ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS", `Ich sitze ${vehicleOf(sosTrip.legs[ridingLeg(sosTrip)]).im}`, "sos") : tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt", "quick")}
+  </div>`;
+}
+function bindTiles() {
+  $app.querySelectorAll("[data-tticket]").forEach(b => b.onclick = () => { startWizard(); W.impOpen = true; go("add"); });
+  $app.querySelectorAll("[data-sosopen]").forEach(b => b.addEventListener("click", () => { openId = b.dataset.sos; }, true));
+  $app.querySelectorAll("[data-quick]").forEach(b => b.onclick = quickAway);
+}
+// „Schnell weg von hier“: Start = Standort, ab jetzt, Ziel aus deinen Wegen/Favoriten oder eintippen
+function quickAway() {
+  startWizard(); W.quick = true; W.when = Date.now();
+  if (!navigator.geolocation) { go("add"); return; }
+  go("add");
+  navigator.geolocation.getCurrentPosition(pos => { if (!W?.quick) return; W.rFrom = { eva: "", name: "Mein Standort", area: "genau hier", lat: pos.coords.latitude, lon: pos.coords.longitude, stop: true, here: true }; render(); },
+    () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
 }
 
 // Plan geht nicht mehr: die Empfehlung gleich im roten Kasten – ein Tipp genügt
@@ -220,7 +251,7 @@ function toTicket() {
   W.step = "ticket"; render();
 }
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
-const canRegular = () => !!W && !W.editId && !W.multi && W.legs?.length > 0 && !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name));
+const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name));
 // In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
 const REG = { open: false, name: "", days: [1, 2, 3, 4, 5], from: "", to: "", hol: true, ticket: "dticket", busy: false };
 function regularBox() {
@@ -966,7 +997,7 @@ const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffse
 const placeParam = s => (s.eva ? s.eva : `@${(+s.lat).toFixed(5)},${(+s.lon).toFixed(5)}`);
 function stationField(id, label, val) {
   return val
-    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}${val.stop ? ` <span class="small muted" style="font-weight:400">Haltestelle${val.area ? ` · ${esc(val.area)}` : ""}</span>` : ""}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
+    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}${val.here ? ` <span class="small muted" style="font-weight:400">genau hier</span>` : val.stop ? ` <span class="small muted" style="font-weight:400">Haltestelle${val.area ? ` · ${esc(val.area)}` : ""}</span>` : ""}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
     : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof oder Haltestelle" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}">
       ${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}<ul class="list" id="${id}Res"></ul>`;
 }
@@ -1022,13 +1053,17 @@ function renderWizard() {
   const err = W.error ? `<p class="err">${esc(W.error)}</p>` : "";
 
   if (W.step === "route") {
-    $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : W.regIntent ? "Arbeits- oder Schulweg" : "Neue Fahrt"}</p>
+    // Schnell weg: Ziele, die du schon kennst, zum Antippen
+    const dests = []; if (W.quick) for (const d of [...trips.filter(t => t.active !== false).map(t => t.legs[t.legs.length - 1].arr), ...FAVS.map(f => f.to)])
+      if (d && (d.eva || d.lat != null) && !dests.some(x => plainStop(x.name) === plainStop(d.name)) && dests.length < 6) dests.push({ eva: d.eva || "", name: d.name, lat: d.lat, lon: d.lon });
+    $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : W.quick ? "Schnell weg von hier" : W.regIntent ? "Arbeits- oder Schulweg" : "Neue Fahrt"}</p>
+      ${W.quick ? `<h1>Wohin?</h1>${dests.length ? `<div class="rchips">${dests.map((d, i) => `<button class="rchip" data-qd="${i}">${esc(cleanStop(d.name))}</button>`).join("")}</div>` : ""}` : ""}
       ${!W.editId && FAVS.length ? `<section class="card favs"><button class="fav-head" data-favtoggle aria-expanded="${FAV_OPEN}"><span class="k" style="margin:0">★ Favoriten · ${FAVS.length}</span><span class="chev">${FAV_OPEN ? "▴" : "▾"}</span></button>${!FAV_OPEN ? "" : `<ul class="fav-list">${FAVS.map((f, i) => (i >= 3 && !W.favAll && W.favOpen !== i) ? "" : `<li class="fav-row ${W.favOpen === i ? "open" : ""}"><button data-fav="${i}" aria-expanded="${W.favOpen === i}">
         <span class="fav-time">${esc(f.time)}</span><span class="fav-main"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><span class="fav-sub">${esc(f.trains.join(" → "))}</span></span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>${W.favOpen === i ? `<li class="fav-days-li">${favDays(f)}</li>` : ""}`).join("")}</ul>
         ${FAVS.length > 3 && !W.favAll ? `<button class="link small" data-favall>Alle ${FAVS.length} Favoriten zeigen</button>` : ""}`}
 
 </section>` : ""}
-      ${W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : !W.impOpen ? `<h1>Wohin geht es?</h1>` : `<section class="card import">
+      ${W.quick ? "" : W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : !W.impOpen ? `<h1>Wohin geht es?</h1>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
         <div class="row"><label class="btn" style="margin:4px 0">Foto, Screenshot oder PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
@@ -1041,11 +1076,12 @@ function renderWizard() {
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
       <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
       ${whenPicker("when")}
-      ${W.editId ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
+      ${W.editId || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
       <button class="btn quiet" id="byTrain">Direkt aus der Abfahrtstafel wählen</button>
-      ${W.editId || W.impOpen || W.regIntent ? "" : `<button class="btn quiet" id="impOpen">Ticket schon gebucht? Foto oder Text einfügen …</button>`}${back}`;
+      ${W.editId || W.impOpen || W.regIntent || W.quick ? "" : `<button class="btn quiet" id="impOpen">Ticket schon gebucht? Foto oder Text einfügen …</button>`}${back}`;
     document.getElementById("impOpen")?.addEventListener("click", () => { W.impOpen = true; render(); scrollTo(0, 0); });
+    $app.querySelectorAll("[data-qd]").forEach(b => b.onclick = () => { W.rTo = dests[+b.dataset.qd]; W.when = Date.now(); if (W.rFrom) { W.conns = null; W.step = "conns"; } render(); });
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
       const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); }, true);
