@@ -87,8 +87,9 @@ export function evaluate(trip, now = Date.now()) {
     // Eigene Umstiegszeit eingestellt: genau so viel Zeit ist ausreichend – knapp erst darunter (Puffer nur, wenn der Zug schon verspätet ist)
     // Eigene Umstiegszeit: ab dieser Zeit ist alles gut. Darunter „knapp“ (gelb) – „gefährdet“ (rot) erst, wenn es auch praktisch eng wird.
     else if (own > 0) {
+      // Genau deine Umstiegszeit reicht – auch wenn der Zug verspätet ist (die Verspätung steckt schon in der Prognose)
       const g2 = a.delay >= 3 ? growth : 0, phys = gap - Math.max(2, Math.min(usual, planGap));
-      status = phys < g2 ? "RISK" : gap < own + g2 || (a.delay >= 3 && spare < g2 + 2) ? "WATCH" : "OK";
+      status = gap >= own ? "OK" : phys < g2 ? "RISK" : "WATCH";
     }
     else if (spare < growth) status = "RISK";
     else if (spare < growth + 2) status = "WATCH";
@@ -118,7 +119,8 @@ export function evaluate(trip, now = Date.now()) {
   // DB: aufgehoben bei Ausfall, absehbar verpasstem Anschluss (auch nur geschätzt) oder ≥ 20 Min. Verspätung
   const absehbar = openTransfers.some(t => t.gap < 0);
   const zbLifted = trip.ticket === "spar" && (!!trip.state?.zbAt || (legs.some(isFV) && (!!lostTransfer || absehbar || !!legCancel || realDelay >= 20)));
-  const v = { status, phase: missed != null && phase === "done" ? "enroute" : phase, legs, transfers, current, finalDelay: missed != null ? null : finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null, missed };
+  const zbWhy = !zbLifted ? null : trip.state?.zbAt ? trip.state.zbWhy || null : legCancel ? "Zugausfall" : lostTransfer || absehbar ? "absehbar verpasster Anschluss" : "Verspätung ab 20 Min.";
+  const v = { zbWhy, status, phase: missed != null && phase === "done" ? "enroute" : phase, legs, transfers, current, finalDelay: missed != null ? null : finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null, missed };
   Object.assign(v, headline(v, trip, now));
   v.next = missed != null ? { kind: "missed", label: legs[missed].label, station: legs[missed].dep.name, at: legs[missed].dep.rt, i: missed } : nextStep(v, now);
   return v;
@@ -183,8 +185,8 @@ export function headline(v, trip, now = Date.now()) {
   if (v.legCancel != null) { const l = legs[v.legCancel]; return { title: `${l.label} fällt aus`, sub: `Zwischen ${l.dep.name} und ${l.arr.name}. Deine Möglichkeiten stehen gleich darunter – die empfohlene ist markiert.` }; }
   if (next?.status === "LOST" && next.toMust) return { title: `${vehicle(next.toLeg).fest} ${next.toLabel} in Gefahr`, sub: next.reason === "cancel" ? `${next.toLabel} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
   if (next?.status === "LOST" && now > next.depRt && next.reason !== "cancel") return { title: `Anschluss in ${next.at} verpasst`, sub: `${next.toLabel} ist schon weg. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.` };
-  if (next?.status === "LOST") return { title: "Anschluss nicht zu schaffen", sub: next.reason === "cancel" ? `${next.toLabel} in ${next.at} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
-  if (next?.status === "RISK" && next.gap < 0) return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} wohl nicht zu schaffen` : "Anschluss wohl nicht zu schaffen",
+  if (next?.status === "LOST") return { title: `Anschluss in ${next.at} klappt nicht`, sub: next.reason === "cancel" ? `${next.toLabel} in ${next.at} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
+  if (next?.status === "RISK" && next.gap < 0) return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} klappt wohl nicht` : `Anschluss in ${next.at} klappt wohl nicht`,
     sub: `Nach der aktuellen Verspätung kommst du in ${next.at} ca. ${mins(-next.gap)} nach der Abfahrt von ${next.toLabel} an. Das kann sich noch ändern – deine Möglichkeiten stehen darunter.` };
   if (next?.status === "RISK") return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} gefährdet` : "Anschluss gefährdet", sub: `${xferText(next, `nur ${mins(next.gap)}`)} Ich behalte das im Blick.` };
   if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${xferText(next, `noch ${mins(next.gap)}`)} Ich behalte das im Blick.` };
@@ -231,8 +233,8 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
       const alt = altText(st.alt[k], ref, spar, now < v.legs[0].dep.rt ? v.legs[0].label : v.legs[k].label);
       if ((s.conf === "RISK" || s.conf === "LOST") && s.sent !== s.conf && !(s.conf === "LOST" && t.reason === "cancel" && (st.legC[k] || st.legC[k + 1]))) {
         msgs.push(s.conf === "LOST"
-          ? { title: t.toMust ? `❌ ${vehicle(t.toLeg).fest} ${t.toLabel} nicht mehr erreichbar` : `❌ Anschluss in ${t.at} nicht zu schaffen`, body: `${t.reason === "cancel" ? `${t.toLabel} fällt aus.` : `${t.fromLabel} kommt erst ${hm(t.arrRt)} an, ${t.toLabel} fährt schon ${hm(t.depRt)}.`}${alt || " Ich suche eine andere Verbindung."}${zbNote()}`, tag: tag(`t${k}`), urgent: true }
-          : { title: p.sent === "LOST" ? `↩️ Anschluss in ${t.at} vielleicht doch noch möglich` : t.gap < 0 ? `⚠️ Anschluss in ${t.at} wohl nicht zu schaffen` : t.toMust ? `⚠️ ${vehicle(t.toLeg).fest} ${t.toLabel} gefährdet` : `⚠️ Anschluss in ${t.at} gefährdet`,
+          ? { title: t.toMust ? `❌ ${vehicle(t.toLeg).fest} ${t.toLabel} nicht mehr erreichbar` : `❌ Anschluss in ${t.at} klappt nicht`, body: `${t.reason === "cancel" ? `${t.toLabel} fällt aus.` : `${t.fromLabel} kommt erst ${hm(t.arrRt)} an, ${t.toLabel} fährt schon ${hm(t.depRt)}.`}${alt || " Ich suche eine andere Verbindung."}${zbNote()}`, tag: tag(`t${k}`), urgent: true }
+          : { title: p.sent === "LOST" ? `↩️ Anschluss in ${t.at} vielleicht doch noch möglich` : t.gap < 0 ? `⚠️ Anschluss in ${t.at} klappt wohl nicht` : t.toMust ? `⚠️ ${vehicle(t.toLeg).fest} ${t.toLabel} gefährdet` : `⚠️ Anschluss in ${t.at} gefährdet`,
             body: `${t.gap >= 0 ? `Nur noch ${mins(t.gap)} zum Umsteigen` : `Nach der aktuellen Verspätung ca. ${mins(-t.gap)} zu spät – das kann sich noch ändern`}${t.arrPl && t.depPl ? ` (${platWord(t.fromLeg, t.arrPl)} → ${platWord(t.toLeg, t.depPl)})` : ""}.${alt || " Ich behalte das im Blick."}`, tag: tag(`t${k}`), urgent: true });
         s.sent = s.conf;
       } else if ((s.conf === "OK" || s.conf === "WATCH") && (p.sent === "RISK" || p.sent === "LOST")) {
@@ -271,7 +273,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     st.rem[i] = true;
     const t = v.transfers[i];
     msgs.push(t?.status === "LOST"
-      ? { title: `Gleich ${l.arr.name}`, body: `${t.reason === "cancel" ? `Dein Anschluss ${t.toLabel} fällt aus.` : `Dein Anschluss ${t.toLabel} ist nicht zu schaffen.`} In der App siehst du, wie du weiterkommst.`, tag: tag(`r${i}`) }
+      ? { title: `Gleich ${l.arr.name}`, body: `${t.reason === "cancel" ? `Dein Anschluss ${t.toLabel} fällt aus.` : `Dein Anschluss ${t.toLabel} klappt nicht.`} In der App siehst du, wie du weiterkommst.`, tag: tag(`r${i}`) }
       : t
       ? { title: `Gleich ${l.arr.name} – umsteigen`, body: `Weiter mit ${t.toLabel}${t.depPl ? ` von ${platWord(t.toLeg, t.depPl)}` : ""} um ${hm(t.depRt)} – ${mins(Math.max(0, t.gap))} Zeit.`, tag: tag(`r${i}`) }
       : { title: `Gleich ${l.arr.name}`, body: `Ankunft ca. ${hm(l.arr.rt)}${l.arr.platform ? `, ${platWord(l, l.arr.platform)}` : ""}. Bitte aussteigen.`, tag: tag(`r${i}`) });
@@ -280,7 +282,9 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
   // Zugbindung (nur Sparpreise), einmal
   if (v.zbLifted && !st.zb && lostK < 0 && v.legCancel == null) {
     st.zb = true;
-    msgs.push({ title: "🎫 Zugbindung voraussichtlich aufgehoben", body: `Du kommst voraussichtlich ${v.finalDelay} Min. später an. Nach den DB-Regeln darfst du dann auch einen anderen Zug nehmen. Angaben ohne Gewähr.`, tag: tag("zb") });
+    const late = v.transfers.find(t => t.status !== "DONE" && t.gap < 0), d = v.finalDelay ?? 0;
+    const why = late ? `Dein Anschluss in ${late.at} klappt voraussichtlich nicht.` : d >= 20 ? `Du kommst voraussichtlich ${d} Min. später an.` : "";
+    if (why) msgs.push({ title: "🎫 Zugbindung voraussichtlich aufgehoben", body: `${why} Nach den DB-Regeln darfst du dann auch einen anderen Zug nehmen. Angaben ohne Gewähr.`, tag: tag("zb") });
   }
   return { state: st, msgs: msgs.map(m => ({ ...m, body: m.body.replace(/\.\./g, ".") })) };
 }

@@ -312,6 +312,14 @@ export async function bindLate(env, trip, now, cache) {
   return changed;
 }
 
+// Mehrere Meldungen einer Fahrt aus demselben Durchlauf → eine Mitteilung (die wichtigste oben, der Rest darunter)
+export function bundle(msgs) {
+  if (msgs.length === 1) return msgs[0];
+  const list = [...msgs].sort((x, y) => (y.urgent ? 1 : 0) - (x.urgent ? 1 : 0)), top = list[0];
+  const rest = list.slice(1, 4).map(m => `${m.title.replace(/^\P{L}+/u, "")}: ${m.body}`).join(" ");
+  return { ...top, body: `${top.body} · Außerdem: ${rest}`.slice(0, 600), urgent: list.some(m => m.urgent) };
+}
+
 // Cron: jede Minute
 export async function runMonitor(env, now = Date.now()) {
   // Regelmäßige Fahrten: fällige Reisen anlegen, bevor überwacht wird
@@ -329,7 +337,7 @@ export async function runMonitor(env, now = Date.now()) {
     const { msgs } = await assess(env, t, now, cache);
     if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
-    if (msgs.length) out.set(acc, [...(out.get(acc) || []), ...msgs.slice(0, 4).map(m => ({ ...m, url: `/?trip=${encodeURIComponent(t.id)}` }))]);
+    if (msgs.length) out.set(acc, [...(out.get(acc) || []), { ...bundle(msgs), url: `/?trip=${encodeURIComponent(t.id)}` }]);
   }
   for (const m of rMsgs) { const { acc, ...msg } = m; out.set(acc, [...(out.get(acc) || []), msg]); }
   let sent = 0;
@@ -360,24 +368,30 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
   if ((fromHere || fromSos) && a && a.from !== "start") k = +a.from;
   if (!a?.legs?.length && !a?.cut) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
   const st0 = trip.state || {};
-  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null, missed: st0.missed || null, zbAt: st0.zbAt || null };
+  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null, missed: st0.missed || null, zbAt: st0.zbAt || null, zbWhy: st0.zbWhy || null };
   // Grund für eine aufgehobene Zugbindung merken – nur wenn sie VOR dem Wechsel schon bestand (Störung), nicht durch den Wechsel selbst
-  const zbAt = st0.zbAt || (evaluate(trip, Date.now()).zbLifted ? new Date().toISOString() : null);
-  const origArr = st0.origArr || trip.legs[trip.legs.length - 1].to.plan;   // ursprünglich gebuchte Ankunft merken
+  const ev0 = evaluate(trip, Date.now()), zbAt = st0.zbAt || (ev0.zbLifted ? new Date().toISOString() : null), zbWhy = st0.zbWhy || ev0.zbWhy || null;
+  // ursprünglich gebuchte Ankunft merken – nur bei einer Störung; wer freiwillig wechselt, hat danach einfach einen neuen Plan
+  const disturbed = ev0.status === "RISK" || ev0.status === "LOST" || (ev0.finalDelay ?? 0) >= 10;
+  const origArr = st0.origArr || (disturbed ? trip.legs[trip.legs.length - 1].to.plan : null);
   const fresh = (a.legs?.length ? await resolveConnection(env, a.legs) : []).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
+  // Live-Stand der Möglichkeit mitnehmen: eine bekannte Verspätung bleibt sichtbar, bis die nächste Prüfung läuft
+  const w = a.watch, seed = (a.legs || []).map((_, j) => { const x = w?.legs?.[j];
+    return x && x.live ? { dep: { rt: x.dep, live: true, c: !!x.c, t: w.t }, arr: { rt: x.arr, live: true, c: !!x.c, t: w.t } } : {}; });
+  let shifted = 0;
   const tail = a.until != null ? trip.legs.slice(a.until) : [], tailObs = a.until != null ? (trip.obs || []).slice(a.until) : [];
   if (a.cut) {
     // SOS: im aktuellen Zug bis zum gewählten Halt fahren, dann weiter mit der neuen Verbindung
     const cur = trip.legs[k], b = byEva(a.cut.eva) || {};
     let head = { ...cur, must: false, to: { eva: a.cut.eva, name: a.cut.name, plan: a.cut.plan, platform: a.cut.platform || "", lat: b.lat ?? null, lon: b.lon ?? null } };
-    if (fresh[0] && fresh[0].label.replace(/\s/g, "") === cur.label.replace(/\s/g, "")) head = { ...head, to: fresh.shift().to };   // erst noch im selben Zug weiter
+    if (fresh[0] && fresh[0].label.replace(/\s/g, "") === cur.label.replace(/\s/g, "")) { head = { ...head, to: fresh.shift().to }; shifted = 1; }   // erst noch im selben Zug weiter
     const o = { ...((trip.obs || [])[k] || {}) };
     const dl = o.arr?.rt ? Date.parse(o.arr.rt) - Date.parse(cur.to.plan) : 0;   // Verspätung mitnehmen, bis es eine neue Prognose gibt
     if (!o.dep?.rt && dl > 0) o.dep = { rt: new Date(Date.parse(cur.from.plan) + dl).toISOString(), live: false, t: o.arr.t, est: true };
     delete o.arr;
     trip.legs = [...trip.legs.slice(0, k), head, ...fresh];
-    trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.map(() => ({}))];
+    trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.map((_, j) => seed[j + shifted] || {})];
     keep = k;
   } else if ((a.kind === "stay" || a.stay) && fresh.length) {
     // Im selben Zug weiterfahren: die aktuelle Teilstrecke bis zum neuen Ausstieg verlängern
@@ -388,18 +402,18 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
     const dl = o.arr?.rt ? Date.parse(o.arr.rt) - Date.parse(cur.to.plan) : 0;
     if (!o.dep?.rt && dl > 0) o.dep = { rt: new Date(Date.parse(cur.from.plan) + dl).toISOString(), live: false, t: o.arr.t, est: true };
     delete o.arr;
-    trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.slice(1).map(() => ({}))];
+    trip.obs = [...(trip.obs || []).slice(0, k), o, ...fresh.slice(1).map((_, j) => seed[j + 1] || {})];
     keep = k;
   } else {
     trip.legs = [...trip.legs.slice(0, keep), ...fresh, ...tail];
-    trip.obs = [...(trip.obs || []).slice(0, keep), ...fresh.map(() => ({})), ...tailObs];
+    trip.obs = [...(trip.obs || []).slice(0, keep), ...fresh.map((_, j) => seed[j] || {}), ...tailObs];
   }
   // Meldungsstand nur für die unveränderten Teilstrecken behalten
   // (beim Sitzenbleiben bleibt die Abfahrt der aktuellen Teilstrecke gleich, nur ihre Ankunft ist neu)
   const depKeep = a.kind === "stay" || a.stay || a.cut ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, zbAt, missed: null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, zbAt, zbWhy: zbAt ? zbWhy : null, missed: null };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
@@ -410,7 +424,7 @@ export function undoAdopt(trip) {
   if (!u?.legs?.length || Date.now() - (u.at || 0) > 3 * 3600e3) throw Object.assign(new Error("Hier gibt es nichts mehr zurückzunehmen."), { user: true });
   trip.legs = u.legs; trip.obs = u.obs || [];
   const { undo, ...st } = trip.state;
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: u.legC || {}, pl: u.pl || {}, rem: u.rem || {}, origArr: u.origArr || undefined, missed: u.missed || null, zbAt: u.zbAt || null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: u.legC || {}, pl: u.pl || {}, rem: u.rem || {}, origArr: u.origArr || undefined, missed: u.missed || null, zbAt: u.zbAt || null, zbWhy: u.zbWhy || null };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }

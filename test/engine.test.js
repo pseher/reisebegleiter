@@ -63,7 +63,7 @@ test("Ausfall des Anschlusszugs: sofort eine Meldung, nicht doppelt", () => {
   const now = T0 + 30 * 60e3, r = diff(t, evaluate(t, now), {}, now);
   assert.equal(evaluate(t, now).status, "LOST");
   assert.equal(r.msgs.filter(m => /fällt aus/.test(m.title)).length, 1);
-  assert.equal(r.msgs.filter(m => /nicht zu schaffen/.test(m.title)).length, 0);
+  assert.equal(r.msgs.filter(m => /klappt nicht/.test(m.title)).length, 0);
 });
 
 test("Gleiswechsel beim Einsteigen wird gemeldet, aber nur einmal", () => {
@@ -147,7 +147,7 @@ test("Anschluss rechnerisch zu spät (nur geschätzt): ‚wohl nicht zu schaffen
   const v = evaluate(t, T0 - 60 * 60e3);
   assert.equal(v.status, "RISK");
   assert.equal(v.zbLifted, true);
-  assert.match(headline(v, t, T0 - 60 * 60e3).title, /wohl nicht zu schaffen/);
+  assert.match(headline(v, t, T0 - 60 * 60e3).title, /klappt wohl nicht/);
 });
 
 test("eigene Umstiegszeit 8, Umstieg genau 8 Min., pünktlich: nicht knapp", () => {
@@ -159,4 +159,12 @@ test("eigene Umstiegszeit 8, Umstieg genau 8 Min., pünktlich: nicht knapp", () 
   assert.equal(evaluate({ ...t, legs: legs7 }, T0 - 120 * 60e3).transfers[0].status, "WATCH");
   const legs1 = t.legs.map((l, i) => i === 1 ? { ...l, from: { ...l.from, plan: new Date(Date.parse(t.legs[0].to.plan) + 1 * 60e3).toISOString() } } : l);
   assert.equal(evaluate({ ...t, legs: legs1 }, T0 - 120 * 60e3).transfers[0].status, "RISK");
+});
+
+test("eigene Umstiegszeit genau erreicht – trotz Verspätung nicht ‚knapp‘", () => {
+  const t = trip(arrDelay(9), "flex"); t.legs = t.legs.map(l => ({ ...l, minT: 8 }));   // 17 − 9 = 8 Min. = eigene Zeit
+  const v = evaluate(t, T0 - 30 * 60e3);
+  assert.equal(v.transfers[0].gap, 8); assert.equal(v.transfers[0].status, "OK");
+  const w = evaluate(trip(arrDelay(10), "flex"), T0); const t2 = trip(arrDelay(10), "flex"); t2.legs = t2.legs.map(l => ({ ...l, minT: 8 }));
+  assert.notEqual(evaluate(t2, T0).transfers[0].status, "OK"); assert.ok(w);   // 7 < 8 → nicht mehr OK
 });

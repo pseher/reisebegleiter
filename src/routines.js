@@ -50,8 +50,8 @@ export function offReason(r, date) {
 export function nextRun(r, now = Date.now()) {
   const today = berlinDate(now);
   for (let i = 0; i < 21; i++) {
-    const date = addDays(today, i), at = wallToMs(date, r.dep);
-    if (at < now - 5 * MIN) continue;
+    const date = addDays(today, i), at = wallToMs(date, r.dep), end = r.win_to ? wallToMs(date, r.win_to) : at;
+    if (end < now - 5 * MIN) continue;   // Zeitfenster: läuft es heute noch, zählt es heute
     if (!offReason(r, date)) return { date, at: new Date(at).toISOString() };
   }
   return null;
@@ -103,14 +103,16 @@ export async function refreshWindow(env, t, now, watch) {
   if (gone) {
     const next = list.find(c => Date.parse(c.legs[0].from.plan) > now);
     if (!next) { t.active = false; t.state = { ...t.state, win: { ...w, at: now, list: [] } }; return true; }   // Fenster vorbei, keine Wahl getroffen
+    // die abgefahrene merken: sitzt du doch drin, kannst du mit einem Tipp zu ihr zurück
+    const prev = { legs: t.legs, dep: t.legs[0].from.plan, arr: t.legs[t.legs.length - 1].to.plan, label: t.legs.map(l => l.label).join(" → ") };
     t.legs = await toLegs(env, next, +t.legs[0].minT); t.obs = []; t._legsDirty = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
-    t.state = { ...t.state, tr: [], alt: {}, altAt: {}, rem: {}, legC: {}, pl: {} };
+    t.state = { ...t.state, tr: [], alt: {}, altAt: {}, rem: {}, legC: {}, pl: {}, win: { ...t.state.win, prev } };
   }
   const cur = t.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|"), toName = t.legs[t.legs.length - 1].to.name;
   const opts = list.filter(c => c.legs.map(l => `${l.label}@${Date.parse(l.from.plan)}`).join("|") !== cur && Date.parse(c.legs[0].from.plan) > now).slice(0, 5).map(c => asOption(c, toName));
   if (watch) await watch(opts).catch(() => {});
   for (const o of opts) o.zb = changesFV(t.legs, o.legs);
-  t.state = { ...t.state, win: { ...w, at: now, list: opts } };
+  t.state = { ...t.state, win: { ...w, prev: t.state.win?.prev ?? w.prev, at: now, list: opts } };
   return true;
 }
 
@@ -123,23 +125,25 @@ export async function makeDue(env, now = Date.now(), watch = null) {
     for (const date of [berlinDate(now), berlinDate(now + DAY)]) {
       if ((r.made || []).includes(date) || offReason(r, date)) continue;
       const at = wallToMs(date, r.dep);
-      if (now < at - LEAD || now > at + 5 * MIN) continue;
+      const until = r.win_to ? wallToMs(date, r.win_to) : at + 5 * MIN;   // ein angefangenes Zeitfenster wird trotzdem noch angelegt
+      if (now < at - LEAD || now > until) continue;
       r.made = [...(r.made || []), date].slice(-14);
       await db.update(env, "rb_routines", r.id, { made: r.made });   // zuerst merken: nie doppelt anlegen
       // Hast du für diese Strecke an dem Tag schon selbst eine Reise angelegt? Dann diese nehmen statt einer zweiten
       if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
       const end = r.win_to ? wallToMs(date, r.win_to) : at + 60 * MIN, start = r.win_to ? at : at - 60 * MIN;
-      const own = tripsCache.get(r.account_id).find(t => t.legs?.length && plain(t.legs[0].from.name) === plain(r.tpl[0].from.name) && plain(t.legs[t.legs.length - 1].to.name) === plain(r.tpl[r.tpl.length - 1].to.name)
+      const mine = tripsCache.get(r.account_id), keep = t => (mine.push(t), t);
+      const own = mine.find(t => t.legs?.length && (!t.state?.routine || t.state.routine === r.id) && plain(t.legs[0].from.name) === plain(r.tpl[0].from.name) && plain(t.legs[t.legs.length - 1].to.name) === plain(r.tpl[r.tpl.length - 1].to.name)
         && Date.parse(t.legs[0].from.plan) >= start - 5 * MIN && Date.parse(t.legs[0].from.plan) <= end + 5 * MIN);
       if (own) { if (!own.state?.routine) await db.update(env, "rb_trips", own.id, { state: { ...(own.state || {}), routine: r.id, rname: r.name } }); continue; }
       if (r.win_to) {   // Zeitfenster: erste Fahrt im Fenster überwachen, die übrigen zur Auswahl
-        const list = await windowConns(env, r, date).catch(e => { console.log("Zeitfenster:", e.message); return []; });
+        const list = await windowConns(env, r, date, now - MIN).catch(e => { console.log("Zeitfenster:", e.message); return []; });
         if (!list.length) { msgs.push({ acc: r.account_id, title: `↻ ${r.name}: keine Verbindung`, body: `Zwischen ${r.win_from} und ${r.win_to} habe ich keine Verbindung gefunden. Bitte selbst prüfen.`, tag: `r-${r.id}` }); continue; }
         const legs = await toLegs(env, list[0], r.min_t), toName = legs[legs.length - 1].to.name, opts = list.slice(1, 6).map(c => asOption(c, toName));
         if (watch) await watch(opts, r.min_t).catch(() => {});
-        await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true, ends_at: legs[legs.length - 1].to.plan,
+        keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true, ends_at: legs[legs.length - 1].to.plan,
           state: { routine: r.id, rname: r.name, win: { from: r.win_from, to: r.win_to, date, picked: false, at: now, from0: r.tpl[0].from, to0: r.tpl[r.tpl.length - 1].to,
-            list: opts } } });
+            list: opts } } }));
         continue;
       }
       const hit = await findForDay(env, r, date).catch(e => { console.log("Regelmäßig:", e.message); return null; });
@@ -147,8 +151,8 @@ export async function makeDue(env, now = Date.now(), watch = null) {
       const legs = (await resolveConnection(env, hit.c.legs)).map(({ live, ...l }) => ({ ...l, minT: r.min_t || 0 }));
       const dep = Date.parse(legs[0].from.plan), label = legs.map(l => l.label).join(" → ");
       const note = hit.changed ? `Heute andere Verbindung: ${label}, ab ${hm(dep)} (sonst ${r.dep}).` : null;
-      const trip = await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true,
-        state: { routine: r.id, rname: r.name, ...(note ? { rnote: note } : {}) }, ends_at: legs[legs.length - 1].to.plan });
+      const trip = keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true,
+        state: { routine: r.id, rname: r.name, ...(note ? { rnote: note } : {}) }, ends_at: legs[legs.length - 1].to.plan }));
       if (note) msgs.push({ acc: r.account_id, title: `↻ ${r.name}: Fahrplan geändert`, body: `${note} Ich überwache diese.`, tag: `r-${r.id}`, url: `/?trip=${encodeURIComponent(trip.id)}` });
     }
   }

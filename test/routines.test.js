@@ -88,3 +88,27 @@ test("Zeitfenster: gewählte spätere Fahrt gilt nicht als Verspätung", async (
   assert.ok(v.win.picked);
   assert.ok(!(v.finalDelay >= 3), "keine Verspätung durch die eigene Wahl: " + v.finalDelay);
 });
+
+test("Zeitfenster schon angefangen: wird trotzdem angelegt; verpasst → ‚Ich sitze in der …‘ führt zurück", async () => {
+  const env = { MOCK: "1" };
+  const { refreshWindow } = await import("../src/routines.js");
+  const acc = await db.insert(env, "rb_accounts", { favs: [] });
+  await db.insert(env, "rb_routines", { account_id: acc.id, name: "Spät", days: [2], dep: "10:00", win_from: "10:00", win_to: "13:00",
+    tpl: [{ jid: "", label: "", from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" } }], ticket: "flex", min_t: 0, holidays: true, paused: false, skip: [], made: [] });
+  await makeDue(env, wallToMs("2026-11-24", "10:02"));   // Fenster läuft schon
+  const [t] = await db.tripsOf(env, acc.id);
+  assert.ok(t, "trotz begonnenem Fenster angelegt");
+  const first = t.legs[0].label;
+  await refreshWindow(env, t, wallToMs("2026-11-24", "10:10"));
+  assert.notEqual(t.legs[0].label, first); assert.equal(t.state.win.prev.label.split(" → ")[0], first);
+});
+
+test("Gleiche Strecke zur gleichen Zeit kann man nicht doppelt anlegen", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j;
+  const body = { from: { name: "Berlin Hbf", eva: "8011160" }, to: { name: "Leipzig Hbf", eva: "8010205" }, name: "Arbeit", days: [1, 2, 3, 4, 5], winFrom: "07:00", winTo: "08:00" };
+  assert.equal((await call("/api/routines", A, "POST", body)).s, 201);
+  const r2 = await call("/api/routines", A, "POST", { ...body, name: "Nochmal" });
+  assert.equal(r2.s, 409); assert.match(r2.j.error || JSON.stringify(r2.j), /schon überwacht/);
+});

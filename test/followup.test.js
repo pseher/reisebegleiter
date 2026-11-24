@@ -45,7 +45,7 @@ test("Erinnerung bei verpasstem Anschluss sagt nicht „umsteigen“", () => {
   const t = trip(late(25)), now = T0 + (70 + 25 - 4) * MIN;
   const { msgs } = diff(t, evaluate(t, now), { tr: [{ conf: "LOST", sent: "LOST" }], zb: true }, now);
   const r = msgs.find(m => /^Gleich/.test(m.title));
-  assert.ok(r); assert.doesNotMatch(r.title, /umsteigen/); assert.match(r.body, /nicht zu schaffen/);
+  assert.ok(r); assert.doesNotMatch(r.title, /umsteigen/); assert.match(r.body, /klappt nicht/);
 });
 
 test("Zugbindung wird genau einmal gemeldet, zusammen mit dem Grund", () => {
@@ -198,4 +198,10 @@ test("Verkehrsmittel richtig benannt", async () => {
   assert.equal(vehicle({ mode: "SUBWAY", label: "U7" }).fest, "Feste U-Bahn");
   assert.equal(vehicle({ mode: "HIGHSPEED_RAIL", label: "ICE 707" }).dein, "deinen Zug");
   assert.equal(vehicle({ mode: "SUBURBAN", label: "S 42" }).n, "Zug");
+});
+
+test("Mehrere Meldungen einer Fahrt → eine Mitteilung, die dringende zuerst", async () => {
+  const { bundle } = await import("../src/monitor.js");
+  const m = bundle([{ title: "🛤️ Gleiswechsel", body: "Jetzt Gleis 5." }, { title: "❌ Anschluss in Leipzig klappt nicht", body: "ICE 1601 fährt schon.", urgent: true }]);
+  assert.match(m.title, /klappt nicht/); assert.match(m.body, /Außerdem: Gleiswechsel: Jetzt Gleis 5/); assert.equal(m.urgent, true);
 });

@@ -376,3 +376,14 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .del-chip { color: var(--muted); }
 .btn.sos-big { flex-direction: column; gap: 2px; text-align: center; } .btn.sos-big span { font-size: 14px; font-weight: 500; opacity: .9; }
 .tile b { line-height: 1.2; }
+
+/* Kopf einer Fahrt: Titel volle Breite, Knöpfe darunter (nie aus dem Bild) */
+.trip-head .th-title { overflow-wrap: anywhere; hyphens: auto; margin-bottom: 6px; }
+.trip-head .th-r { display: block; font-size: .55em; font-weight: 600; color: var(--muted, #667); margin-bottom: 2px; }
+.trip-head .th-act { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+.trip-head .th-act .chip { flex: 0 0 auto; }
+/* gewählte Tage gefüllt – auf einen Blick erkennbar */
+.chips.days .chip[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 700; }
+.dlg-in { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 12px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); }
+/* Gefüllte rote Knöpfe: in hell und dunkel dasselbe kräftige Rot – weiße Schrift bleibt lesbar */
+.sos-btn, .btn.danger-fill { background: #b42318 !important; color: #fff !important; }

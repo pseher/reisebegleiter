@@ -54,9 +54,9 @@ function view(trip, now = Date.now()) {
     const replaced = a.from === "start" ? trip.legs : trip.legs.slice(k + 1);
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   const sosV = st.sos && now - st.sos.at < 45 * MIN ? { ...st.sos, list: (st.sos.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs.slice((a.from ?? 0) + 1), a.legs || []) })) } : null;
-  const win = st.win ? { from: st.win.from, to: st.win.to, picked: !!st.win.picked, list: (st.win.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs, a.legs || []) })) } : null;
+  const win = st.win ? { from: st.win.from, to: st.win.to, picked: !!st.win.picked, prev: st.win.prev && Date.parse(st.win.prev.arr) > now ? { dep: st.win.prev.dep, label: st.win.prev.label } : null, list: (st.win.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs, a.legs || []) })) } : null;
   return { id: trip.id, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
-    status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, finalDelay: v.finalDelay, current: v.current,
+    status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, zbWhy: v.zbWhy, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
 }
@@ -350,6 +350,8 @@ async function api(req, env, url) {
     const t = await ownTrip(env, dev, ma[1]);
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({}));
+    const nat = x => x == null || (Number.isInteger(+x) && +x >= 0 && +x < 50);
+    if (ma[2] === "adopt" && (!nat(b.idx) || !nat(b.k))) return fail(400, "Ungültige Auswahl");
     if (ma[2] === "undo") undoAdopt(t);
     else if (b.win) {
       // Zeitfenster: diese Fahrt nehmen → ab jetzt normal überwachen (mit Meldungen)
@@ -371,7 +373,11 @@ async function api(req, env, url) {
   if (mp && (method === "POST" || method === "DELETE")) {
     const t = await ownTrip(env, dev, mp[1]);
     if (!t?.state?.win) return fail(404, "Reise nicht gefunden");
-    t.state = { ...t.state, win: { ...t.state.win, picked: method === "POST", at: method === "POST" ? t.state.win.at : 0 } };
+    const bp = method === "POST" ? await req.json().catch(() => ({})) : {}, pv = t.state.win.prev;
+    if (bp.prev && pv?.legs?.length) {   // „Ich sitze doch in der 07:05“: zurück zur abgefahrenen Fahrt
+      t.legs = pv.legs; t.obs = []; t.ends_at = pv.arr;
+      t.state = { ...t.state, tr: [], alt: {}, altAt: {}, rem: {}, legC: {}, pl: {}, win: { ...t.state.win, prev: null, picked: true, list: [] } };
+    } else t.state = { ...t.state, win: { ...t.state.win, picked: method === "POST", at: method === "POST" ? t.state.win.at : 0 } };
     if (method === "DELETE") { const { refreshWindow } = await import("./routines.js"); await refreshWindow(env, t, Date.now()).catch(() => {}); }
     await db.update(env, "rb_trips", t.id, { state: t.state, legs: t.legs, obs: t.obs || [], active: t.active, ends_at: t.ends_at });
     return json(view(t, Date.now()));
@@ -389,7 +395,10 @@ async function api(req, env, url) {
       const bad = checkLegs(legs); if (bad) return fail(400, bad);
       const minT = +t.legs[0]?.minT || 0;
       t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
-      t.obs = []; t.state = {}; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
+      // Zugehörigkeit zu einer regelmäßigen Fahrt bleibt beim Ändern erhalten (das Zeitfenster ist nach einer festen Wahl erledigt)
+      const st0 = t.state || {}, keepSt = Object.fromEntries(["routine", "rname"].filter(k => st0[k]).map(k => [k, st0[k]]));
+      if (st0.win) keepSt.win = { ...st0.win, picked: true, list: [] };
+      t.obs = []; t.state = keepSt; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
       if (["spar", "flex", "dticket", "bc100"].includes(b.ticket)) t.ticket = b.ticket;
       const now = Date.now(), cache = new Map();
       await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
@@ -419,7 +428,12 @@ async function api(req, env, url) {
     // aus einer angelegten Reise: gleiche Strecke, gleiche Abfahrtszeit, gewählte Tage
     const b = await req.json().catch(() => ({}));
     const days = cleanDays(b.days); if (!days.length) return fail(400, "Bitte mindestens einen Tag wählen.");
-    if ((await db.routinesOf(env, dev.account_id)).length >= 12) return fail(400, "Höchstens 12 regelmäßige Fahrten.");
+    const mineR = await db.routinesOf(env, dev.account_id);
+    if (mineR.length >= 12) return fail(400, "Höchstens 12 regelmäßige Fahrten.");
+    // Gleiche Strecke zur gleichen Zeit gibt es schon? Dann keine zweite (sonst doppelte Mitteilungen)
+    const pn = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
+    const dupOf = (fromN, toN, dep) => mineR.find(r => pn(r.tpl[0].from.name) === pn(fromN) && pn(r.tpl[r.tpl.length - 1].to.name) === pn(toN) && r.dep === dep);
+    const dupMsg = r => `Diese Strecke zu dieser Zeit wird schon überwacht („${r.name}“). Du findest sie unter „Regelmäßige Fahrten“.`;
     if (b.from && b.to) {
       // direkt aus der Verbindungssuche: Start, Ziel, Tage und Zeitfenster
       const hhmm = s => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(s)) ? String(s) : null), wf = hhmm(b.winFrom), wt = hhmm(b.winTo);
@@ -427,6 +441,7 @@ async function api(req, env, url) {
       const pl = s => ({ name: String(s.name || "").slice(0, 80), eva: /^\d{6,9}$/.test(String(s.eva || "")) ? String(s.eva) : "", ...coord(s), ...sid(s) });
       const from = pl(b.from), to = pl(b.to);
       if (!from.name || !to.name || (!from.eva && from.lat == null) || (!to.eva && to.lat == null)) return fail(400, "Start oder Ziel unbekannt.");
+      { const d = dupOf(from.name, to.name, wf); if (d) return fail(409, dupMsg(d)); }
       // aus einer gerade angelegten Reise: deren Tag gilt als erledigt, die Reise gehört dazu
       const t0 = b.tripId ? await ownTrip(env, dev, String(b.tripId)) : null, made = t0 ? [berlinDate(Date.parse(t0.legs[0].from.plan))] : [];
       const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
@@ -437,6 +452,7 @@ async function api(req, env, url) {
     const t = await ownTrip(env, dev, String(b.tripId || ""));
     if (!t) return fail(404, "Reise nicht gefunden");
     const legs = (t.state?.undo?.legs && b.original ? t.state.undo.legs : t.legs), dep0 = Date.parse(legs[0].from.plan);
+    { const d = dupOf(legs[0].from.name, legs[legs.length - 1].to.name, wallTime(dep0)); if (d) return fail(409, dupMsg(d)); }
     const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${legs[legs.length - 1].to.name}`, days, dep: wallTime(dep0),
       tpl: legs.map(({ jid, tid, ...l }) => ({ ...l, jid: "" })), ticket: t.ticket, min_t: +legs[0].minT || 0, holidays: b.holidays !== false, paused: false, skip: [], made: [berlinDate(dep0)] });
     await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
@@ -450,6 +466,9 @@ async function api(req, env, url) {
       // einen Tag aussetzen bzw. wieder fahren; ist die Reise für den Tag schon angelegt, wird sie beendet
       const b = await req.json().catch(() => ({})), date = /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : null;
       if (!date) return fail(400, "Datum fehlt");
+      const real = new Date(date + "T12:00:00Z"), today0 = berlinDate(Date.now());
+      if (isNaN(real) || real.toISOString().slice(0, 10) !== date) return fail(400, "Ungültiges Datum");
+      if (b.on !== false && (date < today0 || Date.parse(date) - Date.parse(today0) > 366 * 864e5)) return fail(400, "Das Datum liegt nicht in der Zukunft.");
       const skip = b.on === false ? (r.skip || []).filter(d => d !== date) : [...new Set([...(r.skip || []), date])].filter(d => d >= berlinDate(Date.now())).slice(-30);
       // wieder fahren: Tag als „noch nicht angelegt“ markieren, damit die Fahrt neu erscheint (falls es sie nicht mehr gibt)
       let made = r.made || [];
