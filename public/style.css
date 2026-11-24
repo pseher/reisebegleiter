@@ -365,3 +365,14 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .tile .cnt { font-style: normal; font-size: 13px; font-weight: 700; color: var(--on-accent); background: var(--accent); border-radius: 999px; padding: 1px 8px; }
 .reg-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--card)); border-radius: 12px; padding: 8px 12px; margin: 4px 0 8px; font-size: 15px; }
 .reg-sum .link { min-height: 36px; }
+/* Eigene Rückfrage (statt Browser-Fenster) */
+.dlg-wrap { position: fixed; inset: 0; z-index: 50; background: rgba(10, 20, 30, .45); display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+@media (min-width: 560px) { .dlg-wrap { align-items: center; } }
+.dlg { width: 100%; max-width: 440px; background: var(--card); color: var(--ink); border-radius: 18px; padding: 20px 18px 16px; }
+.dlg h2 { font-size: 20px; margin: 0 0 8px; } .dlg p { margin: 0 0 14px; color: var(--muted); font-size: 16px; line-height: 1.45; }
+.dlg-btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 10px; }
+.dlg-btns .btn { margin: 0; min-height: 50px; }
+.btn.danger-fill { background: var(--lost); color: #fff; }
+.del-chip { color: var(--muted); }
+.btn.sos-big { flex-direction: column; gap: 2px; text-align: center; } .btn.sos-big span { font-size: 14px; font-weight: 500; opacity: .9; }
+.tile b { line-height: 1.2; }
