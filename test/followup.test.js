@@ -190,3 +190,12 @@ test("Freiwillig späteren Plan gewählt: Zugbindung bleibt bestehen", () => {
   assert.equal(v.zbLifted, false);
   assert.equal(evaluate({ ...trip, state: { ...trip.state, zbAt: T(6, 0) } }, new Date(T(6, 33))).zbLifted, true);
 });
+
+test("Verkehrsmittel richtig benannt", async () => {
+  const { vehicle } = await import("../src/engine.js");
+  assert.equal(vehicle({ mode: "BUS", label: "X10" }).dein, "deinen Bus");
+  assert.equal(vehicle({ label: "Tram M10" }).n, "Tram");
+  assert.equal(vehicle({ mode: "SUBWAY", label: "U7" }).fest, "Feste U-Bahn");
+  assert.equal(vehicle({ mode: "HIGHSPEED_RAIL", label: "ICE 707" }).dein, "deinen Zug");
+  assert.equal(vehicle({ mode: "SUBURBAN", label: "S 42" }).n, "Zug");
+});

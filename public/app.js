@@ -136,12 +136,12 @@ function renderList(active) {
 // Der nächste Schritt – groß und eindeutig
 function nextCard(n, t) {
   if (!n) return "";
-  if (n.kind === "missed") return `<section class="card next"><div class="k">Zug verpasst</div>
+  if (n.kind === "missed") return `<section class="card next"><div class="k">${vehicleOf(t?.legs?.[n.i]).n} verpasst</div>
       <div><b>${esc(n.label)}</b> ab ${esc(cleanStop(n.station))} hast du nicht bekommen.</div>
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
   // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
   const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
-  const word = leg && MODE[leg.mode] ? ({ Bus: "Bus", Tram: "Tram", "U-Bahn": "U-Bahn", Fähre: "Fähre" }[MODE[leg.mode][1]] || "Zug") : "Zug";
+  const word = vehicleOf(leg).n;
   const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 120 * MIN
     ? `<button class="btn sec small-btn miss" data-missed="${t.id}|${n.i}">${word} verpasst / nicht eingestiegen</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
@@ -306,7 +306,7 @@ function sosCard(t) {
   if (sosBusy === t.id) return `<section class="card sos"><div class="k">Andere Wege ab hier</div><p style="margin:0">Ich suche, wo du aussteigen kannst und wie du am schnellsten ans Ziel kommst …</p><div class="spinner"></div></section>`;
   const s = t.sos; if (!s) return "";
   const i = s.info || {}, zb0 = t.ticket === "spar" && !t.zbLifted;
-  const where = i.onTrain ? `Du bist vermutlich in <b>${esc(i.label)}</b>${i.near ? ` bei ${esc(i.near)}` : ""}.` : `Nächster Zug laut Plan: <b>${esc(i.label)}</b>.`;
+  const where = i.onTrain ? `Du bist vermutlich in <b>${esc(i.label)}</b>${i.near ? ` bei ${esc(i.near)}` : ""}.` : `Als Nächstes laut Plan: <b>${esc(i.label)}</b>.`;
   const exits = (s.exits || []).slice(0, 4).map(x => `${esc(x.name)} ${hm(x.arr)}${x.delay >= 3 ? ` <span class="late">+${x.delay}</span>` : ""}`).join(" · ");
   const ci = Math.max(0, t.current), mine = { ...t, legs: t.legs.slice(ci), transfers: t.transfers.slice(ci) };
   const rec = bestIdx(s.list);
@@ -321,7 +321,7 @@ function sosCard(t) {
       <p style="margin:0 0 4px">${where}${i.located ? "" : ` <span class="small muted">(ohne Standort)</span>`}</p>
       ${exits ? `<p class="small muted" style="margin:0">Nächste Halte: ${exits}</p>` : ""}
       <div class="seg-info small"><span></span><button class="link" data-sos="${t.id}">↻ Aktualisieren</button></div></section>
-    <div class="tiles">${plan}${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine andere Verbindung gefunden. Ich behalte deinen Zug im Blick.</p></div>`}</div>`;
+    <div class="tiles">${plan}${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine andere Verbindung gefunden. Ich behalte ${vehicleOf(t.legs[Math.max(0, t.current)]).dein} im Blick.</p></div>`}</div>`;
 }
 
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
@@ -330,7 +330,7 @@ let hereBusy = null;
 function searchSeg(t, cur) {
   const enroute = t.phase === "enroute", ns = nextStop(t);
   const opts = enroute ? [["next", `Ab ${cleanStop(ns.name)}`, "bei Ankunft dort"], ["now", "Ab hier", "sofort"]]
-    : [["start", `Ab ${cleanStop(t.legs[0].dep.name)}`, "geplante Zeit"], ["trip", "Ab hier", "geplante Zeit"], ["now", "Ab hier", "sofort"]];
+    : [["start", `Ab ${cleanStop(t.legs[0].dep.name).replace(/\//g, "/\u200b")}`, "geplante Zeit"], ["trip", "Ab hier", "geplante Zeit"], ["now", "Ab hier", "sofort"]];
   return `<div class="seg" role="group" aria-label="Andere Verbindungen suchen" style="grid-template-columns:repeat(${opts.length},1fr)">${opts.map(([m, a, b]) =>
     `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "trip" || m === "now" ? PIN : ""}${esc(a)}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
 }
@@ -383,6 +383,13 @@ const walkBtn = (a, b) => `<a class="walk" href="${walkUrl(a, b)}" target="_blan
 // Verkehrsmittel vor reine Liniennummern schreiben (auch für ältere Reisen)
 const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"], FERRY: ["Fähre", "Fähre"], SUBWAY: ["U", "U-Bahn"], METRO: ["U", "U-Bahn"] };
 const nice = l => { const m = MODE[l.mode]; return m && /^\d/.test(l.label) ? `${m[0]} ${l.label}` : l.label; };
+// Richtiges Wort fürs Verkehrsmittel (wie im Server): Zug, Bus, Tram, U-Bahn, Fähre
+const vehicleOf = l => { const m = String(l?.mode || ""), lb = String(l?.label || "").trim();
+  if (/FERRY/i.test(m) || /^Fähre\b/i.test(lb)) return { n: "Fähre", fest: "Feste Fähre", dein: "deine Fähre" };
+  if (/TRAM/i.test(m) || /^(Tram|STR)\b/i.test(lb)) return { n: "Tram", fest: "Feste Tram", dein: "deine Tram" };
+  if (/SUBWAY|METRO/i.test(m) || /^U\s?\d/i.test(lb)) return { n: "U-Bahn", fest: "Feste U-Bahn", dein: "deine U-Bahn" };
+  if (/BUS|COACH/i.test(m) || /^(Bus|ALT|AST)\b/i.test(lb)) return { n: "Bus", fest: "Fester Bus", dein: "deinen Bus" };
+  return { n: "Zug", fest: "Fester Zug", dein: "deinen Zug" }; };
 const kindWord = l => (MODE[l.mode] ? (MODE[l.mode][1] === "U-Bahn" ? "Diese U-Bahn" : MODE[l.mode][1] === "Tram" ? "Diese Tram" : MODE[l.mode][1] === "Fähre" ? "Diese Fähre" : "Diesen Bus") : "Diesen Zug");
 
 // Kompakter Verlauf: eine Zeile pro Zug, Umstiege als schmale Zeile, Details auf Antippen
@@ -392,7 +399,7 @@ function timeline(t) {
     const past = Date.parse(l.arr.rt) < Date.now(), open = openLeg === `${t.id}:${i}`;
     rows.push(`<li class="leg-row ${past ? "past" : ""}"><button data-leg="${t.id}:${i}" aria-expanded="${open}">
       <span class="tm">${hm(l.dep.rt)}${lateTag(l.dep.delay)}<br><span class="muted">${hm(l.arr.rt)}${lateTag(l.arr.delay)}</span></span>
-      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">fester Zug</span>` : ""}${l.live ? "" : ` <span class="muted small">nur Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
+      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">${vehicleOf(l).fest.toLowerCase()}</span>` : ""}${l.live ? "" : ` <span class="muted small">nur Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
         <span class="small">${esc(l.dep.name)} → ${esc(l.arr.name)}</span></span>
       <span class="pl small">${esc(platWord(l, l.dep.platform))}</span></button>
       ${open ? `<div class="detail small">
@@ -417,7 +424,7 @@ function transferText(tr) {
   const pl = a && d ? ` · ${esc(a)} → ${esc(d)}` : d ? ` · weiter von ${esc(d)}` : "";
   if (tr.status === "DONE") return `erledigt`;
   if (tr.status === "LOST") return tr.reason === "cancel" ? `<b>Anschluss fällt aus</b>` : `<b>nicht zu schaffen</b>${pl}`;
-  if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>Fester Zug in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;
+  if (tr.toMust && (tr.status === "RISK" || tr.status === "LOST")) return `<b>${vehicleOf(tr.toLeg).fest} in Gefahr:</b> ${tr.gap >= 0 ? `${tr.gap} Min.` : `Ankunft ${-tr.gap} Min. nach Abfahrt`}${pl}`;
   if (tr.status === "RISK" && tr.own && tr.gap >= 0 && tr.gap < tr.own) return `<b>${tr.gap} Min., zu knapp für dich</b>${pl}`;
   if (tr.status === "RISK") return tr.gap < 0 ? `<b>Ankunft ${-tr.gap} Min. nach Abfahrt</b>${pl}` : `<b>nur ${tr.gap} Min.</b>${pl}`;
   if (tr.status === "WATCH") return `<b>${tr.gap} Min., knapp</b>${pl}`;
@@ -700,7 +707,7 @@ function renderWizard() {
       ${whenPicker("when")}
       ${W.editId ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
-      <button class="btn quiet" id="byTrain">Zug direkt aus der Abfahrtstafel wählen</button>${back}`;
+      <button class="btn quiet" id="byTrain">Direkt aus der Abfahrtstafel wählen</button>${back}`;
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
       const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); }, true);
