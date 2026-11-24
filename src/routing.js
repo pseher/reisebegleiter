@@ -51,7 +51,7 @@ export function simplify(data) {
       if (legs.length && walk) legs[legs.length - 1].walk = walk;
       walk = 0;
       legs.push({ mode: l.mode, rail: RAIL.has(l.mode), label: legLabel(l), num: l.tripShortName || "", line: l.routeShortName || "", tripId: l.tripId || "",
-        headsign: l.headsign || "", cancelled: !!l.cancelled,
+        headsign: l.headsign || "", cancelled: !!l.cancelled, live: !!l.realTime,
         from: { ...place(l.from), plan: l.scheduledStartTime || place(l.from).plan, rt: l.startTime },
         to: { ...place(l.to), plan: l.scheduledEndTime || place(l.to).plan, rt: l.endTime } });
     }

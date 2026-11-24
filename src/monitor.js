@@ -138,12 +138,19 @@ export async function watchAlts(env, alts, now, own = 0, cache = new Map()) {
     if (!a.legs?.length || Date.parse(a.depPlan || a.dep) - now > 3 * 3600e3) { a.watch = null; continue; }
     const legs = [];
     for (const l of a.legs) {
-      const r = l.rail ? await resolveLeg(env, l, cache).catch(() => null) : null;
       const dPlan = Date.parse(l.from.plan), aPlan = Date.parse(l.to.plan);
-      const dRt = Date.parse(r?.live?.dep?.rt || l.from.rt || l.from.plan), live = !!r?.jid;
+      let r = l.rail ? await resolveLeg(env, l, cache).catch(() => null) : null;
+      // Bus, Tram, U-Bahn: eigene Echtzeit (Transitous bzw. VBB), ab 2 Std. vor der Abfahrt
+      if (!r?.jid && !l.rail && dPlan - now < 2 * 3600e3 && Date.parse(l.to.plan) > now - 3 * MIN) {
+        const b = await busLive(env, { ...l, tid: l.tid || l.tripId }, now, cache).catch(() => null);
+        if (b?.dep || b?.arr) r = { live: { dep: b.dep && { rt: b.dep.rt, c: b.dep.c, rtKnown: b.dep.live }, arr: b.arr && { rt: b.arr.rt, c: b.arr.c, rtKnown: b.arr.live } } };
+      }
+      const dRt = Date.parse(r?.live?.dep?.rt || l.from.rt || l.from.plan);
+      // „live“ nur mit echter Prognose – sonst wäre „pünktlich“ geraten
+      const live = !!(r?.live?.dep?.rtKnown || r?.live?.arr?.rtKnown) || (!r && !!l.live);
       const dDelay = Math.round((dRt - dPlan) / MIN);
       const aRt = r?.live?.arr?.rt ? Date.parse(r.live.arr.rt) : Math.max(Date.parse(l.to.rt || l.to.plan), aPlan + Math.max(0, dDelay) * MIN);
-      legs.push({ label: l.label, live, liveArr: !!r?.live?.arr?.rtKnown, dep: dRt, arr: aRt, delay: dDelay, arrDelay: Math.round((aRt - aPlan) / MIN),
+      legs.push({ label: l.label, live, liveArr: !!r?.live?.arr?.rtKnown || (!r && !!l.live), dep: dRt, arr: aRt, delay: dDelay, arrDelay: Math.round((aRt - aPlan) / MIN),
         pl: r?.live?.dep?.pl || l.from.track || "", c: !!(l.cancelled || r?.live?.dep?.c || r?.live?.arr?.c) });
     }
     const gaps = legs.slice(1).map((l, i) => Math.round((l.dep - legs[i].arr) / MIN));
@@ -152,7 +159,7 @@ export async function watchAlts(env, alts, now, own = 0, cache = new Map()) {
     const minGap = gaps.length ? Math.min(...gaps) : null, cancelled = legs.some(l => l.c);
     const ok = !cancelled && (minGap == null || minGap >= Math.max(2, Math.min(own || 2, 5)));
     a.watch = { t: now, point, live: legs.some(l => l.live), delay: legs[0].delay, arrDelay: legs[legs.length - 1].arrDelay, cancelled, minGap, ok,
-      legs: legs.map(l => ({ label: l.label, delay: l.delay, c: l.c, live: l.live })) };
+      legs: legs.map(l => ({ label: l.label, delay: l.delay, arrDelay: l.arrDelay, dep: new Date(l.dep).toISOString(), arr: new Date(l.arr).toISOString(), c: l.c, live: l.live })) };
     a.dep = new Date(legs[0].dep).toISOString();
     // Ohne echte Prognose fürs Ziel die bisherige (ggf. höhere) Schätzung nicht unterbieten
     const lastL = legs[legs.length - 1], prevArr = Date.parse(a.arr) || 0;

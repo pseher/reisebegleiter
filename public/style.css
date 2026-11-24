@@ -288,3 +288,6 @@ button.link { padding: 10px 4px; }
 .danger-zone { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--line); }
 .btn.danger { background: transparent; color: var(--lost); border: 1.5px solid var(--lost); }
 .sos-btn { background: var(--lost); color: #fff; }
+/* Echtzeit je Teilstrecke */
+.steps-l .st-t s { display: block; font-size: 12px; line-height: 1.1; }
+.steps-l .badge { font-size: 12px; padding: 0 6px; }

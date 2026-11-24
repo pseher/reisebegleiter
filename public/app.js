@@ -212,8 +212,8 @@ function planBCard(t) {
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
     // Plan ist knapp, aber gerade in Ordnung: ruhig zeigen, dass es Ausweichmöglichkeiten gibt
-    const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && !a.watch.legs.some(l => l.delay >= 3)).length, open = openCmp === `calm:${t.id}`;
-    const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Ich prüfe sie ab 3 Std. vor der Abfahrt live mit.`;
+    const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && a.watch.live && !a.watch.legs.some(l => l.delay >= 3)).length, liveN = tr.alt.filter(a => a.watch?.live).length, open = openCmp === `calm:${t.id}`;
+    const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${!liveN ? "noch ohne Live-Daten" : good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Ich prüfe sie ab 3 Std. vor der Abfahrt live mit.`;
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
       <button class="btn sec small-btn" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
   }
@@ -223,18 +223,30 @@ function planBCard(t) {
 // „S Hohenzollerndamm (Berlin)“ = „Hohenzollerndamm“
 const plainStop = n => cleanStop(n).replace(/^(S\+U|S|U)\s+/i, "").replace(/\s*\([^)]*\)\s*$/, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
 // Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
+// Echtzeit je Teilstrecke: „pünktlich“, „+4 Min.“ oder „fällt aus“ – ohne Prognose nichts behaupten
+function stepLive(x) {
+  if (x.c) return ` <span class="badge bad">fällt aus</span>`;
+  if (!x.live) return x.watched ? ` <span class="muted small">noch ohne Live-Daten</span>` : "";
+  return (x.delay || 0) >= 2 ? ` <span class="badge warn">+${x.delay} Min.</span>` : ` <span class="badge good">pünktlich</span>`;
+}
+const stepTime = (rt, plan, live) => { const d = plan ? Math.round((Date.parse(rt) - Date.parse(plan)) / MIN) : 0;
+  return live && d >= 2 ? `<s class="muted">${hm(plan)}</s> <b class="late">${hm(rt)}</b>` : hm(rt); };
 function stepsHtml(steps) {
-  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${hm(x.dep)}</span><span class="st-b"><b>${esc(x.label)}</b>${x.pl ? ` <span class="muted">${esc(platWord({ label: x.label, mode: x.mode }, x.pl))}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${hm(x.arr)}</span></span></li>
+  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${stepTime(x.dep, x.depPlan, x.live)}</span><span class="st-b"><b>${esc(x.label)}</b>${stepLive(x)}${x.pl ? ` <span class="muted">${esc(platWord({ label: x.label, mode: x.mode }, x.pl))}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${stepTime(x.arr, x.arrPlan, x.live)}</span></span></li>
     ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
       const walk = plainStop(x.to) !== plainStop(steps[i + 1].from) && (x.walk == null || x.walk > 0);
       if (g < 0) return `<span class="late">Umstieg geht nicht – ${-g} Min. zu spät</span>`;
       return `<span class="${g < Math.max(MINT, 3) ? "late" : g < Math.max(MINT, 3) + 3 ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
 }
 // Teilstrecken einer Möglichkeit (MOTIS) mit Echtzeit aus der Beobachtung
-const altSteps = a => (a.legs || []).map((l, i) => { const d = a.watch?.legs?.[i]?.delay || 0, shift = ms => new Date(Date.parse(ms) + Math.max(0, d) * MIN).toISOString();
-  return { label: l.label, mode: l.mode, from: l.from.name, to: l.to.name, pl: l.from.track || "", walk: l.walk || 0, dep: l.from.rt || shift(l.from.plan), arr: l.to.rt || shift(l.to.plan) }; });
+const altSteps = a => (a.legs || []).map((l, i) => { const w = a.watch?.legs?.[i], d = w?.delay || 0, shift = ms => new Date(Date.parse(ms) + Math.max(0, d) * MIN).toISOString();
+  const dep = w?.dep || l.from.rt || shift(l.from.plan), arr = w?.arr || l.to.rt || shift(l.to.plan);
+  const live = w ? !!w.live : !!l.live;
+  return { label: l.label, mode: l.mode, from: l.from.name, to: l.to.name, pl: l.from.track || "", walk: l.walk || 0, dep, arr, depPlan: l.from.plan, arrPlan: l.to.plan,
+    live, watched: !!w, c: !!(w?.c || l.cancelled), delay: Math.round((Date.parse(dep) - Date.parse(l.from.plan)) / MIN) }; });
 // Deine Reise in derselben Form
-const planSteps = t => t.legs.map((l, i) => ({ mode: l.mode, label: nice(l) + (l.dep.cancelled || l.arr.cancelled ? " (fällt aus)" : ""), from: l.dep.name, to: l.arr.name, pl: l.dep.platform, walk: t.transfers[i]?.walk || 0, dep: l.dep.rt, arr: l.arr.rt }));
+const planSteps = t => t.legs.map((l, i) => ({ mode: l.mode, label: nice(l), from: l.dep.name, to: l.arr.name, pl: l.dep.platform, walk: t.transfers[i]?.walk || 0,
+  dep: l.dep.rt, arr: l.arr.rt, depPlan: l.dep.plan, arrPlan: l.arr.plan, live: !!(l.dep.live || l.arr.live), c: !!(l.dep.cancelled || l.arr.cancelled), delay: l.dep.delay || 0 }));
 // „Los 16:51 → Ziel 18:50“ mit Unterschied zu deinem Plan
 function losZiel(dep, arr, refDep, refArr) {
   const dd = refDep ? Math.round((Date.parse(dep) - Date.parse(refDep)) / MIN) : 0, da = refArr ? Math.round((Date.parse(arr) - Date.parse(refArr)) / MIN) : 0;
@@ -269,8 +281,10 @@ function liveBadge(a) {
   if (!w) return `<span class="muted small">nur Fahrplan · live ab 3 Std. vorher</span>`;
   if (w.cancelled) return `<span class="badge bad">fällt aus</span>`;
   if (!w.ok) return `<span class="badge bad">Umstieg geht nicht mehr</span>`;
-  const late = w.legs.filter(l => l.delay >= 3);
-  return late.length ? late.map(l => `<span class="badge warn">${esc(l.label)} +${l.delay}</span>`).join(" ") : `<span class="badge ${w.live ? "good" : ""}">${w.live ? "pünktlich" : "nur Fahrplan"}</span>`;
+  // Einzelne Verspätungen stehen bei den Teilstrecken – hier nur, was am Ende zählt: die Ankunft
+  if (!w.live) return `<span class="muted small">noch ohne Live-Daten</span>`;
+  const ad = w.arrDelay || 0;
+  return ad >= 2 ? `<span class="badge warn">Ankunft ca. ${ad} Min. später als im Fahrplan</span>` : `<span class="badge good">Ankunft pünktlich</span>`;
 }
 
 // ---------- SOS: im Zug, Verspätung angesagt → sofort Ausstiege und Alternativen ----------

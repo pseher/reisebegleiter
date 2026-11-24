@@ -169,3 +169,14 @@ test("Bus → S-Bahn an derselben Station: kein Fehlalarm durch aufgeblähten Fu
   assert.ok(ev.transfers[0].walk <= 4, "Fußweg aus Entfernung: " + ev.transfers[0].walk);
   assert.notEqual(ev.transfers[0].status, "RISK");
 });
+
+test("Alternativen: Bus bekommt Live-Verspätung je Teilstrecke", async () => {
+  const { watchAlts } = await import("../src/monitor.js");
+  const now = Date.UTC(2026, 10, 24, 8, 0), iso = m => new Date(now + m * 60e3).toISOString();
+  const alt = { dep: iso(20), arr: iso(40), legs: [{ label: "Bus 115", mode: "BUS", rail: false, tripId: "x",
+    from: { name: "Elsterplatz", plan: iso(20), lat: 52.47, lon: 13.29 }, to: { name: "Hohenzollerndamm", plan: iso(40), lat: 52.49, lon: 13.30 } }] };
+  await watchAlts({ MOCK: "1" }, [alt], now);
+  assert.equal(alt.watch.legs[0].live, true);
+  assert.equal(alt.watch.legs[0].delay, 2);
+  assert.equal(alt.watch.arrDelay, 2);
+});
