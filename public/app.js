@@ -246,7 +246,7 @@ function routineRow(r) {
       ${r.skip.length ? `<p class="small" style="margin:8px 0 0">Ausgesetzt: ${r.skip.map(d => `<button class="chip" data-runskip="${r.id}|${d}" title="Wieder fahren">${dateWord(d)} ✕</button>`).join(" ")}</p>` : ""}
       <div class="rbtns"><button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren"}</button>
         <button class="btn quiet small-btn" data-rname="${r.id}">Umbenennen</button></div>
-      <button class="btn quiet small-btn danger-t" data-rdel="${r.id}">Nicht mehr regelmäßig überwachen</button></div>` : ""}</div>`;
+      <button class="btn danger small-btn" data-rdel="${r.id}">Regelmäßige Überwachung beenden</button></div>` : ""}</div>`;
 }
 async function rCall(path, opts) { try { const v = await api(path, opts); return v; } catch (e) { alert(e.message); return null; } }
 async function reloadRoutines() { ROUTINES = await api("/api/routines").catch(() => ROUTINES); render(); }
@@ -268,14 +268,22 @@ function bindRoutines() {
   $app.querySelectorAll("[data-runskip]").forEach(b => b.onclick = async () => { const [id, date] = b.dataset.runskip.split("|");
     await rCall(`/api/routines/${id}/skip`, { method: "POST", body: { date, on: false } }); reloadRoutines(); });
   $app.querySelectorAll("[data-rdel]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rdel);
-    if (!confirm(`„${r.name}“ nicht mehr regelmäßig überwachen?\n\nSchon angelegte Fahrten bleiben, bis sie vorbei sind.`)) return;
-    await rCall(`/api/routines/${r.id}`, { method: "DELETE" }); R_OPEN = null; reloadRoutines(); });
+    if (!confirm(`Regelmäßige Überwachung „${r.name}“ beenden?\n\nEs werden keine neuen Fahrten mehr angelegt. Schon angelegte Fahrten bleiben, bis sie vorbei sind.`)) return;
+    await rCall(`/api/routines/${r.id}`, { method: "DELETE" }); R_OPEN = null; await loadTrips().catch(() => {}); reloadRoutines(); });
 }
 // In den Einstellungen einer Reise: „Regelmäßig überwachen“
 const RF = { days: [1, 2, 3, 4, 5], name: "", hol: true };
 function routineForm(t) {
-  if (t.routine) { const r = ROUTINES.find(x => x.id === t.routine);
-    return `<p class="small" style="margin:12px 0 0">↻ Gehört zu <b>${esc(t.rname || r?.name || "einer regelmäßigen Fahrt")}</b>${r ? ` (${daysText(r.days)} · ${esc(r.dep)})` : ""}. Ändern auf der Startseite unter „Regelmäßig“.</p>`; }
+  const r = t.routine && ROUTINES.find(x => x.id === t.routine);
+  if (r) {
+    const date = new Date(t.legs[0].dep.plan).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }), dw = dateWord(date);
+    return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig: ${esc(r.name)}</p>
+      <p class="small muted" style="margin:0 0 6px">${daysText(r.days)} · ${r.win ? `${esc(r.win[0])}–${esc(r.win[1])}` : esc(r.dep)} · ${r.paused ? "pausiert" : "wird überwacht"}</p>
+      ${t.phase === "before" ? `<button class="btn sec small-btn" data-rskip="${r.id}|${date}">${dw === "heute" || dw === "morgen" ? `${dw[0].toUpperCase()}${dw.slice(1)}` : `Am ${dw}`} nicht fahren</button>` : ""}
+      <button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren (z. B. Urlaub)"}</button>
+      <button class="btn danger small-btn" data-rstop="${r.id}">Regelmäßige Überwachung beenden</button></div>`;
+  }
+  if (t.routine) return "";
   if (t.phase === "done") return "";
   return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig überwachen</p>
     <p class="small muted" style="margin:0 0 6px">Z. B. für den Weg zur Arbeit: An jedem Fahrtag lege ich diese Verbindung ca. 3 Std. vorher an und überwache sie.</p>
@@ -286,6 +294,11 @@ function routineForm(t) {
 }
 function bindRoutineForm(t) {
   const $ = id => document.getElementById(id);
+  bindRoutines();
+  $app.querySelectorAll("[data-rstop]").forEach(b => b.onclick = async () => { const r = ROUTINES.find(x => x.id === b.dataset.rstop);
+    if (!confirm(`Regelmäßige Überwachung „${r.name}“ beenden?\n\nEs werden keine neuen Fahrten mehr angelegt. Diese Fahrt bleibt, bis sie vorbei ist – du kannst sie unten auch beenden.`)) return;
+    await rCall(`/api/routines/${r.id}`, { method: "DELETE" }); flash = `„${r.name}“ wird nicht mehr regelmäßig überwacht.`;
+    ROUTINES = await api("/api/routines").catch(() => ROUTINES); await loadTrips().catch(() => {}); render(); });
   $("rfName")?.addEventListener("input", e => { RF.name = e.target.value; });
   $app.querySelectorAll("[data-rfd]").forEach(b => b.onclick = () => { const d = +b.dataset.rfd; RF.days = RF.days.includes(d) ? RF.days.filter(x => x !== d) : [...RF.days, d].sort(); render(); });
   $("rfHol")?.addEventListener("change", e => { RF.hol = e.target.checked; });

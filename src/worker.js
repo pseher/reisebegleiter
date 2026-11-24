@@ -466,7 +466,18 @@ async function api(req, env, url) {
       await db.update(env, "rb_routines", r.id, patch);
       return json(routineView({ ...r, ...patch }));
     }
-    if (method === "DELETE") { await db.remove(env, "rb_routines", r.id); return json({ ok: true }); }   // bereits angelegte Reisen bleiben
+    if (method === "DELETE") {
+      // Überwachung beenden: keine neuen Fahrten mehr. Schon angelegte bleiben als normale Reisen (ohne Verweis), auf Wunsch ganz weg.
+      const b = await req.json().catch(() => ({}));
+      await db.remove(env, "rb_routines", r.id);
+      for (const t of await db.tripsOf(env, dev.account_id)) {
+        if (t.state?.routine !== r.id) continue;
+        if (b.endTrips) { await db.remove(env, "rb_trips", t.id); continue; }
+        const { routine, rname, rnote, win, ...st } = t.state;
+        await db.update(env, "rb_trips", t.id, { state: { ...st, ...(win ? { win: { ...win, picked: true, list: [] } } : {}) } });
+      }
+      return json({ ok: true });
+    }
   }
 
   // ---------- Geräte verbinden (ohne Anmeldung): Code auf dem einen Gerät zeigen, auf dem anderen eingeben ----------
