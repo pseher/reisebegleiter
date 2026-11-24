@@ -1296,28 +1296,32 @@ function renderWizard() {
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${keepInfo() ? `zum ${esc(keepInfo().label)} um ${hm(keepInfo().dep)}` : `ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}`}</p>
       ${keepPicker()}
-      ${err}${W.conns && (keepInfo() ? W.conns.length : W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      ${err}${W.conns && (keepInfo() ? true : W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
       ${W.conns && !W.editId ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
         ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
-      <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
-      ${W.conns?.length ? `${keepInfo() ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}${W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL}` : ""}${back}`;
+      <div>${!W.conns ? `<div class="spinner"></div>` : keepInfo() && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(keepInfo().label)} um ${hm(keepInfo().dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : connList(W.conns)}</div>
+      ${W.conns && (W.conns.length || keepInfo()) ? `${keepInfo() && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : keepInfo() && !W.conns.length ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}${W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL}` : ""}${back}`;
     const K = keepInfo();
-    if (!W.conns) api(K ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
+    if (!W.conns) api(K && W.depMin ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.depMin).toISOString())}`
+      : K ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
       : `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
-      .then(c => { if (K) { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
+      .then(c => { if (K && W.depMin) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) >= W.depMin).slice(0, 4);   // spätere, die den festen Zug noch erreichen
+        else if (K) { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
           c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max).slice(-4); }
         W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     // eine Stunde früher suchen (nicht vor jetzt)
     const ec = document.getElementById("earlierC");
     if (ec && K) ec.onclick = () => { const a = Math.min(...W.conns.map(c => Date.parse(c.legs[c.legs.length - 1].to.plan))), d = Math.min(...W.conns.map(c => Date.parse(c.legs[0].from.plan)));
-      W.arrBy = (Number.isFinite(a) ? a : K.latest) - MIN; W.depMax = Number.isFinite(d) ? d - MIN : null; W.conns = null; render(); };
+      if (Number.isFinite(d)) { W.arrBy = a - MIN; W.depMax = d - MIN; } else { W.arrBy = null; W.depMax = W.depMin ? W.depMin - MIN : null; }
+      W.depMin = null; W.conns = null; render(); };
     else if (ec) ec.onclick = () => { const first = W.conns[0] ? Date.parse(W.conns[0].legs[0].from.plan) : W.when; W.when = Math.max(Date.now(), Math.min(W.when, first) - 60 * MIN); W.conns = null; render(); };
     document.getElementById("bufC")?.addEventListener("click", () => { W.buf = !W.buf; W.conns = null; render(); });
     const lc = document.getElementById("laterC");
-    if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
+    if (lc && K) lc.onclick = () => { const d = Math.max(...W.conns.map(c => Date.parse(c.legs[0].from.plan))); W.depMin = (Number.isFinite(d) ? d : Date.parse(W.ref.dep)) + MIN; W.arrBy = null; W.depMax = null; W.conns = null; render(); };
+    else if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
     document.getElementById("otherTime")?.addEventListener("click", () => { W.step = "route"; W.conns = null; render(); });
-    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; W.keep = v === "" ? null : +v; W.arrBy = null; W.depMax = null; W.conns = null; render(); });
+    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; W.keep = v === "" ? null : +v; W.arrBy = null; W.depMax = null; W.depMin = null; W.conns = null; render(); });
     document.getElementById("otherRoute")?.addEventListener("click", () => { W.step = "route"; W.when = Math.max(Date.now(), Date.parse(W.ref.dep)); W.conns = null; render(); });
   }
 
