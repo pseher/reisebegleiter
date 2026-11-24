@@ -1033,8 +1033,10 @@ async function startEdit(t) {
   const first = t.legs[0].dep, last = t.legs[t.legs.length - 1].arr;
   const st = async s => s.eva ? { eva: s.eva, name: s.name } : s.lat != null ? { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
   const [rFrom, rTo] = await Promise.all([st(first), st(last)]);
-  W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan)), conns: null,
-    editId: t.id, editTicket: t.ticket, minT: t.minT || 0 };
+  // Meist will man nur ein, zwei Busse früher fahren: gleich die Verbindungen ab ca. 40 Min. vor der bisherigen Abfahrt zeigen
+  const ok = rFrom && rTo;
+  W = { step: ok ? "conns" : "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan) - 40 * MIN), conns: null,
+    editId: t.id, editTicket: t.ticket, minT: t.minT || 0, ref: { dep: first.plan, arr: last.plan, trains: t.legs.map(lineKey).join(">") } };
   go("add");
 }
 function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
@@ -1131,14 +1133,21 @@ function nextAt(time) { const [h, m] = time.split(":").map(Number), d = new Date
 const sameTrains = (c, fav) => fav && c.legs.map(l => l.label.replace(/\s/g, "")).join(">") === fav.trains.map(x => x.replace(/\s/g, "")).join(">")
   && Math.abs((Date.parse(c.legs[0].from.plan) - new Date(c.legs[0].from.plan).setHours(...fav.time.split(":").map(Number), 0, 0)) / MIN) <= 5;
 
+// gleiche Fahrt wie die bisherige Reise? (gleiche Linien, gleiche Abfahrt)
+const lineKey = l => String(l.label || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
+const isRef = (c, R) => c.legs.map(lineKey).join(">") === R.trains && Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(R.dep)) <= MIN;
 function connList(list) {
   if (!list.length) return `<p class="muted">Keine Verbindung gefunden.</p><button class="btn sec" id="otherTime">Andere Zeit wählen</button>`;
   return `<ul class="list">${list.map((c, i) => {
     const late = Math.round((Date.parse(c.legs[0].from.rt || c.dep) - Date.parse(c.legs[0].from.plan)) / MIN), mine = sameTrains(c, W?.fav);
-    return `<li><button data-c="${i}" class="${mine ? "fav-hit" : ""}">${mine ? `<span class="small fav-tag">★ Deine übliche Verbindung</span>` : ""}<div class="train" style="grid-template-columns:1fr auto">
+    const R = W?.editId && W.ref, cur = R && isRef(c, R);
+    const vs = R && !cur ? (() => { const dd = Math.round((Date.parse(c.legs[0].from.plan) - Date.parse(R.dep)) / MIN), da = Math.round((Date.parse(c.legs[c.legs.length - 1].to.plan) - Date.parse(R.arr)) / MIN);
+      return [Math.abs(dd) < 1 ? "gleiche Abfahrt" : dd < 0 ? `<b class="ok-t">${fmtSpan(-dd)} früher los</b>` : `${fmtSpan(dd)} später los`, Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `${fmtSpan(-da)} früher am Ziel` : `${fmtSpan(da)} später am Ziel`].join(" · "); })() : "";
+    return `<li><button data-c="${i}" class="${mine || cur ? "fav-hit" : ""}">${cur ? `<span class="small fav-tag">● Deine bisherige Fahrt</span>` : mine ? `<span class="small fav-tag">★ Deine übliche Verbindung</span>` : ""}<div class="train" style="grid-template-columns:1fr auto">
       <span class="t">${hm(c.legs[0].from.rt || c.legs[0].from.plan)} → ${hm(c.legs[c.legs.length - 1].to.rt || c.legs[c.legs.length - 1].to.plan)}</span>
       <span class="pl">${dur(c.minutes)}</span>
       <span class="d" style="grid-column:1/3">${c.transfers ? `${c.transfers} Umstieg${c.transfers > 1 ? "e" : ""} · ` : "direkt · "}${c.legs.map(l => esc(l.label)).join(" → ")}${c.legs.some(l => l.cancelled) ? ` <span class="late">fällt aus</span>` : ""}</span>
+      ${vs ? `<span class="small" style="grid-column:1/3">${vs}</span>` : ""}
       ${late >= 2 ? `<span class="small late" style="grid-column:1/3">${late} Min. später (geplant ${hm(c.legs[0].from.plan)})</span>` : ""}
       ${(() => { const own = W?.editId ? W.minT : MINT, bad = c.legs.slice(1).map((l, k) => ({ at: c.legs[k].to.name, g: Math.round((Date.parse(l.from.rt || l.from.plan) - Date.parse(c.legs[k].to.rt || c.legs[k].to.plan)) / MIN) }))
         .filter(x => x.g < Math.max(own, 2)).sort((a, b) => a.g - b.g)[0];
@@ -1265,10 +1274,11 @@ function renderWizard() {
   else if (W.step === "conns") {
     $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}</p>
       ${err}${W.conns && W.when > Date.now() + 5 * MIN ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
-      ${W.conns ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
+      ${W.editId ? `<p class="small muted" style="margin:0 2px 8px">Gleiche Strecke – tippe eine frühere oder spätere Fahrt an. Ticket und Umstiegszeit bleiben.</p>` : ""}
+      ${W.conns && !W.editId ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
         ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
       <div>${W.conns ? connList(W.conns) : `<div class="spinner"></div>`}</div>
-      ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>${SPECIAL}` : ""}${back}`;
+      ${W.conns?.length ? `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>${W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL}` : ""}${back}`;
     if (!W.conns) api(`/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
       .then(c => { W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
     // eine Stunde früher suchen (nicht vor jetzt)
@@ -1279,6 +1289,7 @@ function renderWizard() {
     if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
     document.getElementById("otherTime")?.addEventListener("click", () => { W.step = "route"; W.conns = null; render(); });
+    document.getElementById("otherRoute")?.addEventListener("click", () => { W.step = "route"; W.when = Math.max(Date.now(), Date.parse(W.ref.dep)); W.conns = null; render(); });
   }
 
   else if (W.step === "pickTrip") {
