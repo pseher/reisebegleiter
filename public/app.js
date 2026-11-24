@@ -141,9 +141,8 @@ function nextCard(n, t) {
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
   // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
   const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
-  const word = vehicleOf(leg).n;
   const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 120 * MIN
-    ? `<button class="btn sec small-btn miss" data-missed="${t.id}|${n.i}">${word} verpasst / nicht eingestiegen</button>` : "";
+    ? `<button class="btn sec small-btn miss" data-missed="${t.id}|${n.i}">Nicht eingestiegen – neu suchen</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b>. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
@@ -295,13 +294,21 @@ function liveBadge(a) {
 
 // ---------- SOS: im Zug, Verspätung angesagt → sofort Ausstiege und Alternativen ----------
 let sosBusy = null;
-// Verspätungs-Knopf: rot nur, wenn wirklich Gefahr besteht – sonst zurückhaltend
+// „Ich sitze im …“-Knopf: rot nur, wenn wirklich Gefahr besteht – sonst zurückhaltend
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
   const urgent = t.status === "RISK" || t.status === "LOST";
-  return `<button class="btn ${urgent ? "sos-btn" : "sec"}" data-sos="${t.id}">Verspätung? Andere Wege zeigen</button>`;
+  return `<button class="btn ${urgent ? "sos-btn" : "sec"}" data-sos="${t.id}">Ich sitze ${vehicleOf(t.legs[ridingLeg(t)]).im} – andere Wege</button>`;
 }
-const sosAvailable = t => t.phase === "enroute" || (t.phase === "before" && Date.parse(t.legs[0].dep.rt) - Date.now() < 60 * MIN);
+// In welcher Fahrt sitzt du gerade? (auch: Zug steht mit Verspätung noch am Startbahnhof) – sonst -1
+function ridingLeg(t) {
+  const now = Date.now(), i = t.legs.findIndex(l => now >= Date.parse(l.dep.rt) - MIN && now < Date.parse(l.arr.rt));
+  if (i >= 0) return i;
+  const f = t.legs[0];
+  return t.phase === "before" && now >= Date.parse(f.dep.plan) && f.dep.delay >= 3 ? 0 : -1;
+}
+// Nur sinnvoll, wenn du drin sitzt und danach noch umsteigst – auf der letzten Fahrt direkt zum Ziel bringt Aussteigen nichts
+const sosAvailable = t => { const i = ridingLeg(t); return i >= 0 && i < t.legs.length - 1; };
 function sosCard(t) {
   if (sosBusy === t.id) return `<section class="card sos"><div class="k">Andere Wege ab hier</div><p style="margin:0">Ich suche, wo du aussteigen kannst und wie du am schnellsten ans Ziel kommst …</p><div class="spinner"></div></section>`;
   const s = t.sos; if (!s) return "";
@@ -385,11 +392,11 @@ const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"
 const nice = l => { const m = MODE[l.mode]; return m && /^\d/.test(l.label) ? `${m[0]} ${l.label}` : l.label; };
 // Richtiges Wort fürs Verkehrsmittel (wie im Server): Zug, Bus, Tram, U-Bahn, Fähre
 const vehicleOf = l => { const m = String(l?.mode || ""), lb = String(l?.label || "").trim();
-  if (/FERRY/i.test(m) || /^Fähre\b/i.test(lb)) return { n: "Fähre", fest: "Feste Fähre", dein: "deine Fähre" };
-  if (/TRAM/i.test(m) || /^(Tram|STR)\b/i.test(lb)) return { n: "Tram", fest: "Feste Tram", dein: "deine Tram" };
-  if (/SUBWAY|METRO/i.test(m) || /^U\s?\d/i.test(lb)) return { n: "U-Bahn", fest: "Feste U-Bahn", dein: "deine U-Bahn" };
-  if (/BUS|COACH/i.test(m) || /^(Bus|ALT|AST)\b/i.test(lb)) return { n: "Bus", fest: "Fester Bus", dein: "deinen Bus" };
-  return { n: "Zug", fest: "Fester Zug", dein: "deinen Zug" }; };
+  if (/FERRY/i.test(m) || /^Fähre\b/i.test(lb)) return { n: "Fähre", fest: "Feste Fähre", dein: "deine Fähre", im: "auf der Fähre" };
+  if (/TRAM/i.test(m) || /^(Tram|STR)\b/i.test(lb)) return { n: "Tram", fest: "Feste Tram", dein: "deine Tram", im: "in der Tram" };
+  if (/SUBWAY|METRO/i.test(m) || /^U\s?\d/i.test(lb)) return { n: "U-Bahn", fest: "Feste U-Bahn", dein: "deine U-Bahn", im: "in der U-Bahn" };
+  if (/BUS|COACH/i.test(m) || /^(Bus|ALT|AST)\b/i.test(lb)) return { n: "Bus", fest: "Fester Bus", dein: "deinen Bus", im: "im Bus" };
+  return { n: "Zug", fest: "Fester Zug", dein: "deinen Zug", im: "im Zug" }; };
 const kindWord = l => (MODE[l.mode] ? (MODE[l.mode][1] === "U-Bahn" ? "Diese U-Bahn" : MODE[l.mode][1] === "Tram" ? "Diese Tram" : MODE[l.mode][1] === "Fähre" ? "Diese Fähre" : "Diesen Bus") : "Diesen Zug");
 
 // Kompakter Verlauf: eine Zeile pro Zug, Umstiege als schmale Zeile, Details auf Antippen
@@ -515,7 +522,7 @@ function bindCommon() {
   });
   $app.querySelectorAll("[data-missed]").forEach(b => b.onclick = async () => {
     const [id, i] = b.dataset.missed.split("|");
-    if (!b.closest(".seg-info") && !confirm("Verpasst bzw. nicht eingestiegen?\n\nIch suche dir sofort die nächsten Verbindungen ab dieser Haltestelle.")) return;
+    if (!b.closest(".seg-info") && !confirm("Nicht eingestiegen?\n\nIch suche dir sofort die nächsten Verbindungen ab deiner Einstiegs-Haltestelle.")) return;
     hereBusy = id; render();
     try { const v = await api(`/api/trips/${id}/missed`, { method: "POST", body: { i: +i } }); trips = trips.map(x => (x.id === id ? v : x)); } catch (e) { alert(e.message); }
     hereBusy = null; render(); scrollTo(0, 0);
