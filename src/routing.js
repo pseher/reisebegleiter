@@ -127,8 +127,9 @@ export async function resolveLeg(env, l, cache = new Map()) {
     to: { eva: "", name: l.to.name, plan: l.to.plan, platform: l.to.track || "", lat: l.to.lat, lon: l.to.lon, stopId: l.to.stopId || "" } };
   if (!l.rail) return base;
   const f = l.from.eva ? byEva(l.from.eva) : nearest(l.from.lat, l.from.lon), t = l.to.eva ? byEva(l.to.eva) : nearest(l.to.lat, l.to.lon);
-  if (!f || !t) return base;
-  base.from.eva = f.eva; base.to.eva = t.eva;
+  if (!f) return base;
+  base.from.eva = f.eva; if (t) base.to.eva = t.eva;
+  // Ziel im Ausland (z. B. Wien, Prag): kein DB-Bahnhof – den Zug trotzdem an der Abfahrt erkennen (Nummer/Name)
   const dep = Date.parse(l.from.plan), list = await board(env, "dep", f.eva, isoBerlin(dep - 5 * MIN), { maxVia: 40, cache });
   const digits = String(l.num).replace(/\D/g, "");
   const scored = list.filter(e => Math.abs(Date.parse(e.plan) - dep) <= 2 * MIN).map(e => {
@@ -136,17 +137,18 @@ export async function resolveLeg(env, l, cache = new Map()) {
     if (digits && String(e.num) === digits) s += 5;
     if (key(e.label) === key(l.label)) s += 4;
     if (l.line && (key(e.line) === key(l.line) || key(e.label) === key(l.line))) s += 3;
-    if (e.via.some(v => v.eva === t.eva) || e.direction.some(d => d.eva === t.eva)) s += 2;
+    if (t && (e.via.some(v => v.eva === t.eva) || e.direction.some(d => d.eva === t.eva))) s += 2;
     return { e, s };
-  }).filter(x => x.s >= 2).sort((a, b) => b.s - a.s);
+  }).filter(x => x.s >= (t ? 2 : 4)).sort((a, b) => b.s - a.s);
   const e = scored[0]?.e;
   if (!e) return base;
-  const arr = await findJourney(env, "arr", t.eva, e.jid, Date.parse(l.to.plan), { windows: 2, cache, label: e.label, after: dep }).catch(() => null);
+  const arr = t ? await findJourney(env, "arr", t.eva, e.jid, Date.parse(l.to.plan), { windows: 2, cache, label: e.label, after: dep }).catch(() => null) : null;
   // live: Echtzeit zum Zeitpunkt der Zuordnung (für die Beobachtung von Alternativen)
   return { ...base, jid: e.jid, label: e.label,
     live: { dep: { rt: e.rt, pl: e.platform, c: e.cancelled, rtKnown: e.realtime }, arr: arr ? { rt: arr.rt, pl: arr.platform, c: arr.cancelled, rtKnown: arr.realtime } : null },
     from: { eva: f.eva, name: f.name, plan: e.plan, platform: e.platformPlan || e.platform || base.from.platform, lat: l.from.lat ?? byEva(f.eva)?.lat, lon: l.from.lon ?? byEva(f.eva)?.lon },
-    to: { eva: t.eva, name: t.name, plan: arr?.plan || l.to.plan, platform: arr ? (arr.platformPlan || arr.platform) : base.to.platform, lat: l.to.lat ?? byEva(t.eva)?.lat, lon: l.to.lon ?? byEva(t.eva)?.lon } };
+    to: t ? { eva: t.eva, name: t.name, plan: arr?.plan || l.to.plan, platform: arr ? (arr.platformPlan || arr.platform) : base.to.platform, lat: l.to.lat ?? byEva(t.eva)?.lat, lon: l.to.lon ?? byEva(t.eva)?.lon }
+      : { ...base.to, abroad: true } };
 }
 
 export async function resolveConnection(env, legs) {

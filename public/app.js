@@ -692,6 +692,7 @@ const walkBtn = (a, b) => `<a class="walk" href="${walkUrl(a, b)}" target="_blan
 const MODE = { BUS: ["Bus", "Bus"], COACH: ["Bus", "Bus"], TRAM: ["Tram", "Tram"], FERRY: ["Fähre", "Fähre"], SUBWAY: ["U", "U-Bahn"], METRO: ["U", "U-Bahn"] };
 const nice = l => { const m = MODE[l.mode]; return m && /^\d/.test(l.label) ? `${m[0]} ${l.label}` : l.label; };
 // Richtiges Wort fürs Verkehrsmittel (wie im Server): Zug, Bus, Tram, U-Bahn, Fähre
+const isTrain = l => /RAIL/.test(String(l?.mode || "")) || /^(ICE|IC|EC|ECE|RJX?|NJ|EN|IRE|RE|RB|S|FLX|D|TGV|ES|EST|MEX|ALX|ODEG|HEX)\s*\d/i.test(String(l?.label || "").trim());
 const vehicleOf = l => { const m = String(l?.mode || ""), lb = String(l?.label || "").trim();
   if (/FERRY/i.test(m) || /^Fähre\b/i.test(lb)) return { n: "Fähre", fest: "Feste Fähre", dein: "deine Fähre", im: "auf der Fähre" };
   if (/TRAM/i.test(m) || /^(Tram|STR)\b/i.test(lb)) return { n: "Tram", fest: "Feste Tram", dein: "deine Tram", im: "in der Tram" };
@@ -714,8 +715,12 @@ function timeline(t) {
         <div>Ab ${esc(l.dep.name)}: plan ${hm(l.dep.plan)}${l.dep.delay ? `, jetzt ${hm(l.dep.rt)}` : ""}${l.dep.platform ? `, ${esc(platWord(l, l.dep.platform))}` : ""}${!isStreet(l) && l.dep.platformPlan && l.dep.platform !== l.dep.platformPlan ? ` (statt ${esc(l.dep.platformPlan)})` : ""}</div>
         <div>An ${esc(l.arr.name)}: plan ${hm(l.arr.plan)}${l.arr.delay ? `, jetzt ${hm(l.arr.rt)}${l.arr.estimated ? " (geschätzt)" : ""}` : ""}${l.arr.platform ? `, ${esc(platWord(l, l.arr.platform))}` : ""}</div>
         ${[...(l.dep.messages || []), ...(l.arr.messages || [])].slice(0, 3).map(m => `<div class="muted">${esc(m)}</div>`).join("")}
-        ${l.live ? "" : `<div class="muted">${l.jid ? "Noch keine Prognose der Bahn – kommt meist kurz vor der Abfahrt." : "Live-Zeiten kommen, sobald der Verkehrsbetrieb sie liefert (meist ab 2 Std. vorher)."}</div>`}
-        ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr fest einplanen" : `${kindWord(l)} fest einplanen`}</button>` : ""}
+        ${l.live ? "" : `<div class="muted">${l.jid ? (Date.parse(l.dep.rt) < Date.now() ? "Die Bahn liefert zu diesem Zug gerade keine Prognose – angezeigt wird der Fahrplan." : "Noch keine Prognose der Bahn – kommt meist kurz vor der Abfahrt.")
+          : isTrain(l) ? "Zu diesem Zug habe ich (noch) keine Live-Daten der Bahn – angezeigt wird der Fahrplan. Ich versuche es weiter."
+          : Date.parse(l.dep.rt) < Date.now() ? "Für diese Fahrt liefert der Verkehrsbetrieb keine Live-Zeiten – angezeigt wird der Fahrplan."
+          : "Live-Zeiten kommen, sobald der Verkehrsbetrieb sie liefert (meist ab 2 Std. vorher)."}</div>`}
+        ${l.abroad && l.jid ? `<div class="muted">Ankunft im Ausland: geschätzt aus der Verspätung bei der Abfahrt.</div>` : ""}
+        ${t.legs.length > 1 && Date.parse(l.dep.rt) > Date.now() ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr fest einplanen" : `${kindWord(l)} fest einplanen`}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];
     if (tr) { const nx = t.legs[i + 1], moved = l.arr.eva && nx.dep.eva ? l.arr.eva !== nx.dep.eva : cleanStop(l.arr.name) !== cleanStop(nx.dep.name);

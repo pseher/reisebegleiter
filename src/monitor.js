@@ -50,11 +50,12 @@ export function dueChecks(trip, now, force = false) {
       out.push({ trip, i, side: "bus", leg, dist });
       return;
     }
-    if (!leg.from.eva || !leg.to.eva) return;
+    if (!leg.from.eva) return;
     // Ein Prüfpunkt pro Zug: vor der Abfahrt die Abfahrt (Gleis, Verspätung, Ausfall), danach die Ankunft.
     // Die Ankunftsprognose vor der Abfahrt ergibt sich aus der Abfahrtsverspätung.
     const ob = trip.obs?.[i] || {}, depEff = ob.dep?.rt ? Date.parse(ob.dep.rt) : Date.parse(leg.from.plan);
     const side = now < depEff - MIN ? "dep" : "arr";
+    if (side === "arr" && !leg.to.eva) return;   // Ziel im Ausland: Ankunft ergibt sich aus der Verspätung bei der Abfahrt
     const s = side === "dep" ? leg.from : leg.to, o = ob[side] || {};
     const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;
     if (eff < now - 3 * MIN) return;                                       // schon vorbei
@@ -325,13 +326,19 @@ export async function bindLate(env, trip, now, cache) {
   let changed = false;
   for (let i = 0; i < trip.legs.length; i++) {
     const l = trip.legs[i], dep = Date.parse(l.from.plan), key = `bind${i}`;
-    if (l.jid || !l.from.eva || !l.to.eva || !RAILY.test(l.label) || dep - now > 6 * 3600e3 || dep < now - 10 * MIN) continue;
-    if (now - (trip.state?.[key] || 0) < 30 * MIN) continue;
+    // Auch Züge aus Plan B / Transitous ohne DB-Nummer nachträglich zuordnen – bis zur Ankunft, nicht nur vor der Abfahrt
+    if (l.jid || !RAILY.test(l.label) || dep - now > 6 * 3600e3 || Date.parse(l.to.plan) < now) continue;
+    if (!l.from.eva && l.from.lat == null) continue;
+    if (now - (trip.state?.[key] || 0) < 15 * MIN) continue;
     trip.state = { ...(trip.state || {}), [key]: now };
     const num = (l.label.match(/(\d{2,6})\s*$/) || [])[1] || "";
     const r = await resolveLeg(env, { rail: true, label: l.label, num, line: l.label.replace(/\s+/g, ""), mode: l.mode || "RAIL",
       from: { ...l.from, track: l.from.platform }, to: { ...l.to, track: l.to.platform } }, cache).catch(() => null);
-    if (r?.jid) { trip.legs[i] = { ...l, jid: r.jid, label: r.label, from: { ...l.from, plan: r.from.plan, platform: r.from.platform }, to: { ...l.to, plan: r.to.plan, platform: r.to.platform, estimated: false } }; changed = true; }
+    if (r?.jid) { trip.legs[i] = { ...l, jid: r.jid, label: r.label, from: { ...l.from, eva: r.from.eva, name: r.from.name, plan: r.from.plan, platform: r.from.platform },
+      to: { ...l.to, eva: r.to.eva || "", ...(r.to.eva ? { name: r.to.name } : { abroad: true }), plan: r.to.plan, platform: r.to.platform, estimated: false } }; changed = true; }
+    // Was die Bahn beim Zuordnen schon wusste (z. B. Verspätung bei der Abfahrt), gleich übernehmen
+    if (r?.jid && r.live?.dep?.rtKnown) { trip.obs = trip.obs || []; const o = trip.obs[i] || {};
+      if (!o.dep?.rt) trip.obs[i] = { ...o, dep: { rt: r.live.dep.rt, pl: r.live.dep.pl, c: !!r.live.dep.c, t: now, live: true } }; trip._dirty = true; }
   }
   if (changed) trip._legsDirty = true;
   return changed;
