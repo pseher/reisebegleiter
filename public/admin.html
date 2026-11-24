@@ -39,7 +39,17 @@
       $m.innerHTML = `<div class="spinner"></div>`;
       const r = await fetch("/api/admin/stats", { headers: { "X-Admin-Key": key() } }).catch(() => null);
       if (!r || r.status === 403) { localStorage.removeItem("rb_admin"); return login(r ? "Schlüssel stimmt nicht." : "Keine Verbindung."); }
-      const { rows } = await r.json();
+      const { rows, ov } = await r.json();
+      const o = ov || {}, ipShort = k => esc(String(k).replace(/^(join-ip|reg-ip):/, m => (m === "join-ip:" ? "Code-Raten · " : "Neuanmeldungen · ")).replace(/^join-all$/, "Code-Raten insgesamt"));
+      const users = `<h3 class="sec-h">Nutzung</h3><div class="kpis">
+          <div class="kpi"><span>Konten (Personen)</span><b>${o.accounts ?? "–"}</b></div>
+          <div class="kpi"><span>Geräte · aktiv in 7 Tagen</span><b>${o.devices ?? "–"} · ${o.devices_7d ?? "–"}</b><span>neu in 7 Tagen: ${o.devices_new_7d ?? "–"}</span></div>
+          <div class="kpi"><span>Mit Mitteilungen</span><b>${o.push ?? "–"}</b></div>
+          <div class="kpi"><span>Fahrten überwacht gerade</span><b>${o.trips_active ?? "–"}</b><span>gespeichert: ${o.trips_all ?? "–"}</span></div>
+          <div class="kpi"><span>Regelmäßige Fahrten</span><b>${o.routines ?? "–"}</b><span>davon aktiv: ${o.routines_active ?? "–"}</span></div>
+        </div>
+        <h3 class="sec-h">Gebremste Versuche (24 Std.)</h3><div class="card flat wrap"><table><tr><th>Was · Anschluss</th><th>Versuche</th><th>Seit</th></tr>
+          ${(o.guard || []).map(g => `<tr><td>${ipShort(g.key)}</td><td>${g.n}</td><td>${hh(g.t)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nichts Auffälliges</td></tr>`}</table></div>`;
       const last24 = rows.filter(x => Date.parse(x.hour) > Date.now() - 24 * 3600e3), sum = (l, k) => l.reduce((a, x) => a + (x[k] || 0), 0);
       const peakRun = Math.max(0, ...last24.map(x => x.db_max_run)), peakHour = last24.reduce((m, x) => (x.db > (m?.db || 0) ? x : m), null);
       const pct = Math.round(peakRun / LIMIT_MIN * 100), cls = pct > 60 ? "r" : pct > 30 ? "w" : "";
@@ -52,7 +62,8 @@
           <div class="kpi"><span>„Zu viele Anfragen“ (429), 24 Std.</span><b style="color:${sum(last24, "db429") ? "var(--lost)" : "inherit"}">${sum(last24, "db429")}</b></div>
           <div class="kpi"><span>Höchstens gleichzeitig überwachte Reisen</span><b>${Math.max(0, ...last24.map(x => x.trips_max))}</b></div>
         </div>
-        <h3 class="sec-h">Letzte 48 Stunden</h3><div class="card flat wrap"><table><tr><th>Stunde</th><th>DB</th><th>Max/Min.</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th><th>Prüfungen</th><th>Reisen</th></tr>
+        ${users}
+        <h3 class="sec-h">Abfragen · letzte 48 Stunden</h3><div class="card flat wrap"><table><tr><th>Stunde</th><th>DB</th><th>Max/Min.</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th><th>Prüfungen</th><th>Reisen</th></tr>
           ${rows.filter(x => Date.parse(x.hour) > Date.now() - 48 * 3600e3).map(x => `<tr><td>${hh(x.hour)}</td><td>${x.db}</td><td>${x.db_max_run}</td><td>${x.db429 || ""}</td><td>${x.vbb}</td><td>${x.motis}</td><td>${x.ai || ""}</td><td>${x.checks}</td><td>${x.trips_max}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Noch keine Daten</td></tr>`}</table></div>
         <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th></tr>
           ${Object.entries(days).map(([d, l]) => `<tr><td>${dd(d + "T12:00:00Z")}</td><td>${sum(l, "db").toLocaleString("de-DE")}</td><td>${sum(l, "db429") || ""}</td><td>${sum(l, "vbb")}</td><td>${sum(l, "motis")}</td><td>${sum(l, "ai") || ""}</td></tr>`).join("")}</table></div>

@@ -150,7 +150,7 @@ async function api(req, env, url) {
   }
 
   if (p === "/api/register" && method === "POST") {
-    if (!(await db.guard(env, `reg-ip:${req.headers.get("CF-Connecting-IP") || "?"}`, 3600, 60))) return fail(429, "Gerade zu viele neue Geräte von diesem Anschluss. Bitte später noch einmal.");
+    if (!(await db.guard(env, `reg-ip:${(await sha(`rb-ip|${req.headers.get("CF-Connecting-IP") || "?"}`)).slice(0, 12)}`, 3600, 60))) return fail(429, "Gerade zu viele neue Geräte von diesem Anschluss. Bitte später noch einmal.");
     const token = b64u(crypto.getRandomValues(new Uint8Array(24)));
     const b = await req.json().catch(() => ({}));
     const acc = await db.insert(env, "rb_accounts", { favs: [] });
@@ -540,7 +540,7 @@ async function api(req, env, url) {
     const now = Date.now(), tr = dev.link_tries && now - Date.parse(dev.link_tries.t) < 15 * MIN ? dev.link_tries : { t: new Date(now).toISOString(), n: 0 };
     if (tr.n >= 5) return fail(429, "Zu viele Versuche. Bitte in 15 Minuten noch einmal – oder auf dem anderen Gerät einen neuen Code holen.");
     // Zusätzlich je Internetanschluss und insgesamt begrenzen – sonst ließe sich mit immer neuen Geräten weiterraten
-    const ip = req.headers.get("CF-Connecting-IP") || "?";
+    const ip = (await sha(`rb-ip|${req.headers.get("CF-Connecting-IP") || "?"}`)).slice(0, 12);   // Anschluss nur verschlüsselt
     if (!(await db.guard(env, `join-ip:${ip}`, 900, 15)) || !(await db.guard(env, "join-all", 900, 300)))
       return fail(429, "Gerade zu viele Versuche. Bitte in einigen Minuten noch einmal – oder auf dem anderen Gerät einen neuen Code holen.");
     const src = code.length === 6 ? await db.deviceByLinkCode(env, await sha(`rb-link|${code}`)) : null;
@@ -601,8 +601,8 @@ async function adminStats(req, env) {
   let diff = key.length ^ want.length; for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ (key.charCodeAt(i) || 0);
   if (want.length < 16 || diff) { await new Promise(r => setTimeout(r, 400)); return fail(403, "Kein Zugriff"); }
   await flush(env).catch(() => {});
-  const rows = await db.statsSince(env, new Date(Date.now() - 14 * 864e5).toISOString());
-  return new Response(JSON.stringify({ now: new Date().toISOString(), rows }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  const [rows, ov] = await Promise.all([db.statsSince(env, new Date(Date.now() - 14 * 864e5).toISOString()), db.overview(env).catch(() => null)]);
+  return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
 export default {

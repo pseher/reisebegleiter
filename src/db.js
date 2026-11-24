@@ -89,6 +89,7 @@ export async function cleanup(env) {
   if (mem(env)) { for (const [id, t] of MEM.rb_trips) if (!t.active && t.ends_at < day) MEM.rb_trips.delete(id); return; }
   await rest(env, `rb_trips?active=eq.false&ends_at=lt.${day}`, { method: "DELETE" });
   await rest(env, `rb_devices?last_seen=lt.${old}`, { method: "DELETE" });
+  await rest(env, `rb_guard?t=lt.${day}`, { method: "DELETE" }).catch(() => {});   // Schutz-Zähler nach einem Tag weg
   // Konten ohne Geräte (alle entfernt oder lange unbenutzt) samt Reisen löschen
   // (zusätzlich hier prüfen, dass wirklich kein Gerät mehr dranhängt)
   const orphans = (await rest(env, "rb_accounts?select=id,rb_devices(id)&rb_devices=is.null&limit=200").catch(() => []) || [])
@@ -113,4 +114,13 @@ export async function guard(env, key, sec, max) {
   if (mem(env)) { const g = MEM.rb_guard.get(key), t = Date.now();
     const cur = !g || t - g.t > sec * 1000 ? { n: 1, t } : { n: g.n + 1, t: g.t }; MEM.rb_guard.set(key, cur); return cur.n <= max; }
   return (await rest(env, "rpc/rb_guard_hit", { method: "POST", body: JSON.stringify({ p_key: key, p_sec: sec, p_max: max }) })) !== false;
+}
+
+// Überblick für die Betreiber-Seite: Nutzer, Geräte, Fahrten, gebremste Versuche
+export async function overview(env) {
+  if (mem(env)) { const d = [...MEM.rb_devices.values()], wk = Date.now() - 7 * 864e5, tr = [...MEM.rb_trips.values()], ro = [...MEM.rb_routines.values()];
+    return { accounts: MEM.rb_accounts.size, devices: d.length, devices_7d: d.filter(x => Date.parse(x.last_seen || x.created_at) > wk).length, devices_new_7d: d.filter(x => Date.parse(x.created_at) > wk).length,
+      push: d.filter(x => x.push).length, trips_active: tr.filter(t => t.active).length, trips_all: tr.length, routines: ro.length, routines_active: ro.filter(r => !r.paused).length,
+      guard: [...MEM.rb_guard.entries()].filter(([, g]) => g.n > 5).map(([key, g]) => ({ key, n: g.n, t: new Date(g.t).toISOString() })) }; }
+  return rest(env, "rpc/rb_overview", { method: "POST", body: "{}" });
 }
