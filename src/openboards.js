@@ -1,3 +1,4 @@
+import { count } from "./stats.js";
 // DB OpenBoards – Abfahrts- und Ankunftstafeln (nur Eisenbahn, inkl. S-Bahn und Ersatzverkehr)
 // Free-Plan: 10 Anfragen/Sek. Eine Anfrage liefert ein 30-Minuten-Fenster ab timeStart.
 // Standardmäßig erweitert die API auf den ganzen Umsteigebereich (z. B. Berlin Hbf oben/tief/S-Bahn).
@@ -15,6 +16,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function slot() { const now = Date.now(), t = Math.max(now, nextSlot); nextSlot = t + 170; if (t > now) await sleep(t - now); }
 
 async function post(env, kind, body) {
+  count("db");
   if (env.MOCK === "1") return mockBoard(kind, body);
   if (!env.DB_CLIENT_ID || !env.DB_API_KEY) throw new BoardError("DB-Schlüssel fehlen");
   for (let attempt = 0; ; attempt++) {
@@ -23,7 +25,8 @@ async function post(env, kind, body) {
       method: "POST", body: JSON.stringify(body),
       headers: { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
     }).catch(e => { throw new BoardError(`Netzwerk: ${e.message}`); });
-    if (r.status === 429 && attempt < 3) { await sleep(1000 * (attempt + 1)); continue; }   // zu viele Anfragen: kurz warten, erneut
+    if (r.status === 429) count("db429");
+    if (r.status === 429 && attempt < 3) { count("db"); await sleep(1000 * (attempt + 1)); continue; }   // zu viele Anfragen: kurz warten, erneut
     if (r.status === 429) throw new BoardError("Die DB-Schnittstelle ist gerade ausgelastet. Bitte in einer Minute noch einmal versuchen.");
     if (!r.ok) throw new BoardError(`OpenBoards HTTP ${r.status}`);
     return r.json();
@@ -87,11 +90,19 @@ export function normalize(data, kind) {
 }
 
 // Ein Fenster abrufen (mit Zwischenspeicher pro Durchlauf)
+// Zusätzlich kurz über Aufrufe hinweg (z. B. Reise anlegen + Überwachung in derselben Minute): 45 Sek.
+const SHARED = new Map(), TTL = 45e3;
 export async function board(env, kind, eva, timeStart, { maxVia = 3, cache } = {}) {
   const key = `${kind}|${eva}|${timeStart}|${maxVia}`;
   if (cache?.has(key)) return cache.get(key);
+  const sh = env.MOCK === "1" ? null : SHARED.get(key);
+  if (sh && Date.now() - sh.at < TTL) { cache?.set(key, sh.p); return sh.p; }
   const p = rawBoard(env, kind, eva, timeStart, maxVia).then(d => normalize(d, kind));
   cache?.set(key, p);
+  if (env.MOCK !== "1") {
+    SHARED.set(key, { p, at: Date.now() }); p.catch(() => SHARED.delete(key));
+    if (SHARED.size > 400) for (const [k, v] of SHARED) if (Date.now() - v.at >= TTL) SHARED.delete(k);
+  }
   return p;
 }
 
@@ -107,7 +118,8 @@ export function isoBerlin(ms, roundMin = 5) {
 // Eine bestimmte Fahrt an einem Bahnhof finden: erst um die Prognose herum, dann um die Sollzeit, dann weitere Fenster
 export async function findJourney(env, kind, eva, jid, aroundMs, { planMs, windows = 2, cache, maxVia = 3, label, after } = {}) {
   const starts = [];
-  const add = ms => { const s = isoBerlin(ms - 10 * 60e3); if (!starts.includes(s)) starts.push(s); };
+  // Fenster auf ein festes Viertelstunden-Raster: alle Reisen über denselben Bahnhof teilen sich eine Abfrage
+  const add = ms => { const s = isoBerlin(ms - 10 * 60e3, 15); if (!starts.includes(s)) starts.push(s); };
   add(aroundMs);
   if (planMs && Math.abs(planMs - aroundMs) > 15 * 60e3) add(planMs);
   for (let i = 1; starts.length < windows + (planMs ? 1 : 0) && i < 20; i++) add(aroundMs + i * (WINDOW_MIN - 5) * 60e3);

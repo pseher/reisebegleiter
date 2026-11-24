@@ -58,3 +58,16 @@ test("Verbinden übernimmt regelmäßige Fahrten des beitretenden Geräts", asyn
   assert.equal((await call("/api/routines", { auth: A })).data.length, 1);
   assert.equal((await call("/api/routines", { auth: B })).data.length, 1);
 });
+
+test("Abfragezähler: Überwachung zählt DB-Abfragen, Ansicht nur mit Admin-Schlüssel", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1", ADMIN_KEY: "geheim-geheim-1234" };
+  const { runMonitor } = await import("../src/monitor.js");
+  const call = async (path, auth, method = "GET", body, extra = {}) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { ...extra, ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j;
+  const T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  await call("/api/trips", A, "POST", { ticket: "flex", legs: [{ jid: "a", label: "ICE 1", from: { eva: "8011160", name: "Berlin Hbf", plan: iso(20) }, to: { eva: "8010205", name: "Leipzig Hbf", plan: iso(90) } }] });
+  await runMonitor(env);
+  assert.equal((await call("/api/admin/stats", null, "GET", null, { "X-Admin-Key": "falsch" })).s, 403);
+  const r = await call("/api/admin/stats", null, "GET", null, { "X-Admin-Key": "geheim-geheim-1234" });
+  assert.equal(r.s, 200); assert.ok(r.j.rows.length && r.j.rows[0].db > 0 && r.j.rows[0].runs >= 1, JSON.stringify(r.j.rows));
+});

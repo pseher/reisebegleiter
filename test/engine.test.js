@@ -168,3 +168,13 @@ test("eigene Umstiegszeit genau erreicht – trotz Verspätung nicht ‚knapp‘
   const w = evaluate(trip(arrDelay(10), "flex"), T0); const t2 = trip(arrDelay(10), "flex"); t2.legs = t2.legs.map(l => ({ ...l, minT: 8 }));
   assert.notEqual(evaluate(t2, T0).transfers[0].status, "OK"); assert.ok(w);   // 7 < 8 → nicht mehr OK
 });
+
+test("Prüfhäufigkeit: pünktlich seltener, bei Verspätung jede Minute, ein Prüfpunkt pro Zug", async () => {
+  const { checkEvery, dueChecks } = await import("../src/monitor.js");
+  const t = trip();
+  assert.equal(checkEvery(t, 0, "dep", 20 * 60e3), 3);                  // pünktlich, 17 Min. Umstieg
+  assert.equal(checkEvery(trip(arrDelay(8)), 0, "arr", 20 * 60e3), 1);  // verspätet → jede Minute
+  assert.equal(checkEvery(t, 1, "arr", 20 * 60e3), 5);                  // Ziel: grob
+  const sides = dueChecks(t, T0 - 20 * 60e3).map(c => `${c.i}${c.side}`);
+  assert.deepEqual(sides, ["0dep", "1dep"]);                             // vor der Abfahrt keine Ankunftsabfrage
+});

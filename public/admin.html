@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Reisebegleiter · Abfragen</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    main { max-width: 820px; margin: 0 auto; padding: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+    th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 18px; }
+    .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+    .kpi b { display: block; font-size: 26px; } .kpi span { color: var(--muted); font-size: 13px; }
+    .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+    .bar i { display: block; height: 100%; background: var(--ok); } .bar i.w { background: var(--watch); } .bar i.r { background: var(--lost); }
+    .wrap { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <header class="top"><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Abfragen</span></a></header>
+  <main id="m"></main>
+  <script>
+    const $m = document.getElementById("m"), LIMIT_MIN = 600;   // DB OpenBoards: 10 je Sekunde
+    const key = () => localStorage.getItem("rb_admin") || "";
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const hh = iso => new Date(iso).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+    const dd = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+    function login(msg = "") {
+      $m.innerHTML = `<h1>Abfragezähler</h1><p class="muted small">Nur für dich: den Schlüssel, den du im Cloudflare-Dashboard als <code>ADMIN_KEY</code> hinterlegt hast. Er bleibt nur auf diesem Gerät gespeichert.</p>
+        ${msg ? `<p class="err">${esc(msg)}</p>` : ""}<input class="txt" id="k" type="password" autocomplete="current-password" placeholder="Schlüssel"><button class="btn" id="go">Anzeigen</button>`;
+      document.getElementById("go").onclick = () => { localStorage.setItem("rb_admin", document.getElementById("k").value.trim()); load(); };
+    }
+    async function load() {
+      if (!key()) return login();
+      $m.innerHTML = `<div class="spinner"></div>`;
+      const r = await fetch("/api/admin/stats", { headers: { "X-Admin-Key": key() } }).catch(() => null);
+      if (!r || r.status === 403) { localStorage.removeItem("rb_admin"); return login(r ? "Schlüssel stimmt nicht." : "Keine Verbindung."); }
+      const { rows } = await r.json();
+      const last24 = rows.filter(x => Date.parse(x.hour) > Date.now() - 24 * 3600e3), sum = (l, k) => l.reduce((a, x) => a + (x[k] || 0), 0);
+      const peakRun = Math.max(0, ...last24.map(x => x.db_max_run)), peakHour = last24.reduce((m, x) => (x.db > (m?.db || 0) ? x : m), null);
+      const pct = Math.round(peakRun / LIMIT_MIN * 100), cls = pct > 60 ? "r" : pct > 30 ? "w" : "";
+      const days = {}; for (const x of rows) { const d = new Date(x.hour).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }); (days[d] ||= []).push(x); }
+      $m.innerHTML = `<h1>Abfragen</h1><p class="muted small">Stand ${hh(new Date().toISOString())} · DB-Limit ${LIMIT_MIN} je Minute (10 je Sek., geteilt mit PlanFlink)</p>
+        <div class="kpis">
+          <div class="kpi"><span>DB-Abfragen, 24 Std.</span><b>${sum(last24, "db").toLocaleString("de-DE")}</b></div>
+          <div class="kpi"><span>Meiste DB-Abfragen in einer Minute (Überwachung)</span><b>${peakRun}</b><div class="bar"><i class="${cls}" style="width:${Math.min(100, pct)}%"></i></div><span>${pct} % des Limits</span></div>
+          <div class="kpi"><span>Stärkste Stunde</span><b>${peakHour ? peakHour.db : 0}</b><span>${peakHour ? hh(peakHour.hour) : "–"}</span></div>
+          <div class="kpi"><span>„Zu viele Anfragen“ (429), 24 Std.</span><b style="color:${sum(last24, "db429") ? "var(--lost)" : "inherit"}">${sum(last24, "db429")}</b></div>
+          <div class="kpi"><span>Höchstens gleichzeitig überwachte Reisen</span><b>${Math.max(0, ...last24.map(x => x.trips_max))}</b></div>
+        </div>
+        <h3 class="sec-h">Letzte 48 Stunden</h3><div class="card flat wrap"><table><tr><th>Stunde</th><th>DB</th><th>Max/Min.</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th><th>Prüfungen</th><th>Reisen</th></tr>
+          ${rows.filter(x => Date.parse(x.hour) > Date.now() - 48 * 3600e3).map(x => `<tr><td>${hh(x.hour)}</td><td>${x.db}</td><td>${x.db_max_run}</td><td>${x.db429 || ""}</td><td>${x.vbb}</td><td>${x.motis}</td><td>${x.ai || ""}</td><td>${x.checks}</td><td>${x.trips_max}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Noch keine Daten</td></tr>`}</table></div>
+        <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th></tr>
+          ${Object.entries(days).map(([d, l]) => `<tr><td>${dd(d + "T12:00:00Z")}</td><td>${sum(l, "db").toLocaleString("de-DE")}</td><td>${sum(l, "db429") || ""}</td><td>${sum(l, "vbb")}</td><td>${sum(l, "motis")}</td><td>${sum(l, "ai") || ""}</td></tr>`).join("")}</table></div>
+        <button class="btn quiet" id="out">Schlüssel auf diesem Gerät vergessen</button>`;
+      document.getElementById("out").onclick = () => { localStorage.removeItem("rb_admin"); login(); };
+    }
+    load();
+  </script>
+</body>
+</html>

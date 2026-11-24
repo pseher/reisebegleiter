@@ -1,7 +1,7 @@
 // Speicher: Supabase (PlanFlink-Projekt, Tabellen rb_devices / rb_trips) über REST mit dem Secret Key.
 // Mit MOCK=1 ein Speicher im Arbeitsspeicher (nur für lokale Tests).
 
-const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map() };
+const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map() };
 
 function hdr(env) {
   const k = env.SUPABASE_SERVICE_KEY;
@@ -94,4 +94,16 @@ export async function cleanup(env) {
   const orphans = (await rest(env, "rb_accounts?select=id,rb_devices(id)&rb_devices=is.null&limit=200").catch(() => []) || [])
     .filter(o => Array.isArray(o.rb_devices) && o.rb_devices.length === 0);
   if (orphans.length) await rest(env, `rb_accounts?id=in.(${orphans.map(o => o.id).join(",")})`, { method: "DELETE" });
+}
+
+// Abfragezähler (stundenweise aufsummiert)
+export async function statsAdd(env, x) {
+  if (mem(env)) { const o = MEM.rb_stats.get(x.hour) || { hour: x.hour, db: 0, db429: 0, vbb: 0, motis: 0, ai: 0, runs: 0, checks: 0, trips_max: 0, db_max_run: 0 };
+    for (const k of ["db", "db429", "vbb", "motis", "ai", "runs", "checks"]) o[k] += x[k] || 0;
+    o.trips_max = Math.max(o.trips_max, x.trips || 0); if (x.runs) o.db_max_run = Math.max(o.db_max_run, x.db || 0); MEM.rb_stats.set(x.hour, o); return; }
+  await rest(env, "rpc/rb_stats_add", { method: "POST", body: JSON.stringify({ p_hour: x.hour, p_db: x.db || 0, p_db429: x.db429 || 0, p_vbb: x.vbb || 0, p_motis: x.motis || 0, p_ai: x.ai || 0, p_runs: x.runs || 0, p_checks: x.checks || 0, p_trips: x.trips || 0 }) });
+}
+export async function statsSince(env, sinceIso) {
+  if (mem(env)) return [...MEM.rb_stats.values()].filter(r => r.hour >= sinceIso).sort((a, b) => (a.hour < b.hour ? 1 : -1));
+  return rest(env, `rb_stats?hour=gte.${encodeURIComponent(sinceIso)}&order=hour.desc&limit=1000`);
 }

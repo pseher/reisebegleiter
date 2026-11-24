@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datenschutz · Reisebegleiter</title>
+  <meta name="theme-color" content="#0f2a3d">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <style>main.legal { max-width: 720px; margin: 0 auto; padding: 16px 18px 40px; line-height: 1.55; } main.legal h2 { font-size: 18px; margin: 22px 0 6px; } main.legal p, main.legal li { color: var(--ink); } main.legal ul { padding-left: 20px; } main.legal a { color: var(--accent); }</style>
+  <script>try { const t = localStorage.getItem("rb_theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+  <header class="top"><a class="hdr-back" href="/" style="text-decoration:none">‹ Zur App</a><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Reisebegleiter</span></a></header>
+  <main class="legal">
+    <h1>Datenschutz</h1>
+    <p>Kurz gesagt: Der Reisebegleiter braucht kein Konto, keinen Namen und keine E-Mail-Adresse. Gespeichert wird nur, was nötig ist, um deine Fahrten zu überwachen.</p>
+    <h2>Verantwortlich</h2>
+    <p>Peter Seher, Ruhlaer Straße 27, 14199 Berlin, <a href="mailto:kontakt@herdzeit.de">kontakt@herdzeit.de</a></p>
+    <h2>Was gespeichert wird</h2>
+    <ul>
+      <li><b>Gerätekennung:</b> eine zufällige Nummer mit Schlüssel, die die App beim ersten Start anlegt, dazu eine Gerätebezeichnung wie „Android-Handy“. Verbindest du Geräte, hängen sie an derselben zufälligen Kontonummer.</li>
+      <li><b>Deine Fahrten:</b> Start, Ziel, Züge/Busse, Zeiten, Ticketart (nur für den Hinweis zur Zugbindung), deine Umstiegszeit sowie der Überwachungsstand.</li>
+      <li><b>Regelmäßige Fahrten und Favoriten:</b> Name, Strecke, Tage und Uhrzeiten, die du anlegst.</li>
+      <li><b>Mitteilungen:</b> Wenn du sie erlaubst, die Empfangsadresse deines Browsers für Push-Mitteilungen.</li>
+    </ul>
+    <p>Zweck ist allein die Überwachung deiner Fahrten (Art. 6 Abs. 1 lit. b DSGVO – du nutzt die App dafür). Es gibt keine Werbung, kein Tracking und keine Weitergabe zu Werbezwecken.</p>
+    <h2>Standort</h2>
+    <p>Dein Standort wird nur abgefragt, wenn du ausdrücklich „Mein Standort“ oder „In der Nähe“ antippst. Er wird dann für diese eine Suche verwendet (an die Verbindungssuche übermittelt) und nicht gespeichert.</p>
+    <h2 id="ki">Tickets und Screenshots – Auslesen mit KI</h2>
+    <p>Wenn du unter „Gebuchte Reise überwachen“ ein Ticket, einen Screenshot oder einen Text einfügst, wird dieser Inhalt an die KI <b>Claude</b> von Anthropic (USA) geschickt, die daraus die Verbindung herausliest. Ticket oder Bild werden danach nicht gespeichert – nur die erkannte Verbindung. Anthropic verwendet über die Schnittstelle übermittelte Inhalte nach eigenen Angaben nicht zum Training. Die Übermittlung in die USA erfolgt auf Grundlage der EU-Standardvertragsklauseln. Wenn du das nicht möchtest, gib die Verbindung einfach selbst ein.</p>
+    <p>Bitte prüfe erkannte Verbindungen vor dem Anlegen – die KI kann sich irren.</p>
+    <h2>Dienstleister</h2>
+    <ul>
+      <li><b>Cloudflare</b> (Betrieb der App und Server) – kann technisch die IP-Adresse verarbeiten.</li>
+      <li><b>Supabase</b> (Datenbank, Rechenzentrum in Irland/EU).</li>
+      <li><b>Deutsche Bahn, Transitous, VBB-Auskunft</b> (Fahrplan- und Echtzeitdaten) – sie erhalten nur Bahnhöfe, Haltestellen und Zeiten, keine Angaben zu dir; bei „Mein Standort“ die Koordinaten für die Suche.</li>
+      <li><b>Anthropic</b> (nur beim Auslesen von Tickets, siehe oben).</li>
+      <li>Der Push-Dienst deines Browsers (z. B. Google, Apple, Mozilla) stellt Mitteilungen zu.</li>
+    </ul>
+    <h2>Wie lange</h2>
+    <p>Fahrten werden einen Tag nach ihrem Ende gelöscht. Geräte, die 60 Tage nicht benutzt wurden, werden samt ihren Daten gelöscht. Einzelne Fahrten, regelmäßige Fahrten und Favoriten kannst du jederzeit selbst löschen; „Dieses Gerät trennen“ in den Einstellungen entfernt das Gerät.</p>
+    <p>Für den Betrieb wird außerdem gezählt, wie viele Abfragen pro Stunde an die Datenquellen gehen – ohne Bezug zu einzelnen Personen.</p>
+    <h2>Deine Rechte</h2>
+    <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch sowie auf Beschwerde bei einer Datenschutz-Aufsichtsbehörde (in Berlin: Berliner Beauftragte für Datenschutz und Informationsfreiheit). Schreib dafür einfach an die oben genannte Adresse.</p>
+    <p class="muted small">Stand: November 2026</p>
+  </main>
+</body>
+</html>

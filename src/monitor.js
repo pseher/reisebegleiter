@@ -1,3 +1,4 @@
+import { flush } from "./stats.js";
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
 import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
 import { findJourney } from "./openboards.js";
@@ -11,6 +12,25 @@ import { makeDue, refreshWindow } from "./routines.js";
 const MIN = 60e3;
 // Wie oft ein Halt geprüft wird – je näher, desto öfter (Minuten)
 export const intervalFor = dist => (dist <= 45 * MIN ? 1 : dist <= 150 * MIN ? 4 : dist <= 6 * 3600e3 ? 15 : null);
+
+// Wie oft prüfen? Jede Minute nur, wenn es darauf ankommt (Verspätung oder knapper Umstieg) – sonst seltener.
+// Ankunft am Ziel ohne weiteren Anschluss: nur grob (dort entscheidet nichts mehr).
+const delayOf = (s, o) => (o?.rt ? Math.round((Date.parse(o.rt) - Date.parse(s.plan)) / MIN) : 0);
+export function checkEvery(trip, i, side, dist) {
+  const base = intervalFor(dist); if (!base) return null;
+  const legs = trip.legs, leg = legs[i], ob = trip.obs?.[i] || {}, own = +leg.minT || 0;
+  const late = Math.max(delayOf(leg.from, ob.dep), delayOf(leg.to, ob.arr));
+  // Umstieg, um den es bei diesem Prüfpunkt geht: nach dieser Fahrt (Ankunft) bzw. davor (Abfahrt einer Anschlussfahrt)
+  const k = side === "arr" ? i : i - 1;
+  const gapOf = j => { if (j < 0 || j >= legs.length - 1) return null;
+    const a = legs[j].to, d = legs[j + 1].from, oa = trip.obs?.[j]?.arr || trip.obs?.[j]?.dep, od = trip.obs?.[j + 1]?.dep;
+    return Math.round((Date.parse(d.plan) - Date.parse(a.plan)) / MIN) - Math.max(0, delayOf(a, oa)) + delayOf(d, od); };
+  const gap = gapOf(k), tight = gap != null && gap < Math.max(own, 5) + 5;
+  const hot = late >= 3 || tight || (ob.dep?.c || ob.arr?.c);
+  if (side === "arr" && i === legs.length - 1) return Math.max(base, dist <= 45 * MIN ? 5 : 15);   // Ziel
+  if (hot) return base;
+  return dist <= 45 * MIN ? 3 : dist <= 150 * MIN ? 8 : 15;
+}
 
 // Fällige Abfragen einer Reise
 export function dueChecks(trip, now, force = false) {
@@ -31,14 +51,16 @@ export function dueChecks(trip, now, force = false) {
       return;
     }
     if (!leg.from.eva || !leg.to.eva) return;
-    for (const side of ["dep", "arr"]) {
-      const s = side === "dep" ? leg.from : leg.to, o = trip.obs?.[i]?.[side] || {};
-      const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;
-      if (eff < now - 3 * MIN) continue;                                   // schon vorbei
-      const iv = intervalFor(eff - now);
-      if (!iv || (!force && o.t && now - o.t < iv * MIN - 20e3)) continue;
-      out.push({ trip, i, side, eva: s.eva, jid: leg.jid, eff, plan, dist: eff - now });
-    }
+    // Ein Prüfpunkt pro Zug: vor der Abfahrt die Abfahrt (Gleis, Verspätung, Ausfall), danach die Ankunft.
+    // Die Ankunftsprognose vor der Abfahrt ergibt sich aus der Abfahrtsverspätung.
+    const ob = trip.obs?.[i] || {}, depEff = ob.dep?.rt ? Date.parse(ob.dep.rt) : Date.parse(leg.from.plan);
+    const side = now < depEff - MIN ? "dep" : "arr";
+    const s = side === "dep" ? leg.from : leg.to, o = ob[side] || {};
+    const plan = Date.parse(s.plan), eff = o.rt ? Date.parse(o.rt) : plan;
+    if (eff < now - 3 * MIN) return;                                       // schon vorbei
+    const iv = checkEvery(trip, i, side, eff - now);
+    if (!iv || (!force && o.t && now - o.t < iv * MIN - 20e3)) return;
+    out.push({ trip, i, side, eva: s.eva, jid: leg.jid, eff, plan, dist: eff - now });
   });
   return out;
 }
@@ -136,7 +158,9 @@ export async function planB(env, trip, v, k, now) {
   const res = out.slice(0, 3);
   const replaced = before ? trip.legs : trip.legs.slice(k + 1);
   for (const a of res) a.zb = a.kind === "stay" ? replaced.some(l => l.label !== curLeg.label && isFVLeg(l)) : changesFV(replaced, a.legs);
-  await watchAlts(env, res, now, own).catch(e => console.log("Alternativen beobachten:", e.message));
+  // Live mitbeobachten kostet Abfragen – nur, wenn es wirklich eng wird (gelb/rot)
+  if (t.status !== "OK" || v.status === "RISK" || v.status === "LOST") await watchAlts(env, res, now, own).catch(e => console.log("Alternativen beobachten:", e.message));
+  else for (const a of res) a.watch = null;
   return res;
 }
 
@@ -259,7 +283,8 @@ export async function assess(env, trip, now, cache) {
     if (acute || calm) {
       // je näher und je kritischer, desto öfter (Alternativen werden dabei auch mit Echtzeit geprüft)
       const every = t.status === "RISK" || t.status === "LOST" ? 4 : t.arrRt - now < 90 * MIN ? 5 : 12;
-      if (!alt[k] || now - (altAt[k] || 0) > every * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
+      const woke = acute && alt[k]?.length && alt[k].every(a => !a.watch) && alt[k].some(a => a.legs?.length && Date.parse(a.depPlan || a.dep) - now <= 3 * 3600e3);   // eben noch ruhig (ohne Live), jetzt eng → sofort live prüfen
+      if (!alt[k] || woke || now - (altAt[k] || 0) > every * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
   }
   // Ausfall ohne Umstieg dahinter (z. B. nur ein Zug): selbst die nächsten Möglichkeiten ab dieser Station suchen
@@ -353,6 +378,7 @@ export async function runMonitor(env, now = Date.now()) {
       }
     }
   }
+  await flush(env, { checks: checks.length, trips: trips.length }).catch(() => {});
   if (new Date(now).getUTCMinutes() === 7) await db.cleanup(env).catch(() => {});
   return { trips: trips.length, checks: checks.length, requests: cache.size, msgs: [...out.values()].flat().length, sent };
 }

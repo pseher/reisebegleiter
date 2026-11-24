@@ -1,3 +1,4 @@
+import { flush } from "./stats.js";
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
@@ -587,12 +588,24 @@ async function api(req, env, url) {
   return fail(404, "Unbekannte Adresse");
 }
 
+// Nur für den Betreiber: Abfragezähler. Schlüssel ADMIN_KEY (mind. 16 Zeichen) im Cloudflare-Dashboard hinterlegen.
+async function adminStats(req, env) {
+  const key = req.headers.get("X-Admin-Key") || "", want = String(env.ADMIN_KEY || "");
+  let diff = key.length ^ want.length; for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ (key.charCodeAt(i) || 0);
+  if (want.length < 16 || diff) { await new Promise(r => setTimeout(r, 400)); return fail(403, "Kein Zugriff"); }
+  await flush(env).catch(() => {});
+  const rows = await db.statsSince(env, new Date(Date.now() - 14 * 864e5).toISOString());
+  return new Response(JSON.stringify({ now: new Date().toISOString(), rows }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}
+
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname === "/api/admin/stats") return adminStats(req, env);
     if (url.pathname.startsWith("/api/")) {
       try { return await api(req, env, url); }
       catch (e) { console.log("API-Fehler:", e.stack || e.message); return fail(502, e.user ? e.message : "Da ist gerade etwas schiefgelaufen. Bitte gleich noch einmal versuchen."); }
+      finally { ctx?.waitUntil?.(flush(env).catch(() => {})); }   // Abfragen dieser Anfrage mitzählen
     }
     return env.ASSETS.fetch(req);
   },

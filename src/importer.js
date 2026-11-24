@@ -1,3 +1,4 @@
+import { count } from "./stats.js";
 // Reise einlesen: Screenshot, PDF (Ticket, Buchungsbestätigung) oder Text/Link → KI liest Züge, Bahnhöfe, Zeiten
 // → jede Bahn-Teilstrecke wird wie bei der Suche der echten DB-Fahrt zugeordnet.
 import { search } from "./stations.js";
@@ -43,7 +44,7 @@ Fußwege weglassen. Steht keine Ankunftszeit da (typisch bei Tickets), lass arr_
 Heute ist {TODAY} (Europe/Berlin).`;
 
 async function ask(env, model, content) {
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  count("ai"); const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({ model, max_tokens: 2000, system: SYSTEM.replace("{TODAY}", new Date().toISOString().slice(0, 10)),

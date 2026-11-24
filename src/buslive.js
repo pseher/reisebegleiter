@@ -1,3 +1,4 @@
+import { count } from "./stats.js";
 // Echtzeit für Bus, Tram, U-Bahn (Teilstrecken ohne DB-Fahrtkennung).
 // 1. Transitous/MOTIS: Fahrt per tripId abrufen (dort fließen GTFS-RT-Feeds ein, z. B. VBB).
 // 2. Rückfall Berlin/Brandenburg: VBB-Auskunft über v6.vbb.transport.rest (Gemeinschaftsdienst, ohne Garantie).
@@ -35,14 +36,14 @@ async function vbbOne(env, s, label, kind, cache) {
   const key = `vbbstop|${s.lat.toFixed(4)},${s.lon.toFixed(4)}`;
   let stopId = cache?.get(key);
   if (!stopId) {
-    const r = await fetch(`${base}/locations/nearby?latitude=${s.lat}&longitude=${s.lon}&results=3&distance=400`, { headers: h }).catch(() => null);
+    count("vbb"); const r = await fetch(`${base}/locations/nearby?latitude=${s.lat}&longitude=${s.lon}&results=3&distance=400`, { headers: h }).catch(() => null);
     const list = r?.ok ? await r.json().catch(() => []) : [];
     stopId = (list.find(x => fold(x.name).includes(fold(s.name).slice(0, 8))) || list[0])?.id;
     if (!stopId) return null;
     cache?.set(key, stopId);
   }
   const plan = Date.parse(s.plan), when = new Date(plan - 5 * MIN).toISOString();
-  const r = await fetch(`${base}/stops/${encodeURIComponent(stopId)}/${kind === "dep" ? "departures" : "arrivals"}?when=${encodeURIComponent(when)}&duration=20&results=60`, { headers: h }).catch(() => null);
+  count("vbb"); const r = await fetch(`${base}/stops/${encodeURIComponent(stopId)}/${kind === "dep" ? "departures" : "arrivals"}?when=${encodeURIComponent(when)}&duration=20&results=60`, { headers: h }).catch(() => null);
   if (!r?.ok) return null;
   const d = await r.json().catch(() => ({}));
   const list = d.departures || d.arrivals || (Array.isArray(d) ? d : []);

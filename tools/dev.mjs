@@ -13,7 +13,7 @@ const ASSETS = { async fetch(req) {
   try { return new Response(await readFile(join(PUB, p)), { headers: { "Content-Type": TYPES[extname(p)] || "application/octet-stream" } }); }
   catch { return new Response(await readFile(join(PUB, "index.html")), { headers: { "Content-Type": TYPES[".html"] } }); }
 } };
-const env = { MOCK: "1", ASSETS };
+const env = { MOCK: "1", ASSETS, ADMIN_KEY: process.env.ADMIN_KEY };
 const ctx = { waitUntil: p => p };
 
 http.createServer(async (req, res) => {

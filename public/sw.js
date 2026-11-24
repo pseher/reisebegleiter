@@ -1,5 +1,5 @@
 // Reisebegleiter – Service Worker: App startet auch mit schlechtem Netz, Meldungen kommen an
-const V = "rb-62";
+const V = "rb-63";
 const SHELL = ["/", "/app.js", "/style.css", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -16,8 +16,11 @@ self.addEventListener("fetch", e => {
   if (r.method === "POST" && u.origin === location.origin && u.pathname === "/share") { e.respondWith(shareIn(r)); return; }
   if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/")) return;
   // Erst Netz (immer aktuell), ohne Netz die gespeicherte Version
-  e.respondWith(fetch(r).then(res => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(r.mode === "navigate" ? "/" : r, c)); } return res; })
-    .catch(() => caches.match(r.mode === "navigate" ? "/" : r)));
+  // Eigene Seiten (Impressum, Datenschutz, Zähler) nicht als App-Startseite speichern
+  if (u.pathname === "/admin.html") return;
+  const app = r.mode === "navigate" && (u.pathname === "/" || u.pathname === "/index.html"), key = app ? "/" : r;
+  e.respondWith(fetch(r).then(res => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(key, c)); } return res; })
+    .catch(() => caches.match(key).then(m => m || (r.mode === "navigate" ? caches.match("/") : undefined))));
 });
 self.addEventListener("push", e => {
   let m = {}; try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : "" }; }
