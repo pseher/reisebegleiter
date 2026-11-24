@@ -1605,6 +1605,8 @@ navigator.serviceWorker?.addEventListener("message", async e => {
 // Link „/?link=123456“ von einem anderen Gerät: gleich zum Verbinden
 const linkCode = new URLSearchParams(location.search).get("link");
 if (linkCode) { history.replaceState(null, "", "/"); view = "settings"; DEV.join = true; DEV.input = linkCode; }
+// Sofort den letzten Stand zeigen (aus dem Gerät), dann im Hintergrund frisch laden
+try { const c = JSON.parse(localStorage.getItem("rb_trips_cache") || "null"); if (c?.trips?.length && Date.now() - c.at < 12 * 3600e3) { trips = c.trips; render(); } } catch {}
 loadTrips().then(() => { render(); schedule(); takeShared(); syncFavs().then(() => { if (view === "add") render(); }); syncPrefs().then(ch => { if (ch) render(); });
   if (linkCode) setTimeout(() => joinDevice(linkCode), 300); },
   e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; });

@@ -262,9 +262,7 @@ async function api(req, env, url) {
       t.state = { ...(t.state || {}), geo: true };
       await db.update(env, "rb_trips", t.id, { legs: t.legs, state: t.state }).catch(() => {});
     }
-    // Nur fällige Abfragen nachholen, damit die Anzeige frisch ist (Meldungen verschickt nur der Cron)
-    const checks = trips.flatMap(t => dueChecks(t, now)).slice(0, 6);
-    if (checks.length) { await observe(env, checks, now, cache); for (const t of trips) if (t._dirty) await db.update(env, "rb_trips", t.id, { obs: t.obs, updated_at: new Date().toISOString() }); }
+    // Keine Live-Abfragen beim Öffnen: die Überwachung läuft ohnehin jede Minute – so startet die App sofort
     if (Date.parse(dev.last_seen || 0) < now - 3600e3) await db.update(env, "rb_devices", dev.id, { last_seen: new Date().toISOString() }).catch(() => {});
     return json(trips.map(t => view(t, now)));
   }

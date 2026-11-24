@@ -1,5 +1,5 @@
 // Reisebegleiter – Service Worker: App startet auch mit schlechtem Netz, Meldungen kommen an
-const V = "rb-70";
+const V = "rb-71";
 const SHELL = ["/", "/app.js", "/style.css", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -19,8 +19,14 @@ self.addEventListener("fetch", e => {
   // Eigene Seiten (Impressum, Datenschutz, Zähler) nicht als App-Startseite speichern
   if (u.pathname === "/admin.html") return;
   const app = r.mode === "navigate" && (u.pathname === "/" || u.pathname === "/index.html"), key = app ? "/" : r;
-  e.respondWith(fetch(r).then(res => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(key, c)); } return res; })
-    .catch(() => caches.match(key).then(m => m || (r.mode === "navigate" ? caches.match("/") : undefined))));
+  // Erst Netz – braucht es länger als 2,5 Sek. (schlechtes Netz), die gespeicherte Version; die frische landet trotzdem im Speicher
+  const net = fetch(r).then(res => { if (res.ok) { const c = res.clone(); caches.open(V).then(x => x.put(key, c)); } return res; });
+  const saved = () => caches.match(key).then(m => m || (r.mode === "navigate" ? caches.match("/") : undefined));
+  e.respondWith(new Promise(resolve => {
+    let done = false; const give = x => { if (!done && x) { done = true; resolve(x); } };
+    const t = setTimeout(() => saved().then(give), 2500);
+    net.then(res => { clearTimeout(t); give(res); }).catch(() => { clearTimeout(t); saved().then(m => { if (m) give(m); else if (!done) { done = true; resolve(Response.error()); } }); });
+  }));
 });
 self.addEventListener("push", e => {
   let m = {}; try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : "" }; }
