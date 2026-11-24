@@ -17,7 +17,7 @@ export async function vapid(env) {
 async function vapidAuth(env, endpoint) {
   const v = await vapid(env), aud = new URL(endpoint).origin;
   const h = b64u(enc.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
-  const c = b64u(enc.encode(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || "mailto:kontakt@herdzeit.de" })));
+  const c = b64u(enc.encode(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || "mailto:kontakt@umstiegsheld.de" })));
   const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, v.key, enc.encode(`${h}.${c}`));
   return `vapid t=${h}.${c}.${b64u(sig)}, k=${v.pub}`;
 }

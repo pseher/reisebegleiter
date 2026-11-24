@@ -1,5 +1,5 @@
 // Reisebegleiter – Service Worker: App startet auch mit schlechtem Netz, Meldungen kommen an
-const V = "rb-63";
+const V = "rb-64";
 const SHELL = ["/", "/app.js", "/style.css", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -24,7 +24,7 @@ self.addEventListener("fetch", e => {
 });
 self.addEventListener("push", e => {
   let m = {}; try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(m.title || "Reisebegleiter", { body: m.body || "", tag: m.tag || undefined, renotify: !!m.tag,
+  e.waitUntil(self.registration.showNotification(m.title || "Umstiegsheld", { body: m.body || "", tag: m.tag || undefined, renotify: !!m.tag,
     icon: "/icon-192.png", badge: "/icon-192.png", data: { url: m.url || "/" }, requireInteraction: !!m.urgent }));
 });
 self.addEventListener("notificationclick", e => {

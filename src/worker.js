@@ -574,7 +574,7 @@ async function api(req, env, url) {
   if (p === "/api/push" && method === "DELETE") { await db.update(env, "rb_devices", dev.id, { push: null }); return json({ ok: true }); }
   if (p === "/api/push/test" && method === "POST") {
     if (!dev.push) return fail(400, "Mitteilungen auf diesem Gerät nicht eingeschaltet");
-    const st = await deliver(env, dev.push, { title: "🔔 Test vom Reisebegleiter", body: "So sehen deine Meldungen unterwegs aus.", tag: "test", url: "/", urgent: true });
+    const st = await deliver(env, dev.push, { title: "🔔 Test von Umstiegsheld", body: "So sehen deine Meldungen unterwegs aus.", tag: "test", url: "/", urgent: true });
     return json({ ok: st >= 200 && st < 300, status: st });
   }
 

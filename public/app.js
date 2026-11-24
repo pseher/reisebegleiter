@@ -810,7 +810,7 @@ function devicesCard() {
       <span class="small muted">${d.me ? "" : `zuletzt ${sameDay(Date.parse(d.seen), Date.now()) ? "heute" : `am ${dayShort(d.seen)}`} · `}Mitteilungen ${d.push ? "an" : "aus"}</span></span>
       ${d.me ? "" : `<button class="chip" data-devdel="${d.id}">Trennen</button>`}</li>`).join("");
   const codeBox = DEV.code && Date.parse(DEV.until) > Date.now() ? `<div class="link-code">
-      <p class="small" style="margin:0">Auf dem anderen Gerät den Reisebegleiter öffnen → Einstellungen → „Code eingeben“:</p>
+      <p class="small" style="margin:0">Auf dem anderen Gerät Umstiegsheld öffnen → Einstellungen → „Code eingeben“:</p>
       <div class="code-big" aria-label="Code ${esc(DEV.code.split("").join(" "))}">${fmtCode(DEV.code)}</div>
       <p class="small muted" style="margin:0">Gilt bis ${hm(DEV.until)} Uhr. Nur an deine eigenen Geräte weitergeben.</p>
       <div class="row" style="margin-top:8px"><button class="btn sec small-btn" id="devShare">Als Link schicken</button><button class="btn quiet small-btn" id="devCodeX">Fertig</button></div></div>` : "";
@@ -830,8 +830,8 @@ function bindDevices() {
   $("devCode")?.addEventListener("click", async () => { try { const r = await api("/api/link/start", { method: "POST" }); DEV.code = r.code; DEV.until = r.until; render(); } catch (e) { alert(e.message); } });
   $("devCodeX")?.addEventListener("click", () => { DEV.code = null; DEV.list = null; render(); });
   $("devShare")?.addEventListener("click", async () => {
-    const url = `${location.origin}/?link=${DEV.code}`, text = `Reisebegleiter verbinden – Code ${fmtCode(DEV.code)} (gilt bis ${hm(DEV.until)} Uhr)`;
-    try { if (navigator.share) await navigator.share({ title: "Reisebegleiter", text, url }); else { await navigator.clipboard.writeText(`${text}\n${url}`); alert("Link kopiert."); } } catch {}
+    const url = `${location.origin}/?link=${DEV.code}`, text = `Umstiegsheld verbinden – Code ${fmtCode(DEV.code)} (gilt bis ${hm(DEV.until)} Uhr)`;
+    try { if (navigator.share) await navigator.share({ title: "Umstiegsheld", text, url }); else { await navigator.clipboard.writeText(`${text}\n${url}`); alert("Link kopiert."); } } catch {}
   });
   $("devJoinOpen")?.addEventListener("click", () => { DEV.join = true; DEV.err = ""; render(); setTimeout(() => $("devIn")?.focus(), 50); });
   $("devJoinX")?.addEventListener("click", () => { DEV.join = false; DEV.input = ""; DEV.err = ""; render(); });
