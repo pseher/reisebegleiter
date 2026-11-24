@@ -204,10 +204,22 @@ function renderList(active) {
   const now = Date.now(), cur = active.filter(t => t.phase !== "done" && (t.phase === "enroute" || Date.parse(t.legs[0].dep.rt) - now < 6 * 3600e3
       || ((t.status === "LOST" || t.status === "RISK") && Date.parse(t.legs[0].dep.rt) - now < 48 * 3600e3)))   // Ausfall schon heute Abend für morgen früh: gleich oben zeigen
     .sort((a, b) => (a.phase === "enroute" ? -1 : 0) - (b.phase === "enroute" ? -1 : 0) || Date.parse(a.legs[0].dep.rt) - Date.parse(b.legs[0].dep.rt))[0];
-  const soon = now + 18 * 3600e3, today = active.filter(t => t !== cur && Date.parse(t.legs[0].dep.plan) < soon), later = active.filter(t => t !== cur && !today.includes(t));
-  const row = t => `<li class="crow-li"><button data-open="${t.id}" class="crow"><span class="sdot d-${t.status}"></span>
-      <span class="tr-main"><b>${hm(t.legs[0].dep.rt)} ${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`}</b>${Date.parse(t.legs[0].dep.plan) > soon ? `<span class="muted small">${day(t.legs[0].dep.plan)}</span>` : ""}</span>
-      <span class="tr-state small">${esc(listState(t))}</span></button></li>`;
+  // Nach Kalendertag: Heute · Morgen · Später (jeweils nach Abfahrt sortiert)
+  const depOf = t => Date.parse(t.legs[0].dep.plan), rest = active.filter(t => t !== cur).sort((a, b) => depOf(a) - depOf(b));
+  const isToday = ms => sameDay(ms, now), isTomorrow = ms => sameDay(ms, now + 864e5);
+  // Regelmäßige Fahrten, die heute/morgen anstehen, aber erst 3 Std. vorher angelegt werden: schon mal zeigen
+  const pend = ROUTINES.filter(r => !r.paused && r.next?.at && (isToday(Date.parse(r.next.at)) || isTomorrow(Date.parse(r.next.at)))
+      && !active.some(t => t.rname === r.name && sameDay(depOf(t), Date.parse(r.next.at))))
+    .map(r => ({ pend: true, r, at: Date.parse(r.next.at) }));
+  const items = [...rest.map(t => ({ t, at: depOf(t) })), ...pend].sort((a, b) => a.at - b.at);
+  const today = items.filter(x => isToday(x.at)), tomorrow = items.filter(x => isTomorrow(x.at)), later = items.filter(x => !isToday(x.at) && !isTomorrow(x.at));
+  const row = x => x.pend
+    ? `<li class="crow-li"><button data-go="routines" class="crow pend"><span class="sdot d-pend"></span>
+      <span class="tr-main"><b>${hm(x.r.next.at)} ↻ ${esc(x.r.name)}</b>${x.r.win ? `<span class="muted small">zwischen ${esc(x.r.win[0])} und ${esc(x.r.win[1])}</span>` : ""}</span>
+      <span class="tr-state small">${x.at - 3 * 3600e3 > now ? `ab ${hm(new Date(x.at - 3 * 3600e3).toISOString())} überwacht` : "wird gleich angelegt"}</span></button></li>`
+    : `<li class="crow-li"><button data-open="${x.t.id}" class="crow"><span class="sdot d-${x.t.status}"></span>
+      <span class="tr-main"><b>${hm(x.t.legs[0].dep.rt)} ${x.t.rname ? `↻ ${esc(x.t.rname)}` : `${esc(cleanStop(x.t.legs[0].dep.name))} → ${esc(cleanStop(x.t.legs[x.t.legs.length - 1].arr.name))}`}</b>${!isToday(x.at) && !isTomorrow(x.at) ? `<span class="muted small">${day(x.t.legs[0].dep.plan)}</span>` : ""}</span>
+      <span class="tr-state small">${esc(listState(x.t))}</span></button></li>`;
   // Alte Adresse (…workers.dev): Hinweis auf den Umzug mit Anleitung zum Mitnehmen
   const moved = /workers\.dev$/.test(location.hostname) ? `<section class="card move"><div class="k">Neue Adresse</div>
       <p style="margin:0 0 8px">Umstiegsheld wohnt jetzt unter <b>umstiegsheld.de</b>. So nimmst du deine Fahrten und Favoriten mit:</p>
@@ -219,6 +231,7 @@ function renderList(active) {
     ${tiles(cur)}
     ${fresh ? iosFirst() : hintCard()}
     ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
+    ${tomorrow.length ? `<div class="sec-row"><span>Morgen</span></div><ul class="trips compact">${tomorrow.map(row).join("")}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
     ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät? Verbinden"}</button>` : ""}`;
