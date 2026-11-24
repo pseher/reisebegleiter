@@ -217,7 +217,7 @@ function renderList(active) {
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
     ${cur ? jetztCard(cur) : ""}
     ${tiles(cur)}
-    ${fresh ? "" : pushCard()}
+    ${fresh ? "" : hintCard()}
     ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
@@ -226,6 +226,7 @@ function renderList(active) {
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
   bindTiles(cur);
+  bindHints();
   bindRoutines();
   bindCommon();
 }
@@ -742,7 +743,8 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
-  $app.innerHTML = `${flashBox()}
+  const justMade = /^(Reise angelegt|\d+ Reisen angelegt)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
+  $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
       <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button></div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${`<section class="hero s-${t.status}"><div class="k">${heroKicker(t)}</div><h2>${esc(t.title)}</h2>
@@ -766,7 +768,7 @@ function renderTrip(t, many) {
       <div class="chips">${[["spar", "Sparpreis"], ["flex", "Flexpreis"], ["dticket", "Deutschlandticket"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-tk="${k}" aria-pressed="${t.ticket === k}">${l}</button>`).join("")}</div>
       ${routineForm(t)}
       <div class="danger-zone"><button class="btn danger" data-del="${t.id}">Fahrt löschen</button><p class="small muted" style="margin:4px 0 0">Wird nicht mehr überwacht und verschwindet aus der Liste.</p></div></section>` : ""}
-    ${pushCard()}
+    ${justMade ? "" : hint}
     <button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
@@ -779,6 +781,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
+  bindHints();
   bindCommon();
 }
 
@@ -881,6 +884,25 @@ async function syncFavs(serverWins = false) {
     FAVS = srv; try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
     return ch;
   } catch {}
+}
+
+// Installieren als App (Android/Chrome/Edge): das Angebot des Browsers merken und später dezent anbieten
+let INSTALL = null;
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); INSTALL = e; if (view === "home" && !openId) render(); });
+addEventListener("appinstalled", () => { INSTALL = null; try { localStorage.setItem("rb_installed", "1"); } catch {} render(); });
+const later = k => { try { return Date.now() < +(localStorage.getItem(`rb_later_${k}`) || 0); } catch { return false; } };
+// Auf der Startseite höchstens EIN Hinweis: erst Mitteilungen, danach „Als App installieren“ – jeweils mit „Später“
+function hintCard() {
+  const push = pushCard(), x = k => `<button class="link small hint-later" data-later-hint="${k}">Später</button>`;
+  if (push && !later("push")) return push.replace("</div>", `${x("push")}</div>`);
+  if (standalone || INSTALL === null || later("install")) return "";
+  return `<div class="banner info hint row" style="align-items:center"><span style="flex:3"><b>Umstiegsheld als App?</b> Liegt dann auf dem Startbildschirm und öffnet schneller.</span>
+    <button class="btn small-btn" id="installApp" style="flex:0 0 auto;width:auto;margin:0">Installieren</button>${x("install")}</div>`;
+}
+function bindHints() {
+  $app.querySelectorAll("[data-later-hint]").forEach(b => b.onclick = () => { try { localStorage.setItem(`rb_later_${b.dataset.laterHint}`, String(Date.now() + 3 * 864e5)); } catch {} render(); });
+  document.getElementById("installApp")?.addEventListener("click", async () => { const e = INSTALL; if (!e) return; INSTALL = null;
+    e.prompt(); const r = await e.userChoice.catch(() => null); if (r?.outcome !== "accepted") { try { localStorage.setItem("rb_later_install", String(Date.now() + 7 * 864e5)); } catch {} } render(); });
 }
 
 function pushCard() {

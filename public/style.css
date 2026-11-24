@@ -392,3 +392,7 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .foot-legal a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; padding: 6px 4px; display: inline-block; }
 .foot-legal span { margin: 0 4px; } .foot-legal p { margin: 2px 0 0; font-size: 12px; }
 .foot-legal nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 14px; }
+.hint-later { flex: 0 0 auto; margin-left: 6px; color: var(--muted); }
+/* Hinweise: Text oben über die ganze Breite, Knöpfe darunter */
+.banner.hint, .banner.push-ask { flex-wrap: wrap; gap: 8px 10px; }
+.banner.hint > span, .banner.push-ask > span { flex: 1 1 100% !important; }
