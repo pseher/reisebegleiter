@@ -46,7 +46,8 @@ export function simplify(data) {
     const legs = [];
     let walk = 0;
     for (const l of it.legs || []) {
-      if (["WALK", "BIKE", "CAR"].includes(l.mode)) { walk += Math.round((l.duration || 0) / 60); continue; }
+      // Fußweg: lieber aus der Entfernung (die Dauer enthält oft die gewünschte Umstiegszeit)
+      if (["WALK", "BIKE", "CAR"].includes(l.mode)) { walk += l.distance ? Math.max(1, Math.round(l.distance * 1.1 / 75)) : Math.round((l.duration || 0) / 60); continue; }
       if (legs.length && walk) legs[legs.length - 1].walk = walk;
       walk = 0;
       legs.push({ mode: l.mode, rail: RAIL.has(l.mode), label: legLabel(l), num: l.tripShortName || "", line: l.routeShortName || "", tripId: l.tripId || "",

@@ -220,11 +220,13 @@ function planBCard(t) {
   return `<h3 class="sec-h">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>`;
 }
 
+// „S Hohenzollerndamm (Berlin)“ = „Hohenzollerndamm“
+const plainStop = n => cleanStop(n).replace(/^(S\+U|S|U)\s+/i, "").replace(/\s*\([^)]*\)\s*$/, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
 // Kompakte Übersicht einer Verbindung: je Zug eine Zeile „16:51 Bus M19 S Halensee → U Adenauerplatz 16:56“, dazwischen der Umstieg
 function stepsHtml(steps) {
   return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${hm(x.dep)}</span><span class="st-b"><b>${esc(x.label)}</b>${x.pl ? ` <span class="muted">${esc(platWord({ label: x.label, mode: x.mode }, x.pl))}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${hm(x.arr)}</span></span></li>
     ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
-      const walk = cleanStop(x.to) !== cleanStop(steps[i + 1].from);
+      const walk = plainStop(x.to) !== plainStop(steps[i + 1].from) && (x.walk == null || x.walk > 0);
       if (g < 0) return `<span class="late">Umstieg geht nicht – ${-g} Min. zu spät</span>`;
       return `<span class="${g < Math.max(MINT, 3) ? "late" : g < Math.max(MINT, 3) + 3 ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
 }
@@ -381,10 +383,11 @@ function timeline(t) {
         ${t.legs.length > 1 ? `<button class="chip" style="margin-top:8px" data-must="${t.id}|${l.must ? "" : i}">${l.must ? "Nicht mehr fest einplanen" : `${kindWord(l)} fest einplanen`}</button>` : ""}
       </div>` : ""}</li>`);
     const tr = t.transfers[i];
-    if (tr) { const nx = t.legs[i + 1], walk = l.arr.eva && nx.dep.eva ? l.arr.eva !== nx.dep.eva : cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
+    if (tr) { const nx = t.legs[i + 1], moved = l.arr.eva && nx.dep.eva ? l.arr.eva !== nx.dep.eva : cleanStop(l.arr.name) !== cleanStop(nx.dep.name);
+      const same = tr.samePlace || plainStop(l.arr.name) === plainStop(nx.dep.name), walk = moved && !same;
       rows.push(`<li class="xfer"><span class="sdot d-${tr.status === "DONE" ? "OK" : tr.status}"></span>
-      <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : ""} · ${transferText(tr)}</span>
-      ${walk && tr.status !== "DONE" ? walkBtn(l.arr, nx.dep) : ""}</li>`); }
+      <span class="small">Umstieg ${esc(cleanStop(l.arr.name))}${walk ? ` → ${esc(cleanStop(nx.dep.name))} (Fußweg)` : moved && tr.walk ? ` (kurzer Fußweg, ca. ${tr.walk} Min.)` : ""} · ${transferText(tr)}</span>
+      ${moved && tr.status !== "DONE" ? walkBtn(l.arr, nx.dep) : ""}</li>`); }
   });
   return `<ol class="tl2">${rows.join("")}</ol>`;
 }

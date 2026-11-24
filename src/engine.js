@@ -63,7 +63,12 @@ export function evaluate(trip, now = Date.now()) {
   const transfers = [];
   for (let i = 0; i < n - 1; i++) {
     const a = legs[i].arr, d = legs[i + 1].dep;
-    const walk = trip.legs[i].walk || 0;                     // Gehzeit aus der Verbindungssuche, falls bekannt
+    // Gehzeit: die Verbindungssuche rechnet die eigene Umstiegszeit mit ein – deshalb mit der echten Entfernung gegenprüfen
+    const km = a.lat != null && d.lat != null ? Math.hypot((a.lat - d.lat) * 111, (a.lon - d.lon) * 111 * Math.cos(a.lat * Math.PI / 180)) : null;
+    const byDist = km == null ? null : Math.max(1, Math.round(km * 1000 * 1.3 / 75)) + 1;   // Umweg-Faktor 1,3, 75 m/Min.
+    let walk = trip.legs[i].walk || 0;
+    if (byDist != null && (walk === 0 ? km > 0.15 : walk > byDist + 2)) walk = km > 0.15 ? byDist : 0;
+    const samePlace = (km != null && km < 0.25) || plainName(a.name) === plainName(d.name);
     const gap = Math.round((d.rt - a.rt) / MIN), planGap = Math.round((d.plan - a.plan) / MIN);
     // Vom Fahrplan so geplante Umstiege gelten als machbar: höchstens die geplante Zeit verlangen (mind. 2 Min.)
     // Eigene Mindest-Umstiegszeit des Reisenden (Einstellung) gilt immer
@@ -82,7 +87,7 @@ export function evaluate(trip, now = Date.now()) {
     else if (spare < growth + 2) status = "WATCH";
     else status = "OK";
     transfers.push({ i, at: a.name, eva: a.eva, gap, planGap, tightPlan, need, own, spare, growth, until, status, reason, toMust: !!trip.legs[i + 1].must,
-      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depAt: d.name, walk,
+      fromLabel: legs[i].label, toLabel: legs[i + 1].label, arrPl: a.platform, depPl: d.platform, depAt: d.name, walk, samePlace,
       fromLeg: { mode: legs[i].mode, label: legs[i].label }, toLeg: { mode: legs[i + 1].mode, label: legs[i + 1].label }, depRt: d.rt, arrRt: a.rt });
   }
   const openTransfers = transfers.filter(t => t.status !== "DONE");
@@ -134,12 +139,14 @@ export function nextStep(v, now = Date.now()) {
 }
 
 const mins = m => (m === 1 ? "1 Min." : `${m} Min.`);
+// „S Hohenzollerndamm (Berlin)“ und „Hohenzollerndamm“ sind derselbe Ort
+const plainName = n => cleanName(n).replace(/^(S\+U|S|U)\s+/i, "").replace(/\s*\([^)]*\)\s*$/, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
 // Bus/Tram/Fähre halten an Steigen, nicht an Gleisen – und deren Positionswechsel sind keine Meldung wert
 export const isStreet = l => /BUS|TRAM|COACH|FERRY/i.test(l?.mode || "") || /^(Bus|Tram|STR|Fähre|ALT|AST)\b/i.test(String(l?.label || "").trim());
 export const platWord = (l, p) => (!p ? "" : isStreet(l) ? `Steig ${String(p).replace(/^(Pos\.?|Position|Steig|Bstg\.?)\s*/i, "")}` : `Gleis ${p}`);
 // „In Leipzig Hbf nur 4 Min. zum Umsteigen (Gleis 12 → 10).“ bzw. mit Fußweg zu einem anderen Halt
 function xferText(t, amount) {
-  const other = t.depAt && cleanName(t.depAt) !== t.at;
+  const other = t.depAt && cleanName(t.depAt) !== t.at && !t.samePlace;
   const a = platWord(t.fromLeg, t.arrPl), d = platWord(t.toLeg, t.depPl);
   const pl = a && d ? ` (${a} → ${d})` : d ? ` (weiter von ${d})` : "";
   return other ? `Von ${t.at} zu ${cleanName(t.depAt)}: ${amount} für Fußweg und Umstieg${t.walk ? `, davon ca. ${mins(t.walk)} zu Fuß` : ""}${pl}.`

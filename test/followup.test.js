@@ -156,3 +156,16 @@ test("Busse haben Steige statt Gleise, Steigwechsel wird nicht gemeldet", () => 
   const now = Date.now(), v = evaluate(t, now), d = diff(t, v, { pl: {} }, now);
   assert.ok(!d.msgs.some(m => /Gleiswechsel/.test(m.title)), JSON.stringify(d.msgs));
 });
+
+test("Bus → S-Bahn an derselben Station: kein Fehlalarm durch aufgeblähten Fußweg", () => {
+  const T = (h, m) => new Date(Date.UTC(2026, 10, 24, h - 1, m)).toISOString();
+  const leg = (label, mode, from, to, dep, arr, a, b, walk) => ({ label, mode, walk,
+    from: { name: from, plan: dep, lat: a[0], lon: a[1] }, to: { name: to, plan: arr, lat: b[0], lon: b[1] } });
+  const trip = { id: "x", legs: [
+    leg("Bus 115", "BUS", "Elsterplatz (Berlin)", "S Hohenzollerndamm (Berlin)", T(9, 57), T(10, 6), [52.47, 13.29], [52.4885, 13.3001], 12),
+    leg("S 42", "SUBURBAN", "Hohenzollerndamm (Berlin)", "Südkreuz", T(10, 18), T(10, 30), [52.4889, 13.2990], [52.475, 13.365], 0)] };
+  const ev = evaluate(trip, new Date(T(9, 40)));
+  assert.equal(ev.transfers[0].samePlace, true);
+  assert.ok(ev.transfers[0].walk <= 4, "Fußweg aus Entfernung: " + ev.transfers[0].walk);
+  assert.notEqual(ev.transfers[0].status, "RISK");
+});
