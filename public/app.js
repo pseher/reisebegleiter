@@ -94,7 +94,7 @@ applyTheme();
 
 // ---------- Zustand ----------
 let trips = [], loadedAt = 0, view = "home", W = null, timer = null;
-const go = v => { view = v; render(); scrollTo(0, 0); };
+const go = v => { view = v; render(); scrollTo(0, 0); if (v === "add") syncFavs(true).then(ch => { if (ch && view === "add") render(); }); };
 document.addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (!b) return;
   if (b.dataset.go === "home" && view === "add" && W && (W.legs?.length || W.rFrom || W.imported)) {
     return ask("Eingaben verwerfen?\n\nDu kommst zur Startseite, deine Eingaben gehen verloren.", { ok: "Verwerfen", danger: true }).then(ok => { if (ok) { W = null; go("home"); } }); }
@@ -117,12 +117,12 @@ async function loadTrips() {
 }
 function schedule() {
   clearTimeout(timer);
-  timer = setTimeout(async () => { if (view === "home" && document.visibilityState === "visible") { await loadTrips().catch(() => {}); render(); } schedule(); }, 60e3);
+  timer = setTimeout(async () => { if (document.visibilityState === "visible") syncFavs(true).catch(() => {}); if (view === "home" && document.visibilityState === "visible") { await loadTrips().catch(() => {}); render(); } schedule(); }, 60e3);
 }
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState !== "visible") return;
   // Favoriten können auf einem anderen Gerät geändert worden sein
-  if (typeof syncFavs === "function" && view !== "add") { syncFavs(true).catch(() => {}); syncPrefs(); }
+  if (typeof syncFavs === "function") { syncFavs(true).catch(() => {}); syncPrefs(); }   // Liste still erneuern (beim Tippen nicht neu zeichnen)
   if (view === "home" && Date.now() - loadedAt > 30e3) { await loadTrips().catch(() => {}); render(); } });
 
 // ---------- Zurück-Taste (Handy/Browser) ----------
@@ -848,7 +848,7 @@ function bindDevices() {
     if (!(await ask("Dieses Gerät trennen?\n\nDeine Reisen bleiben auf den anderen Geräten. Hier fängst du danach leer an.", { ok: "Trennen", danger: true }))) return;
     const me = (DEV.list || []).find(d => d.me);
     await api(`/api/devices/${me.id}`, { method: "DELETE" }).catch(() => {});
-    try { ["rb_auth", "rb_favs", "rb_push"].forEach(k => localStorage.removeItem(k)); } catch {}
+    try { ["rb_auth", "rb_favs", "rb_favs_up", "rb_push"].forEach(k => localStorage.removeItem(k)); } catch {}
     location.replace("/");
   });
 }
@@ -866,12 +866,15 @@ async function joinDevice(raw) {
   } catch (e) { DEV.busy = false; DEV.err = e.message; render(); }
 }
 // Favoriten mit dem Konto abgleichen (beim Start; nach dem Verbinden gilt die Liste vom Server)
-let favSyncT = null;
 async function syncFavs(serverWins = false) {
   try {
     const srv = await api("/api/favs");
-    if (!serverWins && !srv.length && FAVS.length) { await api("/api/favs", { method: "PUT", body: FAVS }); return; }   // einmalig vom Gerät hochladen
+    // nur beim allerersten Abgleich dieses Geräts die alte, lokal gespeicherte Liste hochladen – danach gilt immer der Server
+    let first = false; try { first = !localStorage.getItem("rb_favs_up"); localStorage.setItem("rb_favs_up", "1"); } catch {}
+    if (first && !serverWins && !srv.length && FAVS.length) { await api("/api/favs", { method: "PUT", body: FAVS }); return false; }
+    const ch = JSON.stringify(srv) !== JSON.stringify(FAVS);
     FAVS = srv; try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
+    return ch;
   } catch {}
 }
 
@@ -1044,8 +1047,14 @@ function stationField(id, label, val) {
 // ---------- Favoriten: häufige Verbindungen (auf diesem Gerät gespeichert, ohne Anmeldung) ----------
 let FAVS = []; try { FAVS = JSON.parse(localStorage.getItem("rb_favs") || "[]"); } catch {}
 let FAV_OPEN = false; try { FAV_OPEN = localStorage.getItem("rb_favs_open") === "1"; } catch {}   // eingeklappt, bis man sie öffnet (wird gemerkt)
-const saveFavs = () => { try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
-  clearTimeout(favSyncT); favSyncT = setTimeout(() => api("/api/favs", { method: "PUT", body: FAVS }).catch(() => {}), 400); };
+// Änderung immer auf den aktuellen Stand vom Server anwenden – sonst schreibt ein Gerät mit alter Liste gelöschte Favoriten zurück
+let favQ = Promise.resolve();
+const changeFavs = fn => { FAVS = fn(FAVS); try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
+  favQ = favQ.then(async () => {
+    let srv = null; try { srv = await api("/api/favs"); } catch { return; }
+    FAVS = fn(srv); try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
+    await api("/api/favs", { method: "PUT", body: FAVS }).catch(() => {});
+  }); return favQ; };
 const berlinHM = iso => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 const placeOfStop = s => (s.eva ? { eva: s.eva, name: s.name, lat: s.lat, lon: s.lon } : { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true });
 const favKey = (from, to, time) => `${from.eva || `${(+from.lat).toFixed(3)},${(+from.lon).toFixed(3)}`}>${to.eva || `${(+to.lat).toFixed(3)},${(+to.lon).toFixed(3)}`}@${time}`;
@@ -1054,7 +1063,7 @@ function favOfTrip(t) {
   return { id: favKey(a, b, time), from: placeOfStop(a), to: placeOfStop(b), time, trains: t.legs.map(l => nice(l)) };
 }
 const isFav = t => { const f = favOfTrip(t); return FAVS.some(x => x.id === f.id); };
-function toggleFav(t) { const f = favOfTrip(t); FAVS = isFav(t) ? FAVS.filter(x => x.id !== f.id) : [f, ...FAVS].slice(0, 12); saveFavs(); }
+function toggleFav(t) { const f = favOfTrip(t), on = isFav(t); changeFavs(L => (on ? L.filter(x => x.id !== f.id) : [f, ...L.filter(x => x.id !== f.id)].slice(0, 12))); }
 // nächster Termin zur Lieblingsuhrzeit: heute, falls noch nicht vorbei, sonst morgen
 // Tagauswahl für einen Favoriten: die nächsten 7 Tage als Knöpfe, sonst Kalender
 function favDays(f) {
@@ -1189,7 +1198,7 @@ function renderWizard() {
     $app.querySelectorAll(".fav-days [data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
     $app.querySelector("[data-favtoggle]")?.addEventListener("click", () => { FAV_OPEN = !FAV_OPEN; W.favOpen = null; try { localStorage.setItem("rb_favs_open", FAV_OPEN ? "1" : "0"); } catch {} render(); });
     $app.querySelector("[data-favall]")?.addEventListener("click", () => { W.favAll = true; render(); });
-    $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = async () => { if (!(await ask("Favorit entfernen?", { ok: "Entfernen", danger: true }))) return; FAVS.splice(+b.dataset.favdel, 1); saveFavs(); render(); });
+    $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = async () => { if (!(await ask("Favorit entfernen?", { ok: "Entfernen", danger: true }))) return; const id = FAVS[+b.dataset.favdel]?.id; changeFavs(L => L.filter(x => x.id !== id)); render(); });
     document.getElementById("byTrain") && (document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); });
     document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));
     document.getElementById("impTextBtn")?.addEventListener("click", () => { W.showText = !W.showText; render(); });
