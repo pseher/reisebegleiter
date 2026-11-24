@@ -180,3 +180,13 @@ test("Alternativen: Bus bekommt Live-Verspätung je Teilstrecke", async () => {
   assert.equal(alt.watch.legs[0].delay, 2);
   assert.equal(alt.watch.arrDelay, 2);
 });
+
+test("Freiwillig späteren Plan gewählt: Zugbindung bleibt bestehen", () => {
+  const T = (h, m) => new Date(Date.UTC(2026, 10, 24, h - 1, m)).toISOString();
+  const trip = { id: "z", ticket: "spar", state: { origArr: T(13, 15) }, legs: [
+    { label: "ICE 707", mode: "HIGHSPEED_RAIL", jid: "j", from: { name: "Berlin Hbf", plan: T(11, 55) }, to: { name: "Bamberg", plan: T(14, 16) } }] };
+  const v = evaluate(trip, new Date(T(6, 33)));
+  assert.equal(v.finalDelay, 61);
+  assert.equal(v.zbLifted, false);
+  assert.equal(evaluate({ ...trip, state: { ...trip.state, zbAt: T(6, 0) } }, new Date(T(6, 33))).zbLifted, true);
+});

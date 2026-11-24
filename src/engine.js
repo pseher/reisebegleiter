@@ -104,7 +104,11 @@ export function evaluate(trip, now = Date.now()) {
   const bookedArr = Date.parse(trip.state?.origArr || "") || last.arr.plan;   // nach „Übernehmen“: ursprünglich gebuchte Ankunft
   const finalDelay = lostTransfer || legCancel ? null : Math.round((last.arr.rt - bookedArr) / MIN);
   if (status === "OK" && phase !== "done" && (finalDelay ?? 0) >= 10) status = "WATCH";   // deutlich später am Ziel: nicht grün
-  const zbLifted = trip.ticket === "spar" && legs.some(isFV) && (!!lostTransfer || !!legCancel || (finalDelay ?? 0) >= 20);
+  // Zugbindung aufgehoben nur durch echte Störungen: Ausfall, verpasster Anschluss oder ≥ 20 Min. Verspätung der Züge selbst.
+  // Ein freiwillig gewählter späterer Plan zählt nicht (Verspätung gegen den eigenen Fahrplan messen, nicht gegen die gebuchte Ankunft).
+  // War die Bindung beim Wechsel schon aufgehoben, bleibt das so.
+  const realDelay = Math.round((last.arr.rt - last.arr.plan) / MIN);
+  const zbLifted = trip.ticket === "spar" && (!!trip.state?.zbAt || (legs.some(isFV) && (!!lostTransfer || !!legCancel || realDelay >= 20)));
   const v = { status, phase: missed != null && phase === "done" ? "enroute" : phase, legs, transfers, current, finalDelay: missed != null ? null : finalDelay, bookedArr, zbLifted, legCancel: legCancel ? legCancel.i : null, missed };
   Object.assign(v, headline(v, trip, now));
   v.next = missed != null ? { kind: "missed", label: legs[missed].label, station: legs[missed].dep.name, at: legs[missed].dep.rt, i: missed } : nextStep(v, now);

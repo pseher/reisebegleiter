@@ -323,7 +323,9 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
   if ((fromHere || fromSos) && a && a.from !== "start") k = +a.from;
   if (!a?.legs?.length && !a?.cut) throw Object.assign(new Error("Diese Möglichkeit gibt es nicht mehr. Ich habe neu gesucht – bitte noch einmal wählen."), { user: true });
   const st0 = trip.state || {};
-  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null, missed: st0.missed || null };
+  const undo = { legs: trip.legs, obs: trip.obs || [], at: Date.now(), legC: st0.legC || {}, pl: st0.pl || {}, rem: st0.rem || {}, origArr: st0.origArr || null, missed: st0.missed || null, zbAt: st0.zbAt || null };
+  // Grund für eine aufgehobene Zugbindung merken – nur wenn sie VOR dem Wechsel schon bestand (Störung), nicht durch den Wechsel selbst
+  const zbAt = st0.zbAt || (evaluate(trip, Date.now()).zbLifted ? new Date().toISOString() : null);
   const origArr = st0.origArr || trip.legs[trip.legs.length - 1].to.plan;   // ursprünglich gebuchte Ankunft merken
   const fresh = (a.legs?.length ? await resolveConnection(env, a.legs) : []).map(({ live, ...l }) => ({ ...l, minT: +trip.legs[0]?.minT || 0 }));
   let keep = a.from === "start" ? 0 : k + 1;
@@ -360,7 +362,7 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
   const depKeep = a.kind === "stay" || a.stay || a.cut ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, missed: null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, zbAt, missed: null };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
@@ -371,7 +373,7 @@ export function undoAdopt(trip) {
   if (!u?.legs?.length || Date.now() - (u.at || 0) > 3 * 3600e3) throw Object.assign(new Error("Hier gibt es nichts mehr zurückzunehmen."), { user: true });
   trip.legs = u.legs; trip.obs = u.obs || [];
   const { undo, ...st } = trip.state;
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: u.legC || {}, pl: u.pl || {}, rem: u.rem || {}, origArr: u.origArr || undefined, missed: u.missed || null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, legC: u.legC || {}, pl: u.pl || {}, rem: u.rem || {}, origArr: u.origArr || undefined, missed: u.missed || null, zbAt: u.zbAt || null };
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
