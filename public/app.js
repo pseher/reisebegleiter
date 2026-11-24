@@ -967,8 +967,10 @@ function bindCommon() {
     const zbWarn = t && t.ticket === "spar" && !t.zbLifted && b.dataset.zb ? "\n\nAchtung Sparpreis: Das ist ein anderer Fernzug. Er gilt erst, wenn die Zugbindung aufgehoben ist – sonst kann ein neues Ticket fällig werden." : "";
     if (!(await ask(`Diese Verbindung nehmen?\n\n${b.dataset.adoptText}${zbWarn}\n\nEs wird nichts gebucht. Ich überwache dann diese Verbindung – du kannst jederzeit zurück zum alten Plan.`, { ok: "Nehmen" }))) return;
     b.disabled = true; b.textContent = "Wird umgestellt …";
-    await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here", sos: src === "sos" } }).catch(e => alert(e.message));
-    await loadTrips().catch(() => {}); render();
+    const ok = await api(`/api/trips/${id}/adopt`, { method: "POST", body: { k: +k, idx: +idx, here: src === "here", sos: src === "sos" } }).then(() => true).catch(e => { alert(e.message); return false; });
+    // gewählt: aufgeklappte Möglichkeiten schließen und oben die neue Verbindung zeigen
+    if (ok) { openCmp = null; flash = "Alles klar – ich überwache jetzt diese Verbindung."; if (src === "here") trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); }
+    await loadTrips().catch(() => {}); render(); if (ok) scrollTo(0, 0);
   });
   $app.querySelectorAll("[data-missed]").forEach(b => b.onclick = async () => {
     const [id, i] = b.dataset.missed.split("|");
@@ -1436,7 +1438,7 @@ function renderWizard() {
       const wk = dow <= 5, quick = wk ? "Mo–Fr" : DOW[dow - 1];
       // Über „Mein Weg“ gekommen: es ist schon klar, dass es regelmäßig ist – nur noch die Tage
       $app.innerHTML = `<p class="steps">${W.regIntent ? "Neue regelmäßige Fahrt" : "Deine Fahrt"}</p><h1>${W.regIntent ? "An welchen Tagen?" : "Einmal oder öfter?"}</h1>
-        <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>
+        <p class="muted small">${esc(cleanStop(l0.from.name))} → ${esc(cleanStop(W.legs[W.legs.length - 1].to.name))}, ab ${depHm}</p>${err}
         ${W.regIntent ? `<button class="btn big-btn" id="regQuick">Jeden ${quick} um ${depHm}</button>`
           : `<button class="btn big-btn" id="regNo">Nur diese Fahrt</button><button class="btn sec" id="regQuick">Regelmäßig: jeden ${quick} um ${depHm}</button>`}
         <button class="btn quiet" id="regYes">Andere Tage oder Zeitfenster …</button>${back}`;
@@ -1591,6 +1593,7 @@ async function saveTrip(ticket) {
       W = null; await loadTrips(); openId = id; sheetId = null; return go("home");
     } catch (e) { if (!W) return; W.busy = null; W.error = e.message; return render(); }
   }
+  if (W.saving) return; W.saving = true;   // doppeltes Tippen: nur einmal anlegen
   W.busy = "Reise wird angelegt …"; render();
   try {
     let newId = null;
@@ -1611,13 +1614,13 @@ async function saveTrip(ticket) {
       const done = W.imported[W.pickedIdx];
       W.savedOne = done.label || "Die Fahrt";
       W.imported = W.imported.filter((_, i) => i !== W.pickedIdx);
-      W.pickedIdx = null; W.ticketGuess = ticket; W.busy = null; W.step = "pickTrip";
+      W.pickedIdx = null; W.ticketGuess = ticket; W.busy = null; W.saving = false; W.step = "pickTrip";
       await loadTrips().catch(() => {}); return render();
     }
     const n = (W.multi || [W.legs]).length;
     flash = n > 1 ? `${n} Reisen angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Reise angelegt. Ich melde mich, wenn du etwas tun solltest.";
-    W = null; await loadTrips(); openId = n > 1 ? null : newId; go("home");
-  } catch (e) { if (!W) return; W.busy = null; W.error = e.message; render(); }
+    W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home");
+  } catch (e) { if (!W) return; W.busy = null; W.saving = false; W.error = e.message; render(); }
 }
 
 // ---------- Mitteilungen ----------

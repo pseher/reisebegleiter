@@ -332,10 +332,15 @@ async function api(req, env, url) {
     const bad = checkLegs(legs); if (bad) return fail(400, bad);
     const ticket = ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex";
     const clean = legs.map(cleanLeg);
+    // Dieselbe Reise schon da (z. B. doppelt getippt oder Antwort ging verloren)? Dann keine zweite anlegen
+    const sigOf = L => L.map(l => `${String(l.label).replace(/\s/g, "")}@${Date.parse(l.from.plan)}>${Date.parse(l.to.plan)}`).join("|");
+    const twin = (await db.tripsOf(env, dev.account_id).catch(() => [])).find(t => t.active && sigOf(t.legs) === sigOf(clean));
+    if (twin) return json({ ...view(twin, Date.now()), existed: true }, 200);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
     const now = Date.now(), cache = new Map();
-    await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache);
-    await assess(env, trip, now, cache);
+    // Erste Prüfung darf das Anlegen nicht scheitern lassen – sonst ist die Reise da, die App meldet aber einen Fehler
+    try { await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache); await assess(env, trip, now, cache); }
+    catch (e) { console.log("Erste Prüfung:", e.message); }
     // Meldungen beginnen mit dem ersten Cron-Lauf – auch für Gleiswechsel oder Zugbindung, die schon beim Anlegen bestehen
     trip.state = { ...trip.state, rem: {}, start: null, pl: {}, zb: false };
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
@@ -422,7 +427,11 @@ async function api(req, env, url) {
       await adopt(env, t, 0, +b.idx || 0, true, false);
       // frei gewählt: Maßstab ist die gewählte Fahrt (nicht „später als geplant“)
       t.state = { ...t.state, here: null, undo: null, origArr: null, zbAt: null, win: { ...w, picked: true, list: [] } };
-    } else await adopt(env, t, +b.k || 0, +b.idx || 0, !!b.here, !!b.sos);
+    } else {
+      await adopt(env, t, +b.k || 0, +b.idx || 0, !!b.here, !!b.sos);
+      // gewählt: die Liste „Andere Verbindungen“ ist erledigt (sie passte zum alten Plan)
+      if (ma[2] === "adopt" && b.here) t.state = { ...t.state, here: null };
+    }
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(t, now, true).slice(0, 8), now, cache);
     await assess(env, t, now, cache);

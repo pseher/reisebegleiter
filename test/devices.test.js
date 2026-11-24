@@ -130,3 +130,13 @@ test("Reise ändern mit fester Fahrt: neue Anreise, der feste Zug und alles dana
   const bad = await call(`/api/trips/${t.id}`, A, "PUT", { keepFrom: 1, legs: [bus(70, 80)] });
   assert.equal(bad.s, 400); assert.match(bad.j.error, /festen Zug/);
 });
+
+test("Doppelt getippt: dieselbe Reise wird nur einmal angelegt", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.10", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const legs = [{ jid: "", tid: "t1", label: "Tram 6", mode: "TRAM", from: { eva: "", name: "Magdeburg, Arndtstr.", plan: iso(30), lat: 52.13, lon: 11.62 }, to: { eva: "", name: "Magdeburg, Hauptbahnhof", plan: iso(35), lat: 52.13, lon: 11.63 } }];
+  const a = await call("/api/trips", A, "POST", { ticket: "flex", legs }), b = await call("/api/trips", A, "POST", { ticket: "flex", legs });
+  assert.equal(a.s, 201); assert.equal(b.j.id, a.j.id);
+  assert.equal((await call("/api/trips", A)).j.length, 1);
+});
