@@ -363,3 +363,5 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .row-del:hover, .row-del:focus-visible { color: var(--lost); }
 .tile .ti-ic { display: flex; align-items: center; gap: 8px; }
 .tile .cnt { font-style: normal; font-size: 13px; font-weight: 700; color: var(--on-accent); background: var(--accent); border-radius: 999px; padding: 1px 8px; }
+.reg-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--card)); border-radius: 12px; padding: 8px 12px; margin: 4px 0 8px; font-size: 15px; }
+.reg-sum .link { min-height: 36px; }

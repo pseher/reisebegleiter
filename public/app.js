@@ -257,6 +257,16 @@ function toTicket() {
   if (!all.some(isFVc)) return saveTrip("flex");
   W.step = "ticket"; render();
 }
+// Zeitfenster aus „Neue regelmäßige Fahrt“: direkt speichern (die Fahrten im Fenster sucht die App an jedem Fahrtag selbst)
+async function saveWindowRoutine() {
+  const R = W.reg; W.busy = "Wird gespeichert …"; render();
+  try {
+    const r = await api("/api/routines", { method: "POST", body: { from: W.rFrom, to: W.rTo, name: R.name.trim(), days: R.days, winFrom: R.from, winTo: R.to, ticket: "flex", holidays: R.hol, minT: MINT } });
+    ROUTINES = await api("/api/routines").catch(() => ROUTINES);
+    flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win[0]}–${r.win[1]}. Die Fahrt erscheint jeweils ein paar Stunden vorher auf der Startseite.`;
+    W = null; go("routines");
+  } catch (e) { W.busy = null; W.error = e.message; render(); }
+}
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
 const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && (W.regIntent || !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name)));
 // In der Verbindungssuche: Strecke regelmäßig überwachen (Tage + Zeitfenster), danach läuft es im Hintergrund
@@ -858,7 +868,8 @@ function pushCard() {
 }
 
 function bindCommon() {
-  $app.querySelectorAll("[data-regstart]").forEach(b => b.onclick = () => { startWizard(); W.regIntent = true; go("add"); });
+  $app.querySelectorAll("[data-regstart]").forEach(b => b.onclick = () => { startWizard(); W.regIntent = true; W.step = "regsetup";
+    W.reg = { name: "", days: [1, 2, 3, 4, 5], kind: "fix", at: "07:30", from: "07:00", to: "08:00", hol: true }; go("add"); });
   $app.querySelectorAll("[data-pick]").forEach(b => b.onclick = async () => { b.disabled = true;
     await api(`/api/trips/${b.dataset.pick}/pick`, { method: "POST" }).catch(e => alert(e.message));
     flash = "Alles klar – ich überwache diese Fahrt und melde mich, wenn etwas nicht klappt."; await loadTrips().catch(() => {}); render(); scrollTo(0, 0); });
@@ -1055,23 +1066,51 @@ function connList(list) {
 
 function renderWizard() {
   if (!W) startWizard();
-  const n = W.legs.length, head = `<p class="steps">${W.editId ? "Reise ändern" : n ? `Teilstrecke ${n + 1}` : "Neue Reise"}</p>`;
+  const n = W.legs.length, head = `<p class="steps">${W.editId ? "Reise ändern" : W.regIntent ? "Neue regelmäßige Fahrt" : n ? `Teilstrecke ${n + 1}` : "Neue Fahrt"}</p>`;
   const back = `<button id="wBack" hidden aria-hidden="true"></button>`;   // Zurück steht oben in der Kopfleiste
   if (W.busy) { $app.innerHTML = `${head}<h1>${esc(W.busy)}</h1><div class="spinner"></div>`; return; }
   const err = W.error ? `<p class="err">${esc(W.error)}</p>` : "";
 
-  if (W.step === "route") {
+  if (W.step === "regsetup") {
+    // Neue regelmäßige Fahrt: zuerst Titel, Tage und Zeit – dann die Haltestellen
+    const R = W.reg;
+    $app.innerHTML = `<p class="steps">Neue regelmäßige Fahrt</p>
+      <label class="k" for="rsName">Titel</label>
+      <input class="txt" id="rsName" maxlength="40" placeholder="z. B. Schule oder Arbeit" value="${esc(R.name)}">
+      <p class="k" style="margin:14px 0 4px">An welchen Tagen?</p>${dayChips(R.days, "data-rsd")}
+      <p class="k" style="margin:14px 0 4px">Wann?</p>
+      <div class="seg seg2"><button data-rsk="fix" aria-pressed="${R.kind === "fix"}"><b>Feste Abfahrt</b><span>immer dieselbe Verbindung</span></button>
+        <button data-rsk="win" aria-pressed="${R.kind === "win"}"><b>Zeitfenster</b><span>alle Fahrten von–bis</span></button></div>
+      ${R.kind === "win" ? `<div class="win-row"><input type="time" id="rsFrom" value="${esc(R.from)}"><span>bis</span><input type="time" id="rsTo" value="${esc(R.to)}"></div>`
+        : `<div class="win-row"><span>ab ca.</span><input type="time" id="rsAt" value="${esc(R.at)}"></div>`}
+      <label class="small chk"><input type="checkbox" id="rsHol" ${R.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
+      ${err}<button class="btn big-btn" id="rsNext">Weiter: Haltestellen wählen</button>${back}`;
+    const keep = () => { R.name = document.getElementById("rsName").value; R.at = document.getElementById("rsAt")?.value || R.at;
+      R.from = document.getElementById("rsFrom")?.value || R.from; R.to = document.getElementById("rsTo")?.value || R.to; R.hol = document.getElementById("rsHol").checked; };
+    $app.querySelectorAll("[data-rsd]").forEach(b => b.onclick = () => { keep(); const d = +b.dataset.rsd; R.days = R.days.includes(d) ? R.days.filter(x => x !== d) : [...R.days, d].sort(); render(); });
+    $app.querySelectorAll("[data-rsk]").forEach(b => b.onclick = () => { keep(); R.kind = b.dataset.rsk; render(); });
+    document.getElementById("rsNext").onclick = () => { keep();
+      if (!R.days.length) { W.error = "Bitte mindestens einen Tag wählen."; return render(); }
+      if (R.kind === "win" && !(R.to > R.from)) { W.error = "Das Ende des Zeitfensters muss nach dem Beginn liegen."; return render(); }
+      // Suche am nächsten Fahrtag zur gewählten Zeit (ein paar Minuten vorher, damit die Verbindung sicher dabei ist)
+      const hhmm = R.kind === "win" ? R.from : R.at, [h, m] = hhmm.split(":").map(Number);
+      for (let i = 0; i < 8; i++) { const d = new Date(); d.setDate(d.getDate() + i); d.setHours(h, m, 0, 0); const dow = ((d.getDay() + 6) % 7) + 1;
+        if (R.days.includes(dow) && d.getTime() > Date.now() + 5 * MIN) { W.when = d.getTime() - 10 * MIN; break; } }
+      W.regPreset = true; W.error = ""; W.step = "route"; render(); };
+  }
+
+  else if (W.step === "route") {
     // Schnell weg: Ziele, die du schon kennst, zum Antippen
     const dests = []; if (W.quick) for (const d of [...trips.filter(t => t.active !== false).map(t => t.legs[t.legs.length - 1].arr), ...FAVS.map(f => f.to)])
       if (d && (d.eva || d.lat != null) && !dests.some(x => plainStop(x.name) === plainStop(d.name)) && dests.length < 6) dests.push({ eva: d.eva || "", name: d.name, lat: d.lat, lon: d.lon });
-    $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : W.quick ? "Schnell weg von hier" : W.regIntent ? "Arbeits- oder Schulweg" : "Neue Fahrt"}</p>
+    $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : W.quick ? "Schnell weg von hier" : W.regIntent ? "Neue regelmäßige Fahrt" : "Neue Fahrt"}</p>
       ${W.quick ? `<h1>Wohin?</h1>${dests.length ? `<div class="rchips">${dests.map((d, i) => `<button class="rchip" data-qd="${i}">${esc(cleanStop(d.name))}</button>`).join("")}</div>` : ""}` : ""}
       ${!W.editId && FAVS.length ? `<section class="card favs"><button class="fav-head" data-favtoggle aria-expanded="${FAV_OPEN}"><span class="k" style="margin:0">★ Favoriten · ${FAVS.length}</span><span class="chev">${FAV_OPEN ? "▴" : "▾"}</span></button>${!FAV_OPEN ? "" : `<ul class="fav-list">${FAVS.map((f, i) => (i >= 3 && !W.favAll && W.favOpen !== i) ? "" : `<li class="fav-row ${W.favOpen === i ? "open" : ""}"><button data-fav="${i}" aria-expanded="${W.favOpen === i}">
         <span class="fav-time">${esc(f.time)}</span><span class="fav-main"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><span class="fav-sub">${esc(f.trains.join(" → "))}</span></span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>${W.favOpen === i ? `<li class="fav-days-li">${favDays(f)}</li>` : ""}`).join("")}</ul>
         ${FAVS.length > 3 && !W.favAll ? `<button class="link small" data-favall>Alle ${FAVS.length} Favoriten zeigen</button>` : ""}`}
 
 </section>` : ""}
-      ${W.quick ? "" : W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : !W.impOpen ? `<h1>Wohin geht es?</h1>` : `<section class="card import">
+      ${W.quick ? "" : W.editId ? `<h1>Neue Verbindung für deine Reise</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : !W.impOpen ? `<h1>${W.regIntent ? "Von wo nach wo?" : "Wohin geht es?"}</h1>` : `<section class="card import">
         <div class="k">Schnell: Reise einfügen</div>
         <p class="small muted" style="margin-top:0">Screenshot aus dem DB Navigator, Ticket-PDF oder geteilter Text – ich lese die Züge selbst heraus.</p>
         <div class="row"><label class="btn" style="margin:4px 0">Foto, Screenshot oder PDF<input type="file" id="impFile" accept="image/*,application/pdf" multiple hidden></label>
@@ -1081,12 +1120,12 @@ function renderWizard() {
       </section>
       <h1 style="margin-top:22px">Oder: Wohin geht es?</h1>`}
 
+      ${W.regIntent && W.reg ? `<div class="reg-sum"><span>↻ <b>${esc(W.reg.name || "Neue regelmäßige Fahrt")}</b> · ${esc(daysText(W.reg.days))} · ${W.reg.kind === "win" ? `${esc(W.reg.from)}–${esc(W.reg.to)}` : `ab ${esc(W.reg.at)}`}</span><button class="link" id="regEdit">ändern</button></div>` : ""}
       ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
-      <p class="small muted" style="margin:14px 0 4px">Abfahrt</p>
-      ${whenPicker("when")}
+      ${W.regIntent && W.reg ? "" : `<p class="small muted" style="margin:14px 0 4px">Abfahrt</p>${whenPicker("when")}`}
       ${W.editId || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
-      ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>Verbindungen suchen</button>
-      <button class="btn quiet" id="byTrain">Direkt aus der Abfahrtstafel wählen</button>
+      ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>${W.regIntent && W.reg?.kind === "win" ? "Speichern" : W.regIntent ? "Verbindung wählen" : "Verbindungen suchen"}</button>
+      ${W.regIntent ? "" : `<button class="btn quiet" id="byTrain">Direkt aus der Abfahrtstafel wählen</button>`}
       ${W.editId || W.impOpen || W.regIntent || W.quick ? "" : `<button class="btn quiet" id="impOpen">Ticket schon gebucht? Foto oder Text einfügen …</button>`}${back}`;
     document.getElementById("impOpen")?.addEventListener("click", () => { W.impOpen = true; render(); scrollTo(0, 0); });
     $app.querySelectorAll("[data-qd]").forEach(b => b.onclick = () => { W.rTo = dests[+b.dataset.qd]; W.when = Date.now(); if (W.rFrom) { W.conns = null; W.step = "conns"; } render(); });
@@ -1114,7 +1153,10 @@ function renderWizard() {
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
     bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
-    document.getElementById("go").onclick = () => { W.conns = null; W.error = ""; W.fav = null; W.step = "conns"; render(); };
+    document.getElementById("regEdit")?.addEventListener("click", () => { W.step = "regsetup"; render(); });
+    document.getElementById("go").onclick = () => {
+      if (W.regIntent && W.reg?.kind === "win") return saveWindowRoutine();   // Zeitfenster: keine einzelne Verbindung nötig
+      W.conns = null; W.error = ""; W.fav = null; W.step = "conns"; render(); };
     // Favorit antippen → Tag wählen → suchen (etwas vor der üblichen Uhrzeit, damit sie sicher dabei ist)
     const favSearch = (f, ms) => { W.when = Math.max(Date.now(), ms - 15 * MIN); W.rFrom = f.from; W.rTo = f.to; W.fav = f; W.favOpen = null; W.cal = null; W.conns = null; W.error = ""; W.step = "conns"; render(); };
     $app.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => { const i = +b.dataset.fav; W.favOpen = W.favOpen === i ? null : i; W.cal = null; render(); });
@@ -1127,7 +1169,7 @@ function renderWizard() {
     $app.querySelector("[data-favtoggle]")?.addEventListener("click", () => { FAV_OPEN = !FAV_OPEN; W.favOpen = null; try { localStorage.setItem("rb_favs_open", FAV_OPEN ? "1" : "0"); } catch {} render(); });
     $app.querySelector("[data-favall]")?.addEventListener("click", () => { W.favAll = true; render(); });
     $app.querySelectorAll("[data-favdel]").forEach(b => b.onclick = () => { if (!confirm("Favorit entfernen?")) return; FAVS.splice(+b.dataset.favdel, 1); saveFavs(); render(); });
-    document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); };
+    document.getElementById("byTrain") && (document.getElementById("byTrain").onclick = () => { W.mode = "train"; W.step = "station"; W.error = ""; render(); });
     document.getElementById("impFile")?.addEventListener("change", e => importFiles([...e.target.files]));
     document.getElementById("impTextBtn")?.addEventListener("click", () => { W.showText = !W.showText; render(); });
     const it = document.getElementById("impText"); if (it) it.oninput = () => { W.impText = it.value; };
@@ -1255,10 +1297,9 @@ function renderWizard() {
       <button class="btn" id="done">${W.editId ? "Reise so ändern" : "Fertig – weiter"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
       ${W.mode === "import" ? `<button class="btn quiet" id="undo">Nicht anlegen</button>` : W.mode === "route" ? `<button class="btn quiet" id="undo">Andere Verbindung wählen</button>` : `<button class="btn quiet" id="undo">Letzte Teilstrecke entfernen</button>`}${back}`;
-    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); if (canRegular()) { W.step = "regular"; render(); } else toTicket(); };
+    document.getElementById("done").onclick = () => { if (W.editId) return saveTrip(W.editTicket); if (canRegular() && !W.regPreset) { W.step = "regular"; render(); } else toTicket(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
     document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
-    return;
   }
 
   else if (W.step === "regular") {
@@ -1314,12 +1355,13 @@ function renderWizard() {
   const bk = document.getElementById("wBack");
   if (bk) bk.onclick = () => {
     W.error = "";
-    if (W.step === "route") { W = null; return go("home"); }
+    if (W.step === "regsetup") { W = null; return go("routines"); }
+    if (W.step === "route") { if (W.regIntent && W.reg) { W.step = "regsetup"; return render(); } W = null; return go("home"); }
     if (W.step === "station") { if (W.mode === "train" && !W.legs.length) W.step = "route"; else { W = null; return go("home"); } }
     else if (W.step === "conns") W.step = "route";
     else if (W.step === "trains") W.step = W.legs.length ? "leg" : "station";
     else if (W.step === "exit") W.step = "trains";
-    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : canRegular() ? "regular" : "leg";
+    else if (W.step === "ticket") W.step = W.multi ? "pickTrip" : canRegular() && !W.regPreset ? "regular" : "leg";
     else if (W.step === "regular") { if (W.reg) W.reg = null; else W.step = "leg"; }   // Formular → Frage → Verbindung
     else if (W.step === "leg" && W.mode === "route") { W.legs = []; W.step = "conns"; }
     else if (W.step === "leg" && W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; }
