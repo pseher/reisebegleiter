@@ -293,15 +293,16 @@ export async function runMonitor(env, now = Date.now()) {
     const before = JSON.stringify(t.state || {});
     const { msgs } = await assess(env, t, now, cache);
     if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
-    if (msgs.length) out.set(t.device_id, [...(out.get(t.device_id) || []), ...msgs.slice(0, 4).map(m => ({ ...m, url: `/?trip=${encodeURIComponent(t.id)}` }))]);
+    const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
+    if (msgs.length) out.set(acc, [...(out.get(acc) || []), ...msgs.slice(0, 4).map(m => ({ ...m, url: `/?trip=${encodeURIComponent(t.id)}` }))]);
   }
   let sent = 0;
   if (out.size) {
-    const devs = await db.devicesByIds(env, [...out.keys()]);
+    const devs = await db.devicesOf(env, [...out.keys()], "id,push,account_id");
     for (const d of devs) {
-      if (!d.push && env.MOCK === "1") { out.get(d.id).forEach(m => console.log("PUSH (kein Abo)", m.title, "–", m.body)); continue; }
+      if (!d.push && env.MOCK === "1") { out.get(d.account_id).forEach(m => console.log("PUSH (kein Abo)", m.title, "–", m.body)); continue; }
       if (!d.push) continue;
-      for (const m of out.get(d.id)) {
+      for (const m of out.get(d.account_id)) {
         const st = await deliver(env, d.push, { url: "/", ...m });
         if (st === 404 || st === 410) { await db.update(env, "rb_devices", d.id, { push: null }); break; }
         if (st >= 200 && st < 300) sent++;

@@ -34,3 +34,5 @@ revoke all on public.rb_trips   from anon, authenticated;
 
 -- Nachtrag (für bestehende Tabellen): Tageszähler für den KI-Import
 alter table public.rb_devices add column if not exists usage jsonb;
+
+-- Nachtrag 24.11.2026: Konten zum Verbinden mehrerer Geräte → siehe supabase/2026-11-24_konten.sql

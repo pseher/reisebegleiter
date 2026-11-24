@@ -9,8 +9,19 @@ const standalone = matchMedia("(display-mode: standalone)").matches || navigator
 // ---------- Gerät & Schnittstelle ----------
 let AUTH = null;
 try { AUTH = JSON.parse(localStorage.getItem("rb_auth") || "null"); } catch {}
+// Name fürs Gerät in der Geräteliste („Android-Handy“, „iPhone“, „Windows-PC“ …)
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  if (/iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/iPhone|iPod/.test(ua)) return "iPhone";
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Android-Handy" : "Android-Tablet";
+  if (/Windows/.test(ua)) return "Windows-PC";
+  if (/Macintosh/.test(ua)) return "Mac";
+  if (/Linux|CrOS/.test(ua)) return "Computer";
+  return "Gerät";
+}
 async function register() {
-  const r = await fetch("/api/register", { method: "POST" });
+  const r = await fetch("/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: deviceLabel() }) });
   if (!r.ok) throw new Error("Anmeldung des Geräts fehlgeschlagen");
   AUTH = await r.json();
   try { localStorage.setItem("rb_auth", JSON.stringify(AUTH)); } catch {}
@@ -120,7 +131,8 @@ function renderList(active) {
     $app.innerHTML = `<h1>Bahnfahren ohne Stress</h1>
       <p class="muted">Lege deine Reise an. Ich prüfe unterwegs Verspätungen, Gleiswechsel und Anschlüsse und melde mich nur, wenn du etwas tun solltest.</p>
       <p class="muted">Wird ein Umstieg knapp, siehst du sofort deinen Plan neben den Möglichkeiten – sitzen bleiben, einen Zug früher oder später – und wann du jeweils ankommst.</p>
-      <button class="btn" data-go="add">Reise hinzufügen</button>${pushCard()}`;
+      <button class="btn" data-go="add">Reise hinzufügen</button>
+      <button class="btn quiet" data-linkjoin>Schon auf einem anderen Gerät eingerichtet? Verbinden</button>${pushCard()}`;
     return bindCommon();
   }
   $app.innerHTML = `${flashBox()}<h1>Deine Reisen</h1>
@@ -486,6 +498,7 @@ function renderSettings() {
       <p class="small muted">Automatisch folgt der Einstellung deines Handys.</p></section>
     <section class="card"><div class="k">Meine übliche Umstiegszeit</div>${minTChips()}
       <p class="small muted">Gilt für neue Reisen. Bei einer Reise änderst du sie unter „Einstellungen dieser Reise“.</p></section>
+    ${devicesCard()}
     <section class="card"><div class="k">Mitteilungen</div>
       <p class="small">${on ? "Eingeschaltet auf diesem Gerät." : perm === "denied" ? "Im Browser blockiert." : "Noch nicht eingeschaltet."}</p>
       ${on ? `<button class="btn sec" id="pushTest">Test-Mitteilung senden</button>` : perm === "denied" ? "" : `<button class="btn" id="pushOn">Mitteilungen erlauben</button>`}
@@ -494,7 +507,84 @@ function renderSettings() {
   $app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { THEME = b.dataset.themeSet; try { localStorage.setItem("rb_theme", THEME); } catch {} applyTheme(); render(); });
   $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
   document.getElementById("pushTest")?.addEventListener("click", () => api("/api/push/test", { method: "POST" }).then(r => alert(r.ok ? "Gesendet – kommt gleich an." : "Konnte nicht gesendet werden.")).catch(e => alert(e.message)));
+  bindDevices();
   bindCommon();
+}
+
+// ---------- Geräte verbinden: gleiche Reisen und Favoriten auf Handy, Tablet und Computer – ohne Anmeldung ----------
+const DEV = { list: null, code: null, until: null, join: false, input: "", err: "", busy: false };
+const fmtCode = c => `${c.slice(0, 3)} ${c.slice(3)}`;
+const dayShort = iso => new Date(iso).toLocaleDateString("de-DE", { day: "numeric", month: "numeric", timeZone: "Europe/Berlin" });
+function devicesCard() {
+  if (!DEV.list) { api("/api/devices").then(l => { DEV.list = l; if (view === "settings") render(); }).catch(() => {}); }
+  const list = DEV.list || [], others = list.filter(d => !d.me);
+  const rows = list.map(d => `<li class="dev-row"><span><b>${esc(d.label)}</b>${d.me ? ` <span class="muted">(dieses Gerät)</span>` : ""}<br>
+      <span class="small muted">${d.me ? "" : `zuletzt ${sameDay(Date.parse(d.seen), Date.now()) ? "heute" : `am ${dayShort(d.seen)}`} · `}Mitteilungen ${d.push ? "an" : "aus"}</span></span>
+      ${d.me ? "" : `<button class="chip" data-devdel="${d.id}">Trennen</button>`}</li>`).join("");
+  const codeBox = DEV.code && Date.parse(DEV.until) > Date.now() ? `<div class="link-code">
+      <p class="small" style="margin:0">Auf dem anderen Gerät den Reisebegleiter öffnen → Einstellungen → „Code eingeben“:</p>
+      <div class="code-big" aria-label="Code ${esc(DEV.code.split("").join(" "))}">${fmtCode(DEV.code)}</div>
+      <p class="small muted" style="margin:0">Gilt bis ${hm(DEV.until)} Uhr. Nur an deine eigenen Geräte weitergeben.</p>
+      <div class="row" style="margin-top:8px"><button class="btn sec small-btn" id="devShare">Als Link schicken</button><button class="btn quiet small-btn" id="devCodeX">Fertig</button></div></div>` : "";
+  const joinBox = DEV.join ? `<div class="link-code">
+      <label class="small" for="devIn">Code vom anderen Gerät</label>
+      <input id="devIn" class="code-in" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" value="${esc(DEV.input)}">
+      ${DEV.err ? `<p class="small late" style="margin:4px 0 0">${esc(DEV.err)}</p>` : ""}
+      <div class="row" style="margin-top:8px"><button class="btn small-btn" id="devJoin" ${DEV.busy ? "disabled" : ""}>${DEV.busy ? "Verbinde …" : "Verbinden"}</button><button class="btn quiet small-btn" id="devJoinX">Abbrechen</button></div></div>` : "";
+  return `<section class="card" id="devices"><div class="k">Deine Geräte</div>
+    <p class="small" style="margin-top:0">Verbundene Geräte zeigen dieselben Reisen und Favoriten – ohne Anmeldung, ohne E-Mail. Mitteilungen schaltest du auf jedem Gerät selbst ein.</p>
+    ${list.length ? `<ul class="dev-list">${rows}</ul>` : ""}
+    ${codeBox || joinBox || `<div class="seg seg2"><button id="devCode"><b>Gerät hinzufügen</b><span>Code hier anzeigen</span></button><button id="devJoinOpen"><b>Code eingeben</b><span>von anderem Gerät</span></button></div>`}
+    ${others.length ? `<button class="btn quiet small-btn" id="devLeave">Dieses Gerät trennen</button>` : ""}</section>`;
+}
+function bindDevices() {
+  const $ = id => document.getElementById(id);
+  $("devCode")?.addEventListener("click", async () => { try { const r = await api("/api/link/start", { method: "POST" }); DEV.code = r.code; DEV.until = r.until; render(); } catch (e) { alert(e.message); } });
+  $("devCodeX")?.addEventListener("click", () => { DEV.code = null; DEV.list = null; render(); });
+  $("devShare")?.addEventListener("click", async () => {
+    const url = `${location.origin}/?link=${DEV.code}`, text = `Reisebegleiter verbinden – Code ${fmtCode(DEV.code)} (gilt bis ${hm(DEV.until)} Uhr)`;
+    try { if (navigator.share) await navigator.share({ title: "Reisebegleiter", text, url }); else { await navigator.clipboard.writeText(`${text}\n${url}`); alert("Link kopiert."); } } catch {}
+  });
+  $("devJoinOpen")?.addEventListener("click", () => { DEV.join = true; DEV.err = ""; render(); setTimeout(() => $("devIn")?.focus(), 50); });
+  $("devJoinX")?.addEventListener("click", () => { DEV.join = false; DEV.input = ""; DEV.err = ""; render(); });
+  $("devIn")?.addEventListener("input", e => { DEV.input = e.target.value; });
+  $("devIn")?.addEventListener("keydown", e => { if (e.key === "Enter") $("devJoin")?.click(); });
+  $("devJoin")?.addEventListener("click", () => joinDevice(DEV.input));
+  $app.querySelectorAll("[data-devdel]").forEach(b => b.onclick = async () => {
+    const d = (DEV.list || []).find(x => x.id === b.dataset.devdel);
+    if (!confirm(`${d?.label || "Gerät"} trennen?\n\nDas Gerät sieht deine Reisen dann nicht mehr und bekommt keine Mitteilungen mehr.`)) return;
+    await api(`/api/devices/${b.dataset.devdel}`, { method: "DELETE" }).catch(e => alert(e.message));
+    DEV.list = null; render();
+  });
+  $("devLeave")?.addEventListener("click", async () => {
+    if (!confirm("Dieses Gerät trennen?\n\nDeine Reisen bleiben auf den anderen Geräten. Hier fängst du danach leer an.")) return;
+    const me = (DEV.list || []).find(d => d.me);
+    await api(`/api/devices/${me.id}`, { method: "DELETE" }).catch(() => {});
+    try { ["rb_auth", "rb_favs", "rb_push"].forEach(k => localStorage.removeItem(k)); } catch {}
+    location.replace("/");
+  });
+}
+async function joinDevice(raw) {
+  const code = String(raw || "").replace(/\D/g, "");
+  if (code.length !== 6) { DEV.err = "Der Code hat 6 Ziffern."; return render(); }
+  if (trips.length && !confirm("Dieses Gerät verbinden?\n\nDeine Reisen und Favoriten von hier kommen dazu – danach siehst du auf beiden Geräten dasselbe.")) return;
+  DEV.busy = true; DEV.err = ""; render();
+  try {
+    await api("/api/link/join", { method: "POST", body: { code } });
+    Object.assign(DEV, { join: false, input: "", busy: false, list: null });
+    await syncFavs(true); await loadTrips().catch(() => {});
+    flash = "Verbunden. Du siehst jetzt deine Reisen und Favoriten von allen Geräten.";
+    openId = null; go("home");
+  } catch (e) { DEV.busy = false; DEV.err = e.message; render(); }
+}
+// Favoriten mit dem Konto abgleichen (beim Start; nach dem Verbinden gilt die Liste vom Server)
+let favSyncT = null;
+async function syncFavs(serverWins = false) {
+  try {
+    const srv = await api("/api/favs");
+    if (!serverWins && !srv.length && FAVS.length) { await api("/api/favs", { method: "PUT", body: FAVS }); return; }   // einmalig vom Gerät hochladen
+    FAVS = srv; try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
+  } catch {}
 }
 
 function pushCard() {
@@ -507,6 +597,7 @@ function pushCard() {
 }
 
 function bindCommon() {
+  $app.querySelectorAll("[data-linkjoin]").forEach(b => b.onclick = () => { DEV.join = true; DEV.err = ""; go("settings"); setTimeout(() => { document.getElementById("devices")?.scrollIntoView({ block: "center" }); document.getElementById("devIn")?.focus(); }, 80); });
   $app.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     if (!confirm("Reise beenden und nicht mehr überwachen?")) return;
     await api(`/api/trips/${b.dataset.del}`, { method: "DELETE" }).catch(e => alert(e.message));
@@ -650,7 +741,8 @@ function stationField(id, label, val) {
 // ---------- Favoriten: häufige Verbindungen (auf diesem Gerät gespeichert, ohne Anmeldung) ----------
 let FAVS = []; try { FAVS = JSON.parse(localStorage.getItem("rb_favs") || "[]"); } catch {}
 let FAV_OPEN = false; try { FAV_OPEN = localStorage.getItem("rb_favs_open") === "1"; } catch {}   // eingeklappt, bis man sie öffnet (wird gemerkt)
-const saveFavs = () => { try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {} };
+const saveFavs = () => { try { localStorage.setItem("rb_favs", JSON.stringify(FAVS)); } catch {}
+  clearTimeout(favSyncT); favSyncT = setTimeout(() => api("/api/favs", { method: "PUT", body: FAVS }).catch(() => {}), 400); };
 const berlinHM = iso => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 const placeOfStop = s => (s.eva ? { eva: s.eva, name: s.name, lat: s.lat, lon: s.lon } : { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true });
 const favKey = (from, to, time) => `${from.eva || `${(+from.lat).toFixed(3)},${(+from.lon).toFixed(3)}`}>${to.eva || `${(+to.lat).toFixed(3)},${(+to.lon).toFixed(3)}`}@${time}`;
@@ -1059,4 +1151,8 @@ navigator.serviceWorker?.addEventListener("message", async e => {
   await loadTrips().catch(() => {});
   go("home");
 });
-loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; throw e; }).then(() => { render(); schedule(); takeShared(); });
+// Link „/?link=123456“ von einem anderen Gerät: gleich zum Verbinden
+const linkCode = new URLSearchParams(location.search).get("link");
+if (linkCode) { history.replaceState(null, "", "/"); view = "settings"; DEV.join = true; DEV.input = linkCode; }
+loadTrips().catch(e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; throw e; }).then(() => { render(); schedule(); takeShared(); syncFavs().then(() => { if (view === "add") render(); });
+  if (linkCode) setTimeout(() => joinDevice(linkCode), 300); });

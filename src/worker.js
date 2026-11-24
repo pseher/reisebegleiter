@@ -20,10 +20,15 @@ async function device(env, req) {
   if (!m) return null;
   const d = await db.get(env, "rb_devices", m[1]);
   if (!d || d.token_hash !== await sha(m[2])) return null;
+  // Geräte von vor den Konten: eigenes Konto mit gleicher ID nachträglich anlegen
+  if (!d.account_id) { await db.insert(env, "rb_accounts", { id: d.id }).catch(() => {}); await db.update(env, "rb_devices", d.id, { account_id: d.id }); d.account_id = d.id; }
   return d;
 }
 
-const ownTrip = async (env, dev, id) => { const t = await db.get(env, "rb_trips", id); return t && t.device_id === dev.id ? t : null; };
+// Reise gehört zum Konto dieses Geräts (alle verbundenen Geräte dürfen sie sehen und ändern)
+const ownTrip = async (env, dev, id) => { const t = await db.get(env, "rb_trips", id); return t && (t.account_id || t.device_id) === dev.account_id ? t : null; };
+const LABEL = s => String(s || "").replace(/[^\p{L}\p{N} .\-]/gu, "").slice(0, 30) || null;
+const CODE_MIN = 10;   // Verbindungscode gilt 10 Minuten
 
 // Fehlende Koordinaten von DB-Bahnhöfen aus der Stationsliste ergänzen (auch für ältere Reisen)
 const withCoords = s => { if (s.lat != null || !s.eva) return s; const b = byEva(s.eva); return b ? { ...s, lat: b.lat, lon: b.lon } : s; };
@@ -141,7 +146,9 @@ async function api(req, env, url) {
 
   if (p === "/api/register" && method === "POST") {
     const token = b64u(crypto.getRandomValues(new Uint8Array(24)));
-    const d = await db.insert(env, "rb_devices", { token_hash: await sha(token) });
+    const b = await req.json().catch(() => ({}));
+    const acc = await db.insert(env, "rb_accounts", { favs: [] });
+    const d = await db.insert(env, "rb_devices", { token_hash: await sha(token), account_id: acc.id, label: LABEL(b.label) });
     return json({ id: d.id, token });
   }
 
@@ -231,7 +238,7 @@ async function api(req, env, url) {
   }
 
   if (p === "/api/trips" && method === "GET") {
-    const now = Date.now(), trips = await db.tripsOf(env, dev.id), cache = new Map();
+    const now = Date.now(), trips = await db.tripsOf(env, dev.account_id), cache = new Map();
     // Einmalig: fehlende Koordinaten von Haltestellen ohne DB-Nummer (Bus/Tram) nachschlagen – für die Fußweg-Navigation
     for (const t of trips) {
       if (t.state?.geo) continue;
@@ -259,7 +266,7 @@ async function api(req, env, url) {
     const bad = checkLegs(legs); if (bad) return fail(400, bad);
     const ticket = ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex";
     const clean = legs.map(cleanLeg);
-    const trip = await db.insert(env, "rb_trips", { device_id: dev.id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
+    const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
     const now = Date.now(), cache = new Map();
     await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache);
     await assess(env, trip, now, cache);
@@ -381,6 +388,55 @@ async function api(req, env, url) {
       }
       return json({ ok: true });
     }
+  }
+
+  // ---------- Geräte verbinden (ohne Anmeldung): Code auf dem einen Gerät zeigen, auf dem anderen eingeben ----------
+  if (p === "/api/devices" && method === "GET") {
+    const list = await db.devicesOf(env, [dev.account_id]);
+    return json(list.map(d => ({ id: d.id, label: d.label || "Gerät", me: d.id === dev.id, push: !!d.push, since: d.created_at, seen: d.last_seen })));
+  }
+  if (p === "/api/devices/label" && method === "POST") {
+    const b = await req.json().catch(() => ({}));
+    await db.update(env, "rb_devices", dev.id, { label: LABEL(b.label) });
+    return json({ ok: true });
+  }
+  if (p.startsWith("/api/devices/") && method === "DELETE") {
+    // Gerät trennen: es verliert den Zugang und fängt beim nächsten Öffnen leer an
+    const id = p.split("/")[3], d = await db.get(env, "rb_devices", id);
+    if (!d || d.account_id !== dev.account_id) return fail(404, "Gerät nicht gefunden");
+    await db.remove(env, "rb_devices", id);
+    return json({ ok: true, me: id === dev.id });
+  }
+  if (p === "/api/link/start" && method === "POST") {
+    const code = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+    const until = new Date(Date.now() + CODE_MIN * MIN).toISOString();
+    await db.update(env, "rb_devices", dev.id, { link_code: await sha(`rb-link|${code}`), link_until: until });
+    return json({ code, until });
+  }
+  if (p === "/api/link/join" && method === "POST") {
+    const b = await req.json().catch(() => ({})), code = String(b.code || "").replace(/\D/g, "");
+    // Schutz vor Raten: höchstens 5 Fehlversuche je Viertelstunde
+    const now = Date.now(), tr = dev.link_tries && now - Date.parse(dev.link_tries.t) < 15 * MIN ? dev.link_tries : { t: new Date(now).toISOString(), n: 0 };
+    if (tr.n >= 5) return fail(429, "Zu viele Versuche. Bitte in 15 Minuten noch einmal – oder auf dem anderen Gerät einen neuen Code holen.");
+    const src = code.length === 6 ? await db.deviceByLinkCode(env, await sha(`rb-link|${code}`)) : null;
+    if (!src) { await db.update(env, "rb_devices", dev.id, { link_tries: { ...tr, n: tr.n + 1 } }).catch(() => {}); return fail(400, "Der Code stimmt nicht oder ist abgelaufen. Bitte auf dem anderen Gerät einen neuen Code holen."); }
+    if (src.account_id === dev.account_id) return fail(400, "Die beiden Geräte sind schon verbunden.");
+    // Favoriten zusammenführen, dann Reisen und Geräte dieses Kontos ins andere übernehmen
+    const [mine, theirs] = await Promise.all([db.get(env, "rb_accounts", dev.account_id), db.get(env, "rb_accounts", src.account_id)]);
+    const favs = [...(theirs?.favs || []), ...(mine?.favs || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id) === i).slice(0, 24);
+    await db.update(env, "rb_accounts", src.account_id, { favs });
+    await db.mergeAccount(env, dev.account_id, src.account_id);
+    await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
+    await db.update(env, "rb_devices", dev.id, { link_tries: null });
+    return json({ ok: true });
+  }
+  // Favoriten gehören zum Konto, damit sie auf allen Geräten gleich sind
+  if (p === "/api/favs" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json(a?.favs || []); }
+  if (p === "/api/favs" && method === "PUT") {
+    const b = await req.json().catch(() => null);
+    if (!Array.isArray(b) || JSON.stringify(b).length > 60000) return fail(400, "Favoriten ungültig");
+    await db.update(env, "rb_accounts", dev.account_id, { favs: b.slice(0, 24) });
+    return json({ ok: true });
   }
 
   if (p === "/api/push" && method === "POST") {

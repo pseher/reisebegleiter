@@ -291,3 +291,11 @@ button.link { padding: 10px 4px; }
 /* Echtzeit je Teilstrecke */
 .steps-l .st-t s { display: block; font-size: 12px; line-height: 1.1; }
 .steps-l .badge { font-size: 12px; padding: 0 6px; }
+/* Geräte verbinden */
+.dev-list { list-style: none; margin: 4px 0 10px; padding: 0; }
+.dev-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.dev-row:first-child { border-top: 0; }
+.seg.seg2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.link-code { background: var(--bg); border-radius: 12px; padding: 12px; margin: 4px 0 8px; }
+.code-big { font-size: 40px; font-weight: 800; letter-spacing: .08em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
+.code-in { width: 100%; font-size: 28px; font-weight: 700; letter-spacing: .1em; text-align: center; padding: 10px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--card); color: var(--text, inherit); margin-top: 4px; box-sizing: border-box; }
