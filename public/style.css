@@ -418,3 +418,9 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .rbody .rbtns .btn { width: 100%; margin: 0; }
 .win-row input[type=time], .win-row input[type=date] { min-width: 7.2em; }
 .win-row input[type=date] { flex: 1; min-height: var(--tap); font: inherit; padding: 8px 6px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); }
+/* Wann muss ich los: kompakte Zeile */
+.acc-line { display: flex; align-items: baseline; gap: 8px; width: 100%; background: none; border: 0; padding: 2px 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.acc-line b { white-space: nowrap; } .acc-line .small { flex: 1; min-width: 0; }
+.acc-line .chev { margin-left: auto; color: var(--muted); }
+.acc .chips { margin-top: 6px; gap: 6px; }
+.chip.sm { min-width: 44px; padding-left: 10px; padding-right: 10px; }

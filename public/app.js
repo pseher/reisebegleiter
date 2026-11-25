@@ -266,7 +266,8 @@ let ACC = {}; try { ACC = JSON.parse(localStorage.getItem("rb_access") || "{}");
 const saveAcc = () => { try { localStorage.setItem("rb_access", JSON.stringify(ACC)); } catch {} };
 // Bei regelmäßigen Fahrten gilt das Ergebnis auch für die nächsten Tage (gleicher Start) – Art und Minuten werden gemerkt
 const accOf = t => ACC[t.id] || (t.routine && ACC[`r:${t.routine}`]) || null;
-const accBuf = () => (ACC._buf != null ? ACC._buf : 5);
+const BUFS = [2, 4, 7, 10], accBuf = () => (BUFS.includes(ACC._buf) ? ACC._buf : 2);
+let ACC_OPEN = null;   // aufgeklappte Einstellungen von „Wann muss ich los?“ (sonst nur eine Zeile)
 function accessBox(t) {
   const a = accOf(t), dep = Date.parse(t.legs[0].dep.rt), pref = t.routine && ACC[`r:${t.routine}`]?.mode;
   if (a?.busy) return `<div class="acc"><div class="spinner"></div></div>`;
@@ -276,14 +277,17 @@ function accessBox(t) {
   const buf = accBuf(), park = a.mode === "CAR" ? PARK : 0, need = a.min + park + buf, go = dep - need * MIN, left = Math.round((go - Date.now()) / MIN);
   const how = `${a.rough ? "grob " : "ca. "}${a.min} Min. ${a.mode === "CAR" ? "mit dem Auto" : "zu Fuß"}${park ? ` + ${park} Min. Parken` : ""}${buf ? ` + ${buf} Min. Puffer` : ""}`;
   const old = !ACC[t.id] ? ` · wie beim letzten Mal (${day(new Date(a.at).toISOString())})` : "";
-  return `<div class="acc"><div><b class="${left < 0 ? "late" : left <= 10 ? "warn-t" : ""}">${left < 0 ? `Los – eigentlich schon seit ${-left} Min.` : left <= 1 ? "Jetzt los!" : `Los um ${hm(go)}`}</b>
-    <span class="small muted">· ${how}</span></div>
-    <div class="small muted">Geschätzt ab deinem Standort um ${hm(a.at)}${old}. Der Standort wird nur dafür genutzt und nicht gespeichert.</div>
-    <div class="chips"><span class="small muted" style="align-self:center">Puffer:</span>${[0, 5, 10].map(v => `<button class="chip" data-abuf="${v}" aria-pressed="${buf === v}">${v} Min.</button>`).join("")}</div>
-    <div class="chips"><button class="chip" data-acc="${t.id}|${a.mode}">↻ Neu berechnen</button><button class="chip" data-acc="${t.id}|${a.mode === "CAR" ? "WALK" : "CAR"}">${a.mode === "CAR" ? "🚶 Lieber zu Fuß" : "🚗 Lieber Auto"}</button>${walkBtn(null, { name: t.legs[0].dep.name, lat: t.legs[0].dep.lat, lon: t.legs[0].dep.lon }, a.mode)}</div></div>`;
+  const open = ACC_OPEN === t.id;
+  // kompakt: eine Zeile – Details erst auf Tipp
+  return `<div class="acc"><button class="acc-line" data-accopen="${t.id}" aria-expanded="${open}"><b class="${left < 0 ? "late" : left <= 10 ? "warn-t" : ""}">${left < 0 ? `Los – seit ${-left} Min.` : left <= 1 ? "Jetzt los!" : `Los um ${hm(go)}`}</b>
+    <span class="small muted">${how.replace(/^(ca\.|grob) /, "")}</span><span class="chev">${open ? "▴" : "▾"}</span></button>
+    ${!open ? "" : `<div class="small muted" style="margin-top:4px">${a.rough ? "Grob geschätzt" : "Geschätzt"} ab deinem Standort um ${hm(a.at)}${old}. Der Standort wird nur dafür genutzt und nicht gespeichert.</div>
+    <div class="chips"><span class="small muted" style="align-self:center">Puffer:</span>${BUFS.map(v => `<button class="chip sm" data-abuf="${v}" aria-pressed="${buf === v}">${v}</button>`).join("")}<span class="small muted" style="align-self:center">Min.</span></div>
+    <div class="chips"><button class="chip" data-acc="${t.id}|${a.mode}">↻ Neu berechnen</button><button class="chip" data-acc="${t.id}|${a.mode === "CAR" ? "WALK" : "CAR"}">${a.mode === "CAR" ? "🚶 Lieber zu Fuß" : "🚗 Lieber Auto"}</button>${walkBtn(null, { name: t.legs[0].dep.name, lat: t.legs[0].dep.lat, lon: t.legs[0].dep.lon }, a.mode)}</div>`}</div>`;
 }
 function bindAccess(t) {
   $app.querySelectorAll("[data-abuf]").forEach(b => b.onclick = () => { ACC._buf = +b.dataset.abuf; saveAcc(); render(); });
+  $app.querySelectorAll("[data-accopen]").forEach(b => b.onclick = () => { ACC_OPEN = ACC_OPEN === b.dataset.accopen ? null : b.dataset.accopen; render(); });
   $app.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => {
     const [id, mode] = b.dataset.acc.split("|");
     if (!navigator.geolocation) { ACC[id] = { err: "Dein Gerät gibt keinen Standort heraus." }; return render(); }
@@ -291,7 +295,7 @@ function bindAccess(t) {
     navigator.geolocation.getCurrentPosition(async pos => {
       try { const r = await api(`/api/trips/${id}/access`, { method: "POST", body: { lat: pos.coords.latitude, lon: pos.coords.longitude, mode } });
         ACC[id] = { min: r.min, mode: r.mode, rough: r.rough, at: Date.now() };
-        if (t?.routine) ACC[`r:${t.routine}`] = ACC[id]; }   // gilt auch für die nächsten Fahrten dieser Serie
+        if (t?.routine) ACC[`r:${t.routine}`] = ACC[id]; ACC_OPEN = null; }   // gilt auch für die nächsten Fahrten dieser Serie
       catch (e) { ACC[id] = { err: e.message }; }
       saveAcc(); render();
     }, () => { ACC[id] = { err: "Ohne Standort kann ich den Weg nicht schätzen. Bitte den Standort für Umstiegsheld erlauben." }; render(); }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
