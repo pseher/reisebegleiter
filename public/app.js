@@ -72,7 +72,7 @@ async function api0(path, { method = "GET", body } = {}, retry = true) {
   if (!AUTH && method === "GET" && path in EMPTY) return structuredClone(EMPTY[path]);
   if (!AUTH) await register();
   const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), "X-RB-Env": `${typeof BNAME === "function" ? BNAME() : ""}|${typeof pushHere === "function" && pushHere() ? 1 : 0}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401 && retry) { AUTH = null; return api0(path, { method, body }, false); }
+  if (r.status === 401 && retry) { AUTH = null; try { localStorage.removeItem("rb_auth"); } catch {} return api0(path, { method, body }, false); }   // Gerät unbekannt (z. B. aufgeräumt): neu anfangen
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Fehler ${r.status}`);
   return data;
