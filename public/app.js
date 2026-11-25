@@ -879,7 +879,7 @@ function renderTrip(t, many) {
   const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
   $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
-      <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<a class="act" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" title="Suche auf bahn.de bzw. im DB Navigator – Start, Ziel und Zeit sind schon eingetragen. Umstiegsheld verkauft selbst keine Tickets."><i>🎫</i>Ticket</a>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+      <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn buchen"><i>🎫</i>Ticket</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
       : t.follow === "gone" ? `<p class="small explain">👀 Die geteilte Fahrt wurde beim Absender gelöscht – ich überwache diese Verbindung hier einfach weiter.</p>` : ""}
     ${`<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
@@ -913,6 +913,12 @@ function renderTrip(t, many) {
   $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
   // Regelmäßige Fahrt: gilt die Änderung nur heute oder für alle Fahrten?
   $app.querySelectorAll("[data-share]").forEach(b => b.onclick = () => shareTrip(t, b));
+  $app.querySelectorAll("[data-bahn]").forEach(b => b.onclick = async () => {
+    const url = bahnUrl(t), x = bahnUrl.last;
+    const show = n => cleanStop(n.replace(/, Berlin$/, ""));
+    const ok = await ask(`Weiter zu bahn.de?\n\nDas wird übergeben:\nStart: ${show(x.from)}\nZiel: ${show(x.to)}\nAbfahrt: ${day(x.at)}, ${hm(x.at)}\n1 Person, 2. Klasse\n\nPrüfe bei der Bahn Reisende, Ermäßigung und Verbindung. Gebucht und bezahlt wird nur dort.`, { ok: "Zu bahn.de", cancel: "Abbrechen" });
+    if (ok) window.open(url, "_blank", "noopener");
+  });
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
     const r = t.routine && ROUTINES.find(x => x.id === t.routine);
     if (r) { const a = await ask(`Was möchtest du ändern?\n\n„${r.name}“ ist eine regelmäßige Fahrt.`, { ok: `Nur ${dateWord(new Date(t.legs[0].dep.plan).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }))}`, alt: "Alle Fahrten" });
@@ -1973,6 +1979,7 @@ function bahnUrl(t) {
     return `A=1@O=${nm(s)}@${s.lat != null ? `X=${Math.round(s.lon * 1e6)}@Y=${Math.round(s.lat * 1e6)}@` : ""}${ok ? `U=80@L=${s.eva}@` : ""}`; };
   const hd = new Date(a.plan).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
   const q = new URLSearchParams({ sts: "true", so: nm(a), zo: nm(z), kl: "2", r: "13:16:KLASSENLOS:1", soid: loc(a), zoid: loc(z), sot: "ST", zot: "ST", hd, hza: "D" });
+  bahnUrl.last = { from: nm(a), to: nm(z), at: a.plan };
   return `https://www.bahn.de/buchung/fahrplan/suche#${q.toString().replace(/\+/g, "%20")}`;
 }
 // Kurz-Nachricht zum aktuellen Stand – passt zu jeder Lage (vor der Fahrt, unterwegs, Plan B, angekommen)
