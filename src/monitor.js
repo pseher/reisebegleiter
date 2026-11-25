@@ -296,7 +296,8 @@ export async function assess(env, trip, now, cache) {
     const acute = t.status === "RISK" || t.status === "LOST" || t.status === "WATCH";
     // Schon im Fahrplan knapp: ab 4 Std. vor Reisebeginn Ausweichmöglichkeiten bereithalten und beobachten
     const calm = t.status === "OK" && t.tightPlan && firstDep - now < 4 * 3600e3;
-    if (acute || calm) {
+    // Weit vor der Reise gibt es noch keine Echtzeit: Ausweichsuchen erst ab 4 Std. vorher (spart Abfragen)
+    if ((acute && firstDep - now < 4 * 3600e3) || calm) {
       // je näher und je kritischer, desto öfter (Alternativen werden dabei auch mit Echtzeit geprüft)
       const every = t.status === "RISK" || t.status === "LOST" ? 4 : t.arrRt - now < 90 * MIN ? 5 : 12;
       const woke = acute && alt[k]?.length && alt[k].every(a => !a.watch) && alt[k].some(a => a.legs?.length && Date.parse(a.depPlan || a.dep) - now <= 3 * 3600e3);   // eben noch ruhig (ohne Live), jetzt eng → sofort live prüfen
@@ -392,18 +393,23 @@ export async function runMonitor(env, now = Date.now()) {
   await observe(env, checks, now, cache);
   const out = new Map(), fMsgs = new Map();
   for (const f of followers) { const m = await followSync(env, f, trips).catch(e => (console.log("Mitverfolgen:", e.message), null)); if (m) fMsgs.set(f.id, m); }
-  for (const t of trips) {
-    const before = JSON.stringify(t.state || {});
+  // Dringendes zuerst (falls die Abfragen eines Laufs knapp werden): nach Ende der Fahrt sortiert
+  trips.sort((a, b) => Date.parse(a.ends_at) - Date.parse(b.ends_at));
+  const checked = new Set(checks.map(c => c.trip?.id).filter(Boolean));
+  const noAt = st => JSON.stringify({ ...(st || {}), at: 0 });
+  for (const t of trips) try {
+    const before = noAt(t.state);
     if (t.state?.win && !t.state.win.picked) await refreshWindow(env, t, now, opts => watchAlts(env, opts, now, +t.legs[0]?.minT || 0, cache)).catch(e => console.log("Zeitfenster:", e.message));
     if (!t.active) { await saveTrip(env, t).catch(() => {}); continue; }
     const { msgs } = await assess(env, t, now, cache);
     if (fMsgs.has(t.id)) msgs.unshift(fMsgs.get(t.id));
     if (t.state?.follow?.trip) for (const m of msgs) if (!m.tag?.endsWith("-follow")) m.title += " · mitverfolgt";   // klar: nicht die eigene Fahrt
-    if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
+    // Nur speichern, wenn sich etwas geändert hat oder die Fahrt gerade geprüft wurde – nicht jede Minute alle (Abfrage-Limit je Lauf)
+    if (t._dirty || t._legsDirty || !t.active || noAt(t.state) !== before || checked.has(t.id)) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
     for (const m of msgs) { count(`p_${pushKind(m)}`); if (m.lead != null && m.lead >= 0) { count("lead_sum", m.lead); count("lead_n"); } }
     if (msgs.length) out.set(acc, [...(out.get(acc) || []), { ...bundle(msgs), url: `/?trip=${encodeURIComponent(t.id)}` }]);
-  }
+  } catch (e) { console.log("Fahrt", t.id, e.message); count("err_run"); }   // eine kaputte Fahrt darf nicht alle anderen aufhalten
   for (const m of rMsgs) { const { acc, ...msg } = m; count("p_regel"); out.set(acc, [...(out.get(acc) || []), msg]); }
   let sent = 0;
   if (out.size) {
