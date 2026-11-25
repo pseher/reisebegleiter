@@ -1295,8 +1295,8 @@ async function startEdit(t) {
   // Meist will man nur ein, zwei Busse früher fahren: gleich die Verbindungen ab ca. 40 Min. vor der bisherigen Abfahrt zeigen
   const ok = rFrom && rTo;
   W = { step: ok ? "conns" : "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan) - 40 * MIN), conns: null,
-    editId: t.id, editTicket: t.ticket, minT: t.minT || 0, ref: { dep: first.plan, arr: last.plan, trains: t.legs.map(lineKey).join(">"), legs: t.legs.map(l => ({ label: nice(l), lk: lineKey(l), dep: l.dep.plan, arr: l.arr.plan, to: l.arr.name, pl: l.dep.platform || "", mode: l.mode, at: { eva: l.dep.eva || "", name: l.dep.name, lat: l.dep.lat, lon: l.dep.lon } })) },
-    keep: (() => { const k = t.legs.findIndex(l => l.must); return k > 0 && Date.parse(t.legs[k].dep.plan) > Date.now() ? k : null; })() };
+    editId: t.id, editTicket: t.ticket, minT: t.minT || 0, ref: { dep: first.plan, arr: last.plan, trains: t.legs.map(lineKey).join(">"), legs: t.legs.map(l => ({ label: nice(l), lk: lineKey(l), dep: l.dep.plan, arr: l.arr.plan, to: l.arr.name, pl: l.dep.platform || "", apl: l.arr.platform || "", mode: l.mode, at: { eva: l.dep.eva || "", name: l.dep.name, lat: l.dep.lat, lon: l.dep.lon }, arrAt: { eva: l.arr.eva || "", name: l.arr.name, lat: l.arr.lat, lon: l.arr.lon } })) },
+    keepSet: (() => { const k = t.legs.findIndex(l => l.must); return k >= 0 && Date.parse(t.legs[k].dep.plan) > Date.now() ? [k] : []; })() };
   go("add");
 }
 function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
@@ -1408,25 +1408,50 @@ function nextAt(time) { const [h, m] = time.split(":").map(Number), d = new Date
 const sameTrains = (c, fav) => fav && c.legs.map(l => l.label.replace(/\s/g, "")).join(">") === fav.trains.map(x => x.replace(/\s/g, "")).join(">")
   && Math.abs((Date.parse(c.legs[0].from.plan) - new Date(c.legs[0].from.plan).setHours(...fav.time.split(":").map(Number), 0, 0)) / MIN) <= 5;
 
-// Reise ändern mit fester Fahrt (z. B. „RE 1 auf jeden Fall“): gesucht wird nur, wie du VORHER hinkommst
-const keepInfo = () => { if (!W?.editId || W.keep == null) return null; const x = W.ref.legs[W.keep]; if (!x) return null;
-  return { ...x, k: W.keep, latest: Date.parse(x.dep) - Math.max(2, +W.minT || 0) * MIN }; };
-// bleibt wie bisher (ab der festen Fahrt)
-function keepTail() {
-  const K = keepInfo(); if (!K || W.step !== "leg") return "";
-  return W.ref.legs.slice(K.k).map(x => `<li><span class="dot"></span><div class="stop">${esc(x.at.name)} → ${esc(x.to || "")}</div><div class="when">${esc(x.label)} · ab ${hm(x.dep)}${x.pl ? ` · ${esc(platWord(x, x.pl))}` : ""} · an ${hm(x.arr)} · <b>wie bisher</b></div></li>`).join("");
+// Reise ändern mit festen Zügen: ein zusammenhängender Block bleibt, davor und/oder danach wird neu gesucht
+const keepInfo = () => {
+  if (!W?.editId || !W.keepSet?.length) return null;
+  const L = W.ref.legs, a = W.keepSet[0], b = W.keepSet[W.keepSet.length - 1], m = Math.max(2, +W.minT || 0) * MIN;
+  if (!L[a] || !L[b]) return null;
+  return { a, b, pre: a > 0, post: b < L.length - 1, first: L[a], last: L[b], latest: Date.parse(L[a].dep) - m, earliest: Date.parse(L[b].arr) + m,
+    k: a, label: L[a].label, dep: L[a].dep, at: L[a].at };   // k/label/dep/at: der erste feste Zug
+};
+// Welcher Teil wird gerade gesucht? „pre“ = bis zum ersten festen Zug, „post“ = ab dem letzten festen Zug
+const keepPhase = () => { const K = keepInfo(); if (!K) return null; return K.pre && !W.preDone ? "pre" : K.post ? "post" : "none"; };
+// feste Züge als Teilstrecken zum Anzeigen (werden beim Speichern vom Server aus der bisherigen Reise genommen)
+const keptLegs = K => W.ref.legs.slice(K.a, K.b + 1).map(x => ({ kept: true, jid: "", label: x.label, mode: x.mode, from: { name: x.at.name, plan: x.dep, platform: x.pl }, to: { name: x.to, plan: x.arr, platform: x.apl || "" } }));
+function keepTail() { return ""; }
+function toggleKeep(i) {
+  const n = W.ref.legs.length, cur = W.keepSet || [];
+  let a = cur.length ? cur[0] : i, b = cur.length ? cur[cur.length - 1] : i;
+  if (!cur.length) { a = b = i; }
+  else if (i < a) a = i; else if (i > b) b = i;              // erweitern: alles dazwischen bleibt mit
+  else if (i === a && i === b) { W.keepSet = []; return; }    // einziger fester Zug: wieder frei
+  else if (i === a) a++; else if (i === b) b--;              // am Rand abwählen
+  else b = i - 1;                                            // in der Mitte abwählen: ab hier wieder frei
+  W.keepSet = []; for (let k = a; k <= b && k < n; k++) W.keepSet.push(k);
 }
 function keepPicker() {
-  if (!W.editId || !(W.ref.legs?.length > 1)) return W.editId ? `<p class="small muted" style="margin:0 2px 8px">Tippe eine frühere oder spätere Verbindung an. Ticket und Umstiegszeit bleiben.</p>` : "";
-  const K = keepInfo(), opts = W.ref.legs.map((x, i) => (i > 0 && Date.parse(x.dep) > Date.now() ? `<button class="chip" data-keep="${i}" aria-pressed="${W.keep === i}">${esc(x.label)} um ${hm(x.dep)} behalten</button>` : "")).join("");
-  return `<div class="card flat keep-card"><p class="small" style="margin:0 0 6px"><b>Einen Zug davon fest behalten?</b></p>
-    <div class="chips"><button class="chip" data-keep="" aria-pressed="${!K}">Nein, alles neu suchen</button>${opts}</div>
-    <p class="small muted" style="margin:6px 0 0">${K ? `Ich zeige dir nur Verbindungen, mit denen du den ${esc(K.label)} um ${hm(K.dep)} in ${esc(cleanStop(K.at.name))} erreichst – auch mit anderen Bussen oder Bahnen. Alles ab dem ${esc(K.label)} bleibt wie bisher.` : "Ich suche die ganze Fahrt neu – frühere und spätere Verbindungen."}</p></div>`;
+  if (!W.editId || !(W.ref.legs?.length > 1)) return W.editId ? `<p class="small muted" style="margin:0 2px 8px">Tippe eine frühere oder spätere Verbindung an. Ticket bleibt.</p>` : "";
+  const K = keepInfo(), set = W.keepSet || [];
+  const opts = W.ref.legs.map((x, i) => (Date.parse(x.dep) > Date.now() ? `<button class="chip" data-keep="${i}" aria-pressed="${set.includes(i)}">${esc(x.label)} ${hm(x.dep)}</button>` : "")).join("");
+  const where = x => esc(cleanStop(x.at.name)), whereTo = x => esc(cleanStop(x.to || ""));
+  const txt = !K ? "Ich suche die ganze Fahrt neu – frühere und spätere Verbindungen."
+    : !K.pre && !K.post ? "Du behältst alle Züge – dann gibt es nichts neu zu suchen. Tippe einen Zug an, um ihn freizugeben."
+    : K.pre && K.post ? `Die markierten Züge bleiben. Ich suche erst, wie du zum ${esc(K.first.label)} in ${where(K.first)} kommst, dann wie es ab ${whereTo(K.last)} weitergeht.`
+    : K.pre ? `Ich suche, wie du zum ${esc(K.first.label)} um ${hm(K.first.dep)} in ${where(K.first)} kommst – auch mit anderen Bussen oder Bahnen. Ab dort bleibt alles wie bisher.`
+    : `Bis ${whereTo(K.last)} bleibt alles wie bisher. Ich suche, wie es ab ${hm(K.last.arr)} weitergeht.`;
+  const mt = `<div class="keep-mt"><span class="small muted">Umstiegszeit</span><div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-emt="${m}" aria-pressed="${(+W.minT || 0) === m}">${l}</button>`).join("")}</div></div>`;
+  return `<div class="card flat keep-card"><p class="small" style="margin:0 0 6px"><b>Züge fest behalten?</b> <span class="muted">Mehrere möglich</span></p>
+    <div class="chips"><button class="chip" data-keep="" aria-pressed="${!K}">Keinen</button>${opts}</div>
+    <p class="small muted" style="margin:6px 0 10px">${txt}</p>${mt}</div>`;
 }
 // gleiche Fahrt wie die bisherige Reise? (gleiche Linien, gleiche Abfahrt)
 const lineKey = l => String(l.label || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
-const isRef = (c, R) => { const K = keepInfo(), want = K ? R.legs.slice(0, K.k).map(x => x.lk).join(">") : R.trains;
-  return c.legs.map(lineKey).join(">") === want && Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(R.dep)) <= MIN; };
+const isRef = (c, R) => { const K = keepInfo(), ph = keepPhase();
+  const part = !K ? R.legs : ph === "post" ? R.legs.slice(K.b + 1) : R.legs.slice(0, K.a);
+  if (!part.length) return false;
+  return c.legs.map(lineKey).join(">") === part.map(x => x.lk).join(">") && Math.abs(Date.parse(c.legs[0].from.plan) - Date.parse(part[0].dep)) <= MIN; };
 // Ampel für den Umstieg: nur hier gibt es Farbe (rot = geht nicht/zu knapp, orange = knapp, grün = entspannt)
 const gapTag = (g, own, at) => { const ownM = Math.max(+own || 0, 2), where = at ? ` in ${esc(cleanStop(at))}` : "";
   if (g < 0) return `<span class="late">Umstieg${where} geht nicht</span>`;
@@ -1461,16 +1486,22 @@ function connList(list) {
     const late = Math.round((Date.parse(first.from.rt || c.dep) - Date.parse(first.from.plan)) / MIN), mine = sameTrains(c, W?.fav), cur = R && isRef(c, R);
     // Umstiege: bei festem Zug zählt der Umstieg zu diesem dazu; gezeigt wird der knappste
     const gaps = L.slice(1).map((l, k) => ({ at: L[k].to.name, g: Math.round((Date.parse(l.from.rt || l.from.plan) - Date.parse(L[k].to.rt || L[k].to.plan)) / MIN) }));
-    if (K) gaps.push({ at: K.at.name, g: Math.round((Date.parse(K.dep) - Date.parse(lastL.to.rt || lastL.to.plan)) / MIN) });
+    const ph = keepPhase();
+    if (K && ph === "pre") gaps.push({ at: K.first.at.name, g: Math.round((Date.parse(K.first.dep) - Date.parse(lastL.to.rt || lastL.to.plan)) / MIN) });
+    if (K && ph === "post") gaps.push({ at: K.last.to, g: Math.round((Date.parse(first.from.rt || first.from.plan) - Date.parse(K.last.arr)) / MIN) });
     const tight = gaps.sort((a, b) => a.g - b.g)[0];
-    // ganze Reise zeigen – bei festem Zug inkl. diesem und allem danach (wie bisher)
-    const tail = K ? R.legs.slice(K.k) : [], arr = K ? R.legs[R.legs.length - 1].arr : (lastL.to.rt || lastL.to.plan);
-    const labels = [...L.map(l => esc(l.label)), ...tail.map(x => esc(x.label))], nT = labels.length - 1;
-    const mins = Math.round((Date.parse(arr) - Date.parse(dep)) / MIN);
-    const vs = R && !cur ? (() => { const dd = Math.round((Date.parse(first.from.plan) - Date.parse(R.dep)) / MIN), da = Math.round((Date.parse(K ? R.arr : lastL.to.plan) - Date.parse(R.arr)) / MIN);
+    // ganze Reise zeigen – mit den festen Zügen (wie bisher) und dem schon gewählten Teil
+    const keptL = K ? R.legs.slice(K.a, K.b + 1).map(x => esc(x.label)) : [];
+    const before = ph === "post" ? (W.preLegs ? W.preLegs.map(l => esc(l.label)) : R.legs.slice(0, K.a).map(x => esc(x.label))) : [];
+    const labels = ph === "pre" ? [...L.map(l => esc(l.label)), ...keptL, ...(K.post ? ["…"] : [])] : ph === "post" ? [...before, ...keptL, ...L.map(l => esc(l.label))] : L.map(l => esc(l.label));
+    const nT = labels.filter(x => x !== "…").length - 1;
+    const tripDep = ph === "post" ? (W.preLegs ? W.preLegs[0].from.plan : R.legs[0].dep) : dep;
+    const arr = ph === "pre" ? (K.post ? K.last.arr : R.arr) : (lastL.to.rt || lastL.to.plan);
+    const mins = Math.round((Date.parse(arr) - Date.parse(tripDep)) / MIN);
+    const vs = R && !cur ? (() => { const dd = Math.round((Date.parse(ph === "post" ? tripDep : first.from.plan) - Date.parse(R.dep)) / MIN), da = Math.round((Date.parse(ph === "pre" ? (K.post ? K.last.arr : R.arr) : lastL.to.plan) - Date.parse(ph === "pre" && K.post ? K.last.arr : R.arr)) / MIN);
       return [Math.abs(dd) < 1 ? "gleiche Abfahrt" : dd < 0 ? `${fmtSpan(-dd)} früher los` : `${fmtSpan(dd)} später los`, Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `${fmtSpan(-da)} früher am Ziel` : `${fmtSpan(da)} später am Ziel`].join(" · "); })() : "";
     return `<li><button data-c="${i}" class="${mine || cur ? "fav-hit" : ""}">${cur ? `<span class="small fav-tag">● Deine bisherige Fahrt</span>` : mine ? `<span class="small fav-tag">★ Deine übliche Verbindung</span>` : ""}<div class="train" style="grid-template-columns:1fr auto">
-      <span class="t">${hm(dep)} → ${hm(arr)}</span>
+      <span class="t">${hm(ph === "post" ? tripDep : dep)} → ${hm(arr)}${ph === "pre" && K.post ? ` <span class="small muted">in ${esc(cleanStop(K.last.to || ""))}</span>` : ""}</span>
       <span class="pl">${dur(mins)}</span>
       <span class="d" style="grid-column:1/3">${nT ? `${nT} Umstieg${nT > 1 ? "e" : ""} · ` : "direkt · "}${labels.join(" → ")}${L.some(l => l.cancelled) ? ` <span class="late">fällt aus</span>` : ""}</span>
       ${tight ? `<span class="small" style="grid-column:1/3">${gapTag(tight.g, own, gaps.length > 1 ? tight.at : tight.at)}${gaps.length > 1 ? ` <span class="muted">(knappster)</span>` : ""}</span>` : ""}
@@ -1643,35 +1674,47 @@ function renderWizard() {
   }
 
   else if (W.step === "conns") {
-    $app.innerHTML = `${head}<h1>${esc(W.rFrom.name)} → ${esc(W.rTo.name)}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${keepInfo() ? `zum ${esc(keepInfo().label)} um ${hm(keepInfo().dep)}` : `ab ${new Date(W.when).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" })}`}</p>
-      ${keepPicker()}
-      ${err}${W.conns && (keepInfo() ? true : W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+    const K = keepInfo(), ph = keepPhase();
+    const fullDate = ms => new Date(ms).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+    // Was wird gesucht? ganze Fahrt · bis zum ersten festen Zug · ab dem letzten festen Zug
+    const sFrom = ph === "post" ? K.last.arrAt : W.rFrom, sTo = ph === "pre" ? K.first.at : W.rTo;
+    const sub = !K ? `ab ${fullDate(W.when)}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
+    const stepNote = K && K.pre && K.post ? `<p class="small" style="margin:0 2px 8px"><b>${ph === "pre" ? "Teil 1 von 2" : "Teil 2 von 2"}:</b> ${ph === "pre" ? `bis ${esc(cleanStop(K.first.at.name))}` : `ab ${esc(cleanStop(K.last.to || ""))}`}</p>` : "";
+    const title = ph === "none" ? `${esc(W.rFrom.name)} → ${esc(W.rTo.name)}` : `${esc(sFrom.name)} → ${esc(sTo.name)}`;
+    $app.innerHTML = `${head}<h1>${title}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${sub}</p>
+      ${ph === "post" && K.pre ? "" : keepPicker()}${stepNote}
+      ${ph === "none" ? "" : `${err}${W.conns && (ph === "pre" ? true : !K && W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
       ${W.conns && !W.editId ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
         ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
-      <div>${!W.conns ? `<div class="spinner"></div>` : keepInfo() && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(keepInfo().label)} um ${hm(keepInfo().dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : connList(W.conns)}</div>
-      ${W.conns && (W.conns.length || keepInfo()) ? `${keepInfo() && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : keepInfo() && !W.conns.length ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}${W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL}` : ""}${back}`;
-    const K = keepInfo();
-    if (!W.conns) api(K && W.depMin ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.depMin).toISOString())}`
-      : K ? `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(K.at)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
-      : `/api/connections?from=${placeParam(W.rFrom)}&to=${placeParam(W.rTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.when).toISOString())}`)
-      .then(c => { if (K && W.depMin) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) >= W.depMin).slice(0, 4);   // spätere, die den festen Zug noch erreichen
-        else if (K) { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
+      <div>${!W.conns ? `<div class="spinner"></div>` : ph === "pre" && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(K.first.label)} um ${hm(K.first.dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : !W.conns.length ? `<p class="muted">Keine passende Verbindung gefunden.</p>` : connList(W.conns)}</div>
+      ${W.conns && (W.conns.length || K) ? `${ph === "pre" && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : ph === "pre" && !W.conns.length ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}` : ""}`}
+      ${ph === "post" && K.pre ? `<button class="btn quiet" id="backPre">Zurück zu Teil 1</button>` : ""}
+      ${W.conns || ph === "none" ? (W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL) : ""}${back}`;
+    if (!W.conns && ph !== "none") api(ph === "pre" && W.depMin ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.depMin).toISOString())}`
+      : ph === "pre" ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
+      : `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(ph === "post" ? (W.postWhen || K.earliest) : W.when).toISOString())}`)
+      .then(c => { if (ph === "pre" && W.depMin) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) >= W.depMin).slice(0, 4);   // spätere, die den festen Zug noch erreichen
+        else if (ph === "pre") { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
           c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max).slice(-4); }
+        else if (ph === "post") c = c.filter(x => Date.parse(x.legs[0].from.plan) >= K.earliest - MIN);   // erst nach Ankunft des letzten festen Zugs
         W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
-    // eine Stunde früher suchen (nicht vor jetzt)
     const ec = document.getElementById("earlierC");
-    if (ec && K) ec.onclick = () => { const a = Math.min(...W.conns.map(c => Date.parse(c.legs[c.legs.length - 1].to.plan))), d = Math.min(...W.conns.map(c => Date.parse(c.legs[0].from.plan)));
+    if (ec && ph === "pre") ec.onclick = () => { const a = Math.min(...W.conns.map(c => Date.parse(c.legs[c.legs.length - 1].to.plan))), d = Math.min(...W.conns.map(c => Date.parse(c.legs[0].from.plan)));
       if (Number.isFinite(d)) { W.arrBy = a - MIN; W.depMax = d - MIN; } else { W.arrBy = null; W.depMax = W.depMin ? W.depMin - MIN : null; }
       W.depMin = null; W.conns = null; render(); };
     else if (ec) ec.onclick = () => { const first = W.conns[0] ? Date.parse(W.conns[0].legs[0].from.plan) : W.when; W.when = Math.max(Date.now(), Math.min(W.when, first) - 60 * MIN); W.conns = null; render(); };
     document.getElementById("bufC")?.addEventListener("click", () => { W.buf = !W.buf; W.conns = null; render(); });
     const lc = document.getElementById("laterC");
-    if (lc && K) lc.onclick = () => { const d = Math.max(...W.conns.map(c => Date.parse(c.legs[0].from.plan))); W.depMin = (Number.isFinite(d) ? d : Date.parse(W.ref.dep)) + MIN; W.arrBy = null; W.depMax = null; W.conns = null; render(); };
+    if (lc && ph === "pre") lc.onclick = () => { const d = Math.max(...W.conns.map(c => Date.parse(c.legs[0].from.plan))); W.depMin = (Number.isFinite(d) ? d : Date.parse(W.ref.dep)) + MIN; W.arrBy = null; W.depMax = null; W.conns = null; render(); };
+    else if (lc && ph === "post") lc.onclick = () => { W.postWhen = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     else if (lc) lc.onclick = () => { W.when = Date.parse(W.conns[W.conns.length - 1].legs[0].from.plan) + MIN; W.conns = null; render(); };
     $app.querySelectorAll("[data-c]").forEach(b => b.onclick = () => pickConnection(W.conns[+b.dataset.c]));
     document.getElementById("otherTime")?.addEventListener("click", () => { W.step = "route"; W.conns = null; render(); });
-    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; W.keep = v === "" ? null : +v; W.arrBy = null; W.depMax = null; W.depMin = null; W.conns = null; render(); });
-    document.getElementById("otherRoute")?.addEventListener("click", () => { W.step = "route"; W.when = Math.max(Date.now(), Date.parse(W.ref.dep)); W.conns = null; render(); });
+    const reset = () => { W.arrBy = null; W.depMax = null; W.depMin = null; W.postWhen = null; W.preDone = false; W.preLegs = null; W.postLegs = null; W.conns = null; };
+    $app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => { const v = b.dataset.keep; if (v === "") W.keepSet = []; else toggleKeep(+v); reset(); render(); });
+    $app.querySelectorAll("[data-emt]").forEach(b => b.onclick = () => { W.minT = +b.dataset.emt; W.conns = null; W.arrBy = null; W.depMax = null; W.depMin = null; W.postWhen = null; render(); });
+    document.getElementById("backPre")?.addEventListener("click", () => { reset(); render(); });
+    document.getElementById("otherRoute")?.addEventListener("click", () => { W.step = "route"; W.keepSet = []; reset(); W.when = Math.max(Date.now(), Date.parse(W.ref.dep)); render(); });
   }
 
   else if (W.step === "pickTrip") {
@@ -1768,14 +1811,13 @@ function renderWizard() {
 
   else if (W.step === "leg") {
     const tight = W.legs.slice(1).map((l, i) => ({ at: W.legs[i].to.name, gap: Math.round((Date.parse(l.from.plan) - Date.parse(W.legs[i].to.plan)) / MIN) }))
-      .concat(keepInfo() ? [{ at: W.legs[n - 1].to.name, gap: Math.round((Date.parse(keepInfo().dep) - Date.parse(W.legs[n - 1].to.plan)) / MIN) }] : [])
       .filter(x => (MINT > 0 ? x.gap < MINT : x.gap < 5)).sort((a, b) => a.gap - b.gap)[0];
     $app.innerHTML = `${head.replace(/Teilstrecke \d+|Neue Reise/, "Deine Reise")}<h1>Passt das so?</h1>
       <p class="muted small">${new Date(W.legs[0].from.plan).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Berlin" })}</p>${W.note ? `<p class="small muted">${esc(W.note)}</p>` : ""}
       ${tight ? `<div class="banner info small"><b>Knapper Umstieg in ${esc(cleanStop(tight.at))}: ${Math.max(0, tight.gap)} Min.</b> Nach dem Anlegen zeige ich dir Verbindungen, die etwas früher losfahren oder mehr Luft haben, und beobachte sie mit.</div>` : ""}
       <div class="card"><ol class="tl">${W.legs.map((l, i) => `${i ? `<li class="xfer-note small">${gapTag(Math.round((Date.parse(l.from.plan) - Date.parse(W.legs[i - 1].to.plan)) / MIN), W.editId ? W.minT : MINT, W.legs[i - 1].to.name)}</li>` : ""}<li><span class="dot"></span><div class="stop">${esc(l.from.name)} → ${esc(l.to.name)}</div>
         <div class="when">${esc(l.label)} · ab ${hm(l.from.plan)}${l.from.platform ? ` · ${esc(platWord(l, l.from.platform))}` : ""} · an ${l.to.estimated ? "≈" : ""}${hm(l.to.plan)}${l.to.platform ? ` · ${esc(platWord(l, l.to.platform))}` : ""}</div>
-        ${l.jid || l.tid ? "" : `<div class="small muted">Live-Zeiten, soweit der Verkehrsbetrieb sie liefert</div>`}</li>`).join("")}${keepInfo() ? `<li class="xfer-note small">${gapTag(Math.round((Date.parse(keepInfo().dep) - Date.parse(W.legs[n - 1].to.plan)) / MIN), W.minT, keepInfo().at.name)}</li>` : ""}${keepTail()}</ol></div>
+        ${l.kept ? `<div class="small"><b>wie bisher</b></div>` : l.jid || l.tid ? "" : `<div class="small muted">Live-Zeiten, soweit der Verkehrsbetrieb sie liefert</div>`}</li>`).join("")}</ol></div>
       ${repeatBlock()}${pushTick()}
       <button class="btn" id="done">${W.editId ? "Reise so ändern" : W.multi || (W.legs.some(isFVc) && !W.quick) ? "Weiter" : W.reg ? "Regelmäßig anlegen" : "Fahrt anlegen"}</button>
       ${W.mode !== "train" ? "" : `<button class="btn sec" id="more">Umstieg in ${esc(W.legs[n - 1].to.name)} hinzufügen</button>`}
@@ -1792,7 +1834,7 @@ function renderWizard() {
       if (W.editId) return saveTrip(W.editTicket);
       if (W.regIntent && !W.regPreset && !W.reg) { W.step = "regular"; render(); } else toTicket(); };
     if (document.getElementById("more")) document.getElementById("more").onclick = () => { const l = W.legs[n - 1]; W.station = { eva: l.to.eva, name: l.to.name, lat: l.to.lat, lon: l.to.lon }; W.from = Date.parse(l.to.plan); W.list = null; W.step = "trains"; render(); };
-    document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
+    document.getElementById("undo").onclick = () => { if (W.mode === "import") { W.legs = []; W.step = W.imported?.length > 1 ? "pickTrip" : "route"; } else if (W.mode === "route") { W.legs = []; W.step = "conns"; W.preDone = false; W.preLegs = null; W.postLegs = null; W.conns = null; } else { W.legs.pop(); W.step = W.legs.length ? "leg" : "station"; } render(); };
   }
 
   else if (W.step === "regular") {
@@ -1936,7 +1978,11 @@ async function pickConnection(c) {
   let legs = null, err = "";
   try { legs = await api("/api/resolve", { method: "POST", body: { legs: c.legs } }); } catch (e) { err = e.message; }
   if (!W) return;
-  if (legs) { W.legs = legs; W.step = "leg"; } W.error = err;
+  const K = keepInfo(), ph = keepPhase();
+  if (legs && K && ph === "pre" && K.post) { W.preLegs = legs; W.preDone = true; W.conns = null; W.error = err; W.busy = null; return render(); }   // weiter mit Teil 2
+  if (legs && K) { if (ph === "pre") W.preLegs = legs; else W.postLegs = legs;
+    W.legs = [...(W.preLegs || []), ...keptLegs(K), ...(W.postLegs || [])]; W.step = "leg"; }
+  else if (legs) { W.legs = legs; W.step = "leg"; } W.error = err;
   W.busy = null; render();
 }
 
@@ -1958,7 +2004,9 @@ async function saveTrip(ticket) {
     const id = W.editId, minT = W.minT;
     W.busy = "Reise wird geändert …"; render();
     try {
-      await api(`/api/trips/${id}`, { method: "PUT", body: { legs: W.legs.map(l => ({ ...l, minT })), ticket, ...(keepInfo() ? { keepFrom: W.keep } : {}) } });
+      const K = keepInfo();
+      await api(`/api/trips/${id}`, { method: "PUT", body: K ? { keep: { a: K.a, b: K.b }, pre: (W.preLegs || []).map(l => ({ ...l, minT })), post: (W.postLegs || []).map(l => ({ ...l, minT })), minT, ticket }
+        : { legs: W.legs.map(l => ({ ...l, minT })), minT, ticket } });
       flash = "Reise geändert. Ich überwache jetzt die neue Verbindung.";
       W = null; await loadTrips(); openId = id; sheetId = null; return go("home");
     } catch (e) { if (!W) return; W.busy = null; W.error = e.message; return render(); }

@@ -294,3 +294,16 @@ test("Reise nach London: Zug mit Ziel im Ausland (ohne DB-Nummer) und U-Bahn ohn
   const r = await call("/api/trips", { auth: A, method: "POST", body: { legs, ticket: "flex" } });
   assert.equal(r.status, 201, JSON.stringify(r.data));
 });
+
+test("Reise ändern: mittlere Züge fest, davor und danach neu, neue Umstiegszeit für alle", async () => {
+  const A = (await call("/api/register", { method: "POST", body: {} })).data;
+  const at = h => new Date(Date.now() + h * 3600e3).toISOString();
+  const L = (lab, a, b, f, t) => ({ jid: "", label: lab, mode: "REGIONAL_RAIL", from: { name: f, eva: "", lat: 52.5, lon: 13.4, plan: at(a) }, to: { name: t, eva: "", lat: 52.6, lon: 13.5, plan: at(b) } });
+  const t = (await call("/api/trips", { auth: A, method: "POST", body: { legs: [L("Bus 1", 5, 5.5, "A", "B"), L("RE 2", 6, 7, "B", "C"), L("RE 3", 7.5, 8, "C", "D"), L("Bus 4", 8.5, 9, "D", "E")], ticket: "flex" } })).data;
+  const r = await call(`/api/trips/${t.id}`, { auth: A, method: "PUT", body: { keep: { a: 1, b: 2 }, pre: [L("Tram 9", 5.2, 5.7, "A", "B")], post: [L("Bus 8", 8.3, 8.8, "D", "E")], minT: 10, ticket: "flex" } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.legs.map(l => l.label), ["Tram 9", "RE 2", "RE 3", "Bus 8"]);
+  assert.equal(r.data.minT, 10);
+  const bad = await call(`/api/trips/${t.id}`, { auth: A, method: "PUT", body: { keep: { a: 1, b: 2 }, pre: [L("Tram 9", 5.8, 6.5, "A", "B")], post: [], ticket: "flex" } });
+  assert.equal(bad.status, 400);
+});

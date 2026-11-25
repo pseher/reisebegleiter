@@ -611,7 +611,11 @@ async function api(req, env, url) {
       // feste Fahrt: neue Anreise + Rest der bisherigen Reise ab dieser Fahrt (unverändert)
       const kf = Number.isInteger(b.keepFrom) && b.keepFrom > 0 && b.keepFrom < t.legs.length ? b.keepFrom : null;
       if (kf != null) legs = [...legs, ...t.legs.slice(kf)];
-      const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && kf != null ? "Mit dieser Verbindung erreichst du den festen Zug nicht." : bad);
+      // Feste Züge als Block [a..b]: davor und/oder danach neu gewählte Teilstrecken
+      if (b.keep && Number.isInteger(b.keep.a) && Number.isInteger(b.keep.b) && b.keep.a >= 0 && b.keep.b >= b.keep.a && b.keep.b < t.legs.length)
+        legs = [...(Array.isArray(b.pre) ? b.pre : []), ...t.legs.slice(b.keep.a, b.keep.b + 1), ...(Array.isArray(b.post) ? b.post : [])];
+      if (b.minT != null && Number.isFinite(+b.minT)) { const m = Math.min(30, Math.max(0, +b.minT)); legs = legs.map(l => ({ ...l, minT: m })); }
+      const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && (kf != null || b.keep) ? "Mit dieser Verbindung erreichst du den festen Zug nicht." : bad);
       return json(await replaceLegs(env, t, legs, b.ticket));
     }
     if (method === "PATCH") {
