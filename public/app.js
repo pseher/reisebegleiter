@@ -245,7 +245,7 @@ function renderList(active) {
     ${nowShown.map((t, i) => jetztCard(t, i > 0 || nowList.length > 1)).join("")}
     ${nowList.length > 3 ? `<button class="link small now-more" data-nowmore>${NOW_MORE ? "Weniger zeigen" : `+ ${nowList.length - 3} weitere jetzt`}</button>` : ""}
     ${tiles(cur)}
-    ${fresh ? iosFirst() : hintCard()}
+    ${fresh && isIOS ? iosFirst() : hintCard()}
     ${soon.length ? `<div class="sec-row"><span>Demnächst</span></div><ul class="trips compact">${grouped(soon)}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<p class="small muted" style="margin:-4px 2px 6px">Live geprüft wird ab ca. 3 Std. vor der Abfahrt – dann erscheinen sie oben.</p><ul class="trips compact">${grouped(later)}</ul>` : ""}` : ""}
@@ -913,6 +913,23 @@ function renderTrip(t, many) {
   bindCommon();
 }
 
+// Einstellungen: App installieren und Mitteilungen – immer erreichbar, auch wenn ein Hinweis weggeklickt wurde
+function appCard() {
+  const ps = pushState(), row = (l, v, c = "") => `<div class="kv"><span>${l}</span><b class="${c}">${v}</b></div>`;
+  const pushTxt = { on: "eingeschaltet", off: "noch aus", blocked: "blockiert", none: isIOS && !standalone ? "erst in der App möglich" : "in diesem Browser nicht möglich" }[ps];
+  return `<section class="card" id="appcard"><div class="k">App &amp; Mitteilungen</div>
+    ${row("Browser", esc(BROWSER) + (isIOS ? " (iPhone/iPad)" : isAndroid ? " (Android)" : ""))}
+    ${row("Als App", standalone ? "installiert" : "nicht installiert – läuft im Browser", standalone ? "ok-t" : "")}
+    ${row("Mitteilungen", pushTxt, ps === "on" ? "ok-t" : ps === "off" ? "" : "late")}
+    ${standalone ? "" : weakBrowser() ? `<p class="small" style="margin:10px 0 6px">In ${esc(BROWSER)} gehen keine Mitteilungen und keine echte App-Installation. Öffne Umstiegsheld in ${isAndroid ? "Chrome" : "Chrome, Edge oder Firefox"}.
+        Deine Fahrten nimmst du mit: unten bei „Geräte“ einen Code anzeigen und im anderen Browser eingeben.</p><a class="btn sec" href="${chromeLink()}">In ${isAndroid ? "Chrome" : "einem anderen Browser"} öffnen</a>`
+      : `<p class="small" style="margin:10px 0 6px"><b>Als App installieren:</b> ${INSTALL ? "Ein Tipp genügt." : installHow()}</p>${INSTALL ? `<button class="btn sec" id="installApp">Als App installieren</button>` : ""}
+        ${isIOS ? `<p class="small muted">Die App auf dem iPhone startet leer. Deine Fahrten nimmst du mit: unten bei „Geräte“ einen Code anzeigen und in der App eingeben.</p>` : ""}`}
+    ${ps === "on" ? `<button class="btn sec" id="pushTest">Test-Mitteilung senden</button>`
+      : ps === "off" ? `<button class="btn" id="pushOn">Mitteilungen einschalten</button>${standalone || isIOS ? "" : `<p class="small muted">Geht auch im Browser – als App ist es aber zuverlässiger.</p>`}`
+      : ps === "blocked" ? `<p class="small"><b>So erlaubst du Mitteilungen:</b> ${unblockHow()}</p><button class="btn sec" data-reload>Erledigt – neu prüfen</button>` : ""}
+    ${!pushHere() || ps === "on" ? "" : `<p class="small muted" style="margin-top:8px">Kommt nach dem Einschalten keine Test-Mitteilung? Dann sind Mitteilungen für ${standalone ? "die App" : `${esc(BROWSER)}`} evtl. in den Android-/Handy-Einstellungen aus.</p>`}</section>`;
+}
 function renderSettings() {
   const perm = "Notification" in window ? Notification.permission : "nicht unterstützt";
   const on = perm === "granted" && localStorage.getItem("rb_push") === "1";
@@ -923,15 +940,13 @@ function renderSettings() {
     <section class="card"><div class="k">Meine übliche Umstiegszeit</div>${minTChips()}
       <p class="small muted">Gilt für neue Reisen. Bei einer Reise änderst du sie unter „Einstellungen dieser Reise“.</p></section>
     ${devicesCard()}
-    <section class="card"><div class="k">Mitteilungen</div>
-      <p class="small">${on ? "Eingeschaltet auf diesem Gerät." : perm === "denied" ? "Im Browser blockiert." : "Noch nicht eingeschaltet."}</p>
-      ${on ? `<button class="btn sec" id="pushTest">Test-Mitteilung senden</button>` : perm === "denied" ? "" : `<button class="btn" id="pushOn">Mitteilungen erlauben</button>`}
-      ${isIOS && !standalone ? `<p class="small muted">iPhone: erst „Teilen“ → „Zum Home-Bildschirm“, dann von dort öffnen.</p>` : ""}</section>
+    ${appCard()}
     <p class="foot">Echtzeitdaten: DB InfraGO (OpenBoards) · Verbindungen: Transitous/MOTIS · Angaben ohne Gewähr</p>`;
   $app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { THEME = b.dataset.themeSet; try { localStorage.setItem("rb_theme", THEME); } catch {} applyTheme(); render(); });
   $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
   document.getElementById("pushTest")?.addEventListener("click", () => api("/api/push/test", { method: "POST" }).then(r => alert(r.ok ? "Gesendet – kommt gleich an." : "Konnte nicht gesendet werden.")).catch(e => alert(e.message)));
   bindDevices();
+  bindHints();
   bindCommon();
 }
 
@@ -1020,12 +1035,43 @@ addEventListener("beforeinstallprompt", e => { e.preventDefault(); INSTALL = e; 
 addEventListener("appinstalled", () => { INSTALL = null; try { localStorage.setItem("rb_installed", "1"); } catch {} render(); });
 const later = k => { try { return Date.now() < +(localStorage.getItem(`rb_later_${k}`) || 0); } catch { return false; } };
 // Auf der Startseite höchstens EIN Hinweis: erst Mitteilungen, danach „Als App installieren“ – jeweils mit „Später“
+// Welcher Browser, was geht dort? (Installieren als App, Mitteilungen) – mit passender Anleitung
+const UA = navigator.userAgent, isAndroid = /Android/i.test(UA);
+const BROWSER = /DuckDuckGo/i.test(UA) ? "DuckDuckGo" : /SamsungBrowser/i.test(UA) ? "Samsung Internet" : /EdgA?\//.test(UA) ? "Edge" : /OPR\/|Opera/i.test(UA) ? "Opera"
+  : /Firefox|FxiOS/i.test(UA) ? "Firefox" : navigator.brave ? "Brave" : /CriOS/.test(UA) ? "Chrome" : /Chrome\//.test(UA) ? "Chrome" : /Safari/.test(UA) ? "Safari" : "Browser";
+const pushPossible = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+// iPhone: Mitteilungen nur in der installierten App; sonst geht es, wenn der Browser Push kann
+const pushHere = () => (isIOS ? standalone && pushPossible() : pushPossible() && !(BROWSER === "DuckDuckGo" && !standalone));
+const pushState = () => (!pushHere() ? "none" : Notification.permission === "granted" && localStorage.getItem("rb_push") === "1" ? "on" : Notification.permission === "denied" ? "blocked" : "off");
+// ohne Push und ohne echte App-Installation (z. B. DuckDuckGo auf Android): lieber in Chrome öffnen
+const weakBrowser = () => !isIOS && !standalone && (!pushPossible() || BROWSER === "DuckDuckGo");
+const chromeLink = () => (isAndroid ? `intent://${location.host}/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.origin)};end` : location.origin);
+function installHow() {
+  if (isIOS) return `${BROWSER === "Safari" ? "Unten" : "Im Browser"} auf „Teilen“ <span aria-hidden="true">⬆︎</span> tippen → „Zum Home-Bildschirm“ → „Hinzufügen“. Danach Umstiegsheld über das neue Symbol öffnen.`;
+  if (BROWSER === "Samsung Internet") return "Unten auf das Menü ☰ tippen → „Seite hinzufügen zu“ → „Startbildschirm“ (oder das ⬇︎-Symbol in der Adresszeile). Danach über das neue Symbol öffnen.";
+  if (BROWSER === "Firefox") return "Oben rechts auf ⋮ tippen → „Installieren“ bzw. „Zum Startbildschirm hinzufügen“. Danach über das neue Symbol öffnen.";
+  if (isAndroid) return "Oben rechts auf ⋮ tippen → „App installieren“ bzw. „Zum Startbildschirm hinzufügen“. Danach über das neue Symbol öffnen.";
+  return "In der Adresszeile rechts auf das Symbol „App installieren“ (Monitor mit Pfeil) klicken – oder im Menü ⋮ → „Umstiegsheld installieren“.";
+}
+function unblockHow() {
+  if (isIOS) return "iPhone-Einstellungen → „Mitteilungen“ → „Umstiegsheld“ → „Mitteilungen erlauben“ einschalten.";
+  if (standalone && isAndroid) return "Lange auf das Umstiegsheld-Symbol drücken → „App-Info“ (ⓘ) → „Benachrichtigungen“ → einschalten.";
+  if (BROWSER === "Samsung Internet") return "Menü ☰ → „Einstellungen“ → „Websites und Downloads“ bzw. „Berechtigungen“ → „Benachrichtigungen“ → umstiegsheld.de erlauben.";
+  if (BROWSER === "Firefox") return "Auf das Schloss links in der Adresszeile tippen → „Berechtigungen“ → „Benachrichtigungen“ → erlauben.";
+  return "Auf das Schloss bzw. Regler-Symbol links in der Adresszeile tippen → „Berechtigungen“ bzw. „Website-Einstellungen“ → „Benachrichtigungen“ → „Zulassen“. Danach die Seite neu laden.";
+}
 function hintCard() {
-  const push = pushCard(), x = k => `<button class="link small hint-later" data-later-hint="${k}">Später</button>`;
-  if (push && !later("push")) return push.replace("</div>", `${x("push")}</div>`);
-  if (standalone || INSTALL === null || later("install")) return "";
-  return `<div class="banner info hint row" style="align-items:center"><span style="flex:3"><b>Umstiegsheld als App?</b> Liegt dann auf dem Startbildschirm und öffnet schneller.</span>
-    <button class="btn small-btn" id="installApp" style="flex:0 0 auto;width:auto;margin:0">Installieren</button>${x("install")}</div>`;
+  const x = k => `<button class="link small hint-later" data-later-hint="${k}">Später</button>`, more = `<button class="link small" data-go="settings">Hilfe</button>`;
+  // Browser ohne Mitteilungen (z. B. DuckDuckGo): ehrlich sagen und Chrome anbieten
+  if (weakBrowser()) return later("weak") ? "" : `<div class="banner info hint"><b>In ${esc(BROWSER)} kann ich dir keine Mitteilungen schicken</b> und die App nicht richtig installieren.
+    Öffne Umstiegsheld am besten in ${isAndroid ? "Chrome" : "Chrome, Edge oder Firefox"}. <div class="row" style="margin-top:6px;align-items:center"><a class="btn small-btn" href="${chromeLink()}" style="width:auto;margin:0;color:#fff;text-decoration:none">In ${isAndroid ? "Chrome" : "einem anderen Browser"} öffnen</a>${x("weak")}${more}</div></div>`;
+  // 1. im Browser: zuerst als App installieren (danach dort die Mitteilungen)
+  if (!standalone && !later("install") && (INSTALL || isIOS || isAndroid)) return `<div class="banner info hint"><b>Erst als App installieren:</b> Dann liegt Umstiegsheld auf dem Startbildschirm${isIOS ? " – und nur so bekommst du auf dem iPhone Mitteilungen" : ""}. Danach öffnest du die App und schaltest dort die Mitteilungen ein.
+    <div class="row" style="margin-top:6px;align-items:center">${INSTALL ? `<button class="btn small-btn" id="installApp" style="width:auto;margin:0">Installieren</button>` : `<span class="small" style="flex:1">${installHow()}</span>`}${x("install")}</div></div>`;
+  // 2. in der App (oder im Browser, wenn Installieren nicht geht/später): Mitteilungen
+  const push = pushCard();
+  if (push && !later("push")) return push.replace(/<\/div>$/, `${x("push")}</div>`);
+  return "";
 }
 // iPhone in Safari, noch nichts angelegt: zuerst installieren – sonst landen die Fahrten in Safari statt in der App
 const iosFirst = () => (isIOS && !standalone && !later("iosfirst") ? `<div class="banner info hint row" style="align-items:center"><span><b>Tipp fürs iPhone:</b> Erst auf den Home-Bildschirm legen – Safari „Teilen“ <span aria-hidden="true">⬆︎</span> → „Zum Home-Bildschirm“ – und Umstiegsheld von dort öffnen.
@@ -1037,17 +1083,18 @@ function bindHints() {
 }
 
 function pushCard() {
-  if (!("serviceWorker" in navigator)) return "";
+  const ps = pushState();
+  if (ps === "on" || (ps === "none" && !isIOS)) return "";
   const perm = "Notification" in window ? Notification.permission : "default";
-  if (perm === "granted" && localStorage.getItem("rb_push") === "1") return "";
   if (isIOS && !standalone) return `<div class="banner info hint small row" style="align-items:center"><span><b>Für Mitteilungen unterwegs:</b> In Safari „Teilen“ → „Zum Home-Bildschirm“, dann Umstiegsheld von dort öffnen.
     Die App startet leer – deine Fahrten nimmst du so mit: hier unter Einstellungen „Gerät hinzufügen“, in der App „Code eingeben“.</span><button class="btn sec small-btn" data-go="settings" style="flex:0 0 auto;width:auto;margin:0">Code anzeigen</button></div>`;
-  if (perm === "denied") return `<div class="banner info small">Mitteilungen sind blockiert. Du kannst sie in den Browser-Einstellungen erlauben.</div>`;
+  if (perm === "denied") return `<div class="banner info small"><b>Mitteilungen sind blockiert.</b> So erlaubst du sie: ${unblockHow()}</div>`;
   return `<div class="banner info push-ask row" style="align-items:center"><span style="flex:3"><b>Bescheid bekommen,</b> wenn dein Bus oder Zug ausfällt oder sich verspätet?</span><button class="btn small-btn" id="pushOn" style="flex:0 0 auto;width:auto;margin:0">Einschalten</button></div>`;
 }
 
 let R_SCROLL = null;
 function bindCommon() {
+  $app.querySelector("[data-reload]")?.addEventListener("click", () => location.reload());
   // angekündigte regelmäßige Fahrt antippen: Serie aufgeklappt mit Erklärung
   $app.querySelectorAll("[data-ropenr]").forEach(b => b.onclick = () => { R_OPEN = R_SCROLL = b.dataset.ropenr; go("routines"); });
   $app.querySelectorAll("[data-regstart]").forEach(b => b.onclick = () => { startWizard(); W.regIntent = true; W.step = "regsetup";

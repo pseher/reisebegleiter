@@ -439,3 +439,6 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .card.planb .k { color: var(--accent); }
 .tl-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
 .next .miss { display: block; margin: 8px 0 0; }
+/* Einstellungen: App & Mitteilungen */
+#appcard .kv { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+#appcard .kv span { color: var(--muted); } #appcard .kv b { text-align: right; font-weight: 600; }
