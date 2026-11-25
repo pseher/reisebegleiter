@@ -261,7 +261,7 @@ function renderList(active) {
       ${PEND_OPEN ? `<ul class="trips compact">${grouped(pendL)}</ul>` : ""}` : ""}
     ${doneL.length ? `<div class="sec-row"><span>Erledigt · ${doneL.length}</span><button class="link" data-doneopen>${DONE_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${DONE_OPEN ? `<ul class="trips compact">${doneL.map(row).join("")}</ul>` : ""}` : ""}
-    ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät? Verbinden"}</button>` : ""}`;
+    ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät oder Code gesichert? Hier eingeben"}</button>` : ""}`;
   if (fresh && !DEV.list && !DEV.asked) { DEV.asked = true; api("/api/devices").then(l => { DEV.list = l; if (view === "home" && !openId && l.length > 1) render(); }).catch(() => {}); }
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
@@ -963,15 +963,58 @@ function renderSettings() {
       <p class="small muted">Automatisch folgt der Einstellung deines Geräts.</p></section>
     <section class="card"><div class="k">Meine übliche Umstiegszeit</div>${minTChips()}
       <p class="small muted">Gilt für neue Reisen. Bei einer Reise änderst du sie unter „Einstellungen dieser Reise“.</p></section>
+    ${recoveryCard()}
     ${devicesCard()}
     ${appCard()}
     <p class="foot">Echtzeitdaten: DB InfraGO (OpenBoards) · Verbindungen: Transitous/MOTIS · Angaben ohne Gewähr</p>`;
   $app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { THEME = b.dataset.themeSet; try { localStorage.setItem("rb_theme", THEME); } catch {} applyTheme(); render(); });
   $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
   document.getElementById("pushTest")?.addEventListener("click", () => api("/api/push/test", { method: "POST" }).then(r => alert(r.ok ? "Gesendet – kommt gleich an." : "Konnte nicht gesendet werden.")).catch(e => alert(e.message)));
-  bindDevices();
+  bindDevices(); bindRecovery();
   bindHints();
   bindCommon();
+}
+
+// ---------- Konto sichern: Wiederherstellungscode (hilft, wenn Browserdaten gelöscht werden oder das Handy weg ist) ----------
+const REC = { has: null, asked: false };
+const loadRec = () => { if (!AUTH || REC.asked) return; REC.asked = true; api("/api/recovery").then(r => { REC.has = r.has; REC.at = r.at; if (view === "settings" || view === "home") render(); }).catch(() => { REC.asked = false; }); };
+function recoveryCard() {
+  loadRec();
+  return `<section class="card" id="recovery"><div class="k">Konto sichern</div>
+    <p class="small" style="margin-top:0">Umstiegsheld kennt dich nur über dieses Gerät. Löschst du die Browserdaten oder ist das Handy weg, sind deine Fahrten sonst nicht mehr erreichbar. Mit einem Wiederherstellungscode holst du alles auf jedem Gerät zurück.</p>
+    ${REC.has ? `<p class="small" style="margin:6px 0"><b class="ok-t">✓ Code erstellt</b>${REC.at ? ` am ${dayShort(REC.at)}` : ""}. Hast du ihn nicht mehr, erstelle einen neuen – der alte gilt dann nicht mehr.</p>
+      <button class="btn sec small-btn" id="recNew">Neuen Code erstellen</button>`
+    : `<button class="btn small-btn" id="recNew">Wiederherstellungscode erstellen</button>`}
+    <p class="small muted" style="margin:6px 0 0">Zurückholen: unten bei „Deine Geräte“ → „Code eingeben“.</p></section>`;
+}
+async function makeRecovery() {
+  if (REC.has && !(await ask("Neuen Code erstellen?\n\nDer bisherige Code gilt danach nicht mehr.", { ok: "Neuen Code erstellen" }))) return;
+  let code; try { code = (await api("/api/recovery", { method: "POST" })).code; } catch (e) { return alert(e.message); }
+  REC.has = true; REC.at = new Date().toISOString();
+  const pm = "PasswordCredential" in window;
+  const w = document.createElement("div"); w.className = "dlg-wrap";
+  w.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-label="Dein Wiederherstellungscode"><h2>Dein Wiederherstellungscode</h2>
+    <div class="rec-code">${esc(code)}</div>
+    <p class="small">Gut aufheben – z. B. im Passwort-Manager oder als Foto. Ich zeige ihn nur jetzt. Wer ihn hat, sieht deine Fahrten: nicht weitergeben.</p>
+    <div class="dlg-btns"><button class="btn sec" data-copy>Kopieren</button>${pm ? `<button class="btn sec" data-pm>Im Passwort-Manager speichern</button>` : ""}</div>
+    <div class="dlg-btns" style="margin-top:10px"><button class="btn" data-no>Ich habe ihn gesichert</button></div></div>`;
+  w.querySelector("[data-copy]").onclick = async e => { try { await navigator.clipboard.writeText(code); e.target.textContent = "Kopiert ✓"; } catch { e.target.textContent = "Bitte abschreiben"; } };
+  w.querySelector("[data-pm]")?.addEventListener("click", async e => { try { await navigator.credentials.store(new PasswordCredential({ id: "Umstiegsheld", name: "Umstiegsheld – Wiederherstellungscode", password: code })); e.target.textContent = "Gespeichert ✓"; } catch { e.target.textContent = "Ging nicht – bitte kopieren"; } });
+  w.querySelector("[data-no]").onclick = () => { w.remove(); render(); };
+  document.body.appendChild(w);
+}
+function bindRecovery() { document.getElementById("recNew")?.addEventListener("click", makeRecovery); }
+async function restoreAccount(raw) {
+  if (raw.length !== 16) { DEV.err = "Der Wiederherstellungscode hat 16 Zeichen (z. B. ABCD-EFGH-JKMN-PQRS)."; return render(); }
+  if (trips.length && !(await ask("Konto zurückholen?\n\nWas du hier schon angelegt hast, kommt dazu.", { ok: "Zurückholen" }))) return;
+  DEV.busy = true; DEV.err = ""; render();
+  try {
+    await api("/api/recovery/restore", { method: "POST", body: { code: raw } });
+    Object.assign(DEV, { join: false, input: "", busy: false, list: null }); REC.has = true; REC.asked = false;
+    await syncFavs(true); await loadTrips().catch(() => {}); ROUTINES = await api("/api/routines").catch(() => ROUTINES);
+    flash = "Willkommen zurück – deine Fahrten, regelmäßigen Fahrten und Favoriten sind wieder da.";
+    openId = null; go("home"); checkPush();
+  } catch (e) { DEV.busy = false; DEV.err = e.message; render(); }
 }
 
 // ---------- Geräte verbinden: gleiche Reisen und Favoriten auf Handy, Tablet und Computer – ohne Anmeldung ----------
@@ -990,8 +1033,8 @@ function devicesCard() {
       <p class="small muted" style="margin:0">Gilt bis ${hm(DEV.until)} Uhr. Nur an deine eigenen Geräte weitergeben.</p>
       <div class="row" style="margin-top:8px"><button class="btn sec small-btn" id="devShare">Als Link schicken</button><button class="btn quiet small-btn" id="devCodeX">Fertig</button></div></div>` : "";
   const joinBox = DEV.join ? `<div class="link-code">
-      <label class="small" for="devIn">Code vom anderen Gerät</label>
-      <input id="devIn" class="code-in" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456" value="${esc(DEV.input)}">
+      <label class="small" for="devIn">Code vom anderen Gerät (6 Ziffern) oder dein Wiederherstellungscode</label>
+      <input id="devIn" class="code-in" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="24" placeholder="123 456  oder  ABCD-…" value="${esc(DEV.input)}">
       ${DEV.err ? `<p class="small late" style="margin:4px 0 0">${esc(DEV.err)}</p>` : ""}
       <div class="row" style="margin-top:8px"><button class="btn small-btn" id="devJoin" ${DEV.busy ? "disabled" : ""}>${DEV.busy ? "Verbinde …" : "Verbinden"}</button><button class="btn quiet small-btn" id="devJoinX">Abbrechen</button></div></div>` : "";
   return `<section class="card" id="devices"><div class="k">Deine Geräte</div>
@@ -1028,8 +1071,10 @@ function bindDevices() {
   });
 }
 async function joinDevice(raw) {
+  const rec = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (/[A-Z]/.test(rec) || rec.length > 6) return restoreAccount(rec);
   const code = String(raw || "").replace(/\D/g, "");
-  if (code.length !== 6) { DEV.err = "Der Code hat 6 Ziffern."; return render(); }
+  if (code.length !== 6) { DEV.err = "Der Code vom anderen Gerät hat 6 Ziffern, der Wiederherstellungscode 16 Zeichen."; return render(); }
   if (trips.length && !(await ask("Dieses Gerät verbinden?\n\nDeine Reisen und Favoriten von hier kommen dazu – danach siehst du auf beiden Geräten dasselbe.", { ok: "Verbinden" }))) return;
   DEV.busy = true; DEV.err = ""; render();
   try {
@@ -1091,13 +1136,18 @@ function unblockHow() {
 }
 // Hinweise zu Mitteilungen erst, wenn es etwas zu überwachen gibt (Fahrt, regelmäßige Fahrt, übernommener Link)
 const hasSomething = () => trips.length > 0 || ROUTINES.length > 0;
+const recHint = () => `<section class="card hint-card"><div class="k">Fahrten absichern</div>
+  <p>Löschst du die Browserdaten oder geht das Handy verloren, wären deine Fahrten weg. Ein Wiederherstellungscode holt alles zurück.</p>
+  <button class="btn small-btn" id="recHint" style="width:auto;margin:10px 0 0">Code erstellen</button><div class="hint-foot"><button class="link small" data-later-hint="rec">Später</button></div></section>`;
 // Andere Browser als ordentliches Raster (Android: öffnet Umstiegsheld direkt dort)
 const browserGrid = () => (isAndroid ? `<div class="br-grid">${openerBtns("btn sec small-btn")}</div>` : `<p class="small" style="margin:6px 0 0">Zum Beispiel in Firefox, Edge oder Chrome.</p>`);
 function hintCard() {
-  if (!hasSomething() || pushState() === "on") return "";
+  if (!hasSomething()) return "";
+  const recOr = () => { loadRec(); return REC.has === false && !later("rec") ? recHint() : ""; };   // danach: Konto sichern
+  if (pushState() === "on") return recOr();
   const foot = k => `<div class="hint-foot"><button class="link small" data-later-hint="${k}">Später</button></div>`;
   // Browser ohne Mitteilungen (z. B. DuckDuckGo): klar sagen, was geht, und andere Browser anbieten
-  if (weakBrowser()) return later("weak") ? "" : `<section class="card hint-card"><div class="k">Mitteilungen</div>
+  if (weakBrowser()) return later("weak") ? recOr() : `<section class="card hint-card"><div class="k">Mitteilungen</div>
     <p><b>${esc(BNAME() === "diesem Browser" ? "Dieser Browser" : BNAME())} kann keine Mitteilungen anzeigen.</b> Warnungen siehst du hier, sobald du Umstiegsheld öffnest.</p>
     <p class="small muted" style="margin:8px 0 6px">Für Mitteilungen aufs Handy Umstiegsheld in einem dieser Browser öffnen:</p>${browserGrid()}${foot("weak")}</section>`;
   // im Browser: zuerst als App installieren (danach dort die Mitteilungen)
@@ -1105,12 +1155,13 @@ function hintCard() {
     <p>Dann liegt Umstiegsheld auf dem Startbildschirm${isIOS ? " – und nur so bekommst du auf dem iPhone Mitteilungen" : ""}. Danach dort die Mitteilungen einschalten.</p>
     ${INSTALL ? `<button class="btn small-btn" id="installApp">Installieren</button>` : `<p class="small muted" style="margin:6px 0 0">${installHow()}</p>`}${foot("install")}</section>`;
   const push = pushCard();
-  return push && !later("push") ? push.replace(/<\/div>$/, `${foot("push")}</div>`) : "";
+  return push && !later("push") ? push.replace(/<\/div>$/, `${foot("push")}</div>`) : recOr();
 }
 // iPhone in Safari, noch nichts angelegt: zuerst installieren – sonst landen die Fahrten in Safari statt in der App
 const iosFirst = () => (isIOS && !standalone && !later("iosfirst") ? `<div class="banner info hint row" style="align-items:center"><span><b>Tipp fürs iPhone:</b> Erst auf den Home-Bildschirm legen – Safari „Teilen“ <span aria-hidden="true">⬆︎</span> → „Zum Home-Bildschirm“ – und Umstiegsheld von dort öffnen.
   Nur dann bekommst du Mitteilungen, und deine Fahrten liegen gleich in der App.</span><button class="link small hint-later" data-later-hint="iosfirst">Später</button></div>` : "");
 function bindHints() {
+  document.getElementById("recHint")?.addEventListener("click", makeRecovery);
   $app.querySelectorAll("[data-later-hint]").forEach(b => b.onclick = () => { try { localStorage.setItem(`rb_later_${b.dataset.laterHint}`, String(Date.now() + 3 * 864e5)); } catch {} render(); });
   document.getElementById("installApp")?.addEventListener("click", async () => { const e = INSTALL; if (!e) return; INSTALL = null;
     e.prompt(); const r = await e.userChoice.catch(() => null); if (r?.outcome !== "accepted") { try { localStorage.setItem("rb_later_install", String(Date.now() + 7 * 864e5)); } catch {} } render(); });

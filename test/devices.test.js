@@ -255,3 +255,19 @@ test("Mitverfolgen vom Live-Link: Kopie gleicht Echtzeit und Plan-B-Wechsel vom 
   const mine = (await call("/api/trips", { auth: B })).data.find(x => x.id === f.data.id);
   assert.equal(mine.legs[1].label, "RB 53");
 });
+
+test("Wiederherstellungscode: nach gelöschten Browserdaten alles zurückholen, alter Code nach neuem ungültig", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(3)], ticket: "flex" } });
+  assert.equal((await call("/api/recovery", { auth: A })).data.has, false);
+  const c1 = (await call("/api/recovery", { auth: A, method: "POST" })).data.code;
+  assert.match(c1, /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+  const c2 = (await call("/api/recovery", { auth: A, method: "POST" })).data.code;
+  // Browserdaten gelöscht: neues Gerät, neues leeres Konto
+  const N = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: c1 } })).status, 400);
+  const r = await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: c2.toLowerCase().replace(/-/g, " ") } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await call("/api/trips", { auth: N })).data.length, 1);
+  assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: c2 } })).status, 400);   // schon im Konto
+});

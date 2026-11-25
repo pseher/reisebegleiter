@@ -94,9 +94,19 @@ export async function cleanup(env) {
   await rest(env, `rb_shares?ends_at=lt.${day}`, { method: "DELETE" }).catch(() => {});   // geteilte Links nach der Fahrt weg   // Schutz-Zähler nach einem Tag weg
   // Konten ohne Geräte (alle entfernt oder lange unbenutzt) samt Reisen löschen
   // (zusätzlich hier prüfen, dass wirklich kein Gerät mehr dranhängt)
-  const orphans = (await rest(env, "rb_accounts?select=id,rb_devices(id)&rb_devices=is.null&limit=200").catch(() => []) || [])
+  const orphans = (await rest(env, "rb_accounts?select=id,recover_hash,orphan_at,rb_devices(id)&rb_devices=is.null&limit=200").catch(() => []) || [])
     .filter(o => Array.isArray(o.rb_devices) && o.rb_devices.length === 0);
-  if (orphans.length) await rest(env, `rb_accounts?id=in.(${orphans.map(o => o.id).join(",")})`, { method: "DELETE" });
+  // Mit Wiederherstellungscode: noch ein Jahr aufheben (man kann alles zurückholen), sonst gleich löschen
+  const year = Date.now() - 365 * 864e5, gone = orphans.filter(o => !o.recover_hash || (o.orphan_at && Date.parse(o.orphan_at) < year)), mark = orphans.filter(o => o.recover_hash && !o.orphan_at);
+  if (gone.length) await rest(env, `rb_accounts?id=in.(${gone.map(o => o.id).join(",")})`, { method: "DELETE" });
+  if (mark.length) await rest(env, `rb_accounts?id=in.(${mark.map(o => o.id).join(",")})`, { method: "PATCH", body: JSON.stringify({ orphan_at: new Date().toISOString() }) });
+}
+
+// Konto zum Wiederherstellungscode (gespeichert ist nur der Prüfwert)
+export async function accountByRecover(env, hash) {
+  if (mem(env)) return [...MEM.rb_accounts.values()].find(a => a.recover_hash === hash) || null;
+  const [r] = await rest(env, `rb_accounts?recover_hash=eq.${encodeURIComponent(hash)}&limit=1`);
+  return r || null;
 }
 
 // Abfragezähler (stundenweise aufsummiert)

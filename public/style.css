@@ -456,3 +456,5 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .br-grid .btn { margin: 0; min-height: 44px; font-size: 15px; }
 .hint-foot { display: flex; justify-content: flex-end; margin-top: 6px; }
 .hint-card #installApp { width: auto; margin: 10px 0 0; }
+.rec-code { font: 700 21px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .02em; text-align: center; margin: 12px 0; padding: 10px; border-radius: 10px; background: var(--bg); white-space: nowrap; user-select: all; }
+.ok-t { color: var(--ok); }

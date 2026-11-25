@@ -260,7 +260,7 @@ async function api(req, env, url) {
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
   // Wer etwas anlegt oder speichert, nutzt die App wirklich (für die Zahl „echte Nutzer“)
-  if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|follow|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
+  if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|follow|recovery|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
 
   if (p === "/api/stations") {
     const q = url.searchParams.get("q") || "", st = await searchStations(env, q);
@@ -779,6 +779,31 @@ async function api(req, env, url) {
     await db.mergeAccount(env, dev.account_id, src.account_id);
     await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
     await db.update(env, "rb_devices", dev.id, { link_tries: null });
+    return json({ ok: true });
+  }
+  // Wiederherstellungscode: einmal anzeigen, nur der Prüfwert wird gespeichert; ein neuer Code macht den alten ungültig
+  if (p === "/api/recovery" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json({ has: !!a?.recover_hash, at: a?.prefs?.recAt || null }); }
+  if (p === "/api/recovery" && method === "POST") {
+    const ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", raw = [...crypto.getRandomValues(new Uint8Array(16))].map(x => ABC[x % ABC.length]).join("");
+    const a = await db.get(env, "rb_accounts", dev.account_id);
+    await db.update(env, "rb_accounts", dev.account_id, { recover_hash: await sha(`rb-rec|${raw}`), prefs: { ...(a?.prefs || {}), recAt: new Date().toISOString() } });
+    count("rec_new");
+    return json({ code: raw.match(/.{4}/g).join("-") });
+  }
+  if (p === "/api/recovery/restore" && method === "POST") {
+    const b = await req.json().catch(() => ({})), raw = String(b.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const ip = (await sha(`rb-ip|${req.headers.get("CF-Connecting-IP") || "?"}`)).slice(0, 12);
+    if (!(await db.guard(env, `rec-ip:${ip}`, 900, 10)) || !(await db.guard(env, "rec-all", 900, 200))) return fail(429, "Gerade zu viele Versuche. Bitte in einigen Minuten noch einmal.");
+    const acc = raw.length === 16 ? await db.accountByRecover(env, await sha(`rb-rec|${raw}`)) : null;
+    if (!acc) { count("rec_fail"); return fail(400, "Der Code stimmt nicht. Bitte genau so eingeben, wie er gespeichert ist (Groß-/Kleinschreibung egal)."); }
+    if (acc.id === dev.account_id) return fail(400, "Dieses Gerät gehört schon zu dem Konto.");
+    // Was auf diesem Gerät schon angelegt ist, kommt mit ins zurückgeholte Konto
+    const mine = await db.get(env, "rb_accounts", dev.account_id);
+    const favs = [...(acc.favs || []), ...(mine?.favs || [])].filter((f, i, x) => f?.id && x.findIndex(y => y.id === f.id) === i).slice(0, 24);
+    const places = [...(acc.prefs?.places || []), ...(mine?.prefs?.places || [])].filter((f, i, x) => f?.id && x.findIndex(y => y.id === f.id || y.name === f.name) === i).slice(0, 20);
+    await db.update(env, "rb_accounts", acc.id, { favs, prefs: { ...(acc.prefs || {}), places }, orphan_at: null });
+    await db.mergeAccount(env, dev.account_id, acc.id);
+    count("rec_ok");
     return json({ ok: true });
   }
   // Einstellungen des Kontos (z. B. übliche Umstiegszeit) – gleich auf allen Geräten

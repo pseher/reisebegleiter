@@ -60,3 +60,7 @@ alter table public.rb_shares enable row level security;
 create index if not exists rb_shares_ends on public.rb_shares (ends_at);
 alter table public.rb_shares add column if not exists routine jsonb;   -- geteilte regelmäßige Fahrt (Tage, Zeit, Fenster)
 alter table public.rb_shares add column if not exists trip_id uuid;   -- Live-Link: zeigt den aktuellen Stand dieser Reise
+
+-- Wiederherstellungscode: nur ein Prüfwert wird gespeichert; Konten mit Code bleiben nach dem letzten Gerät noch ein Jahr
+alter table public.rb_accounts add column if not exists recover_hash text, add column if not exists orphan_at timestamptz;
+create unique index if not exists rb_accounts_recover on public.rb_accounts (recover_hash) where recover_hash is not null;
