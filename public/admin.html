@@ -84,10 +84,11 @@
       </div>`;
 
       // ---- 2. Wer nutzt die App?
-      const users = `<h2 class="sec">Nutzer</h2><p class="sec-sub">Ein Konto = eine Person bzw. ein Haushalt (ohne Anmeldung). Ein Konto kann mehrere verbundene Geräte haben. „Aktiv“ = App geöffnet.</p>
+      const users = `<h2 class="sec">Nutzer</h2><p class="sec-sub">Ein Konto = eine Person bzw. ein Haushalt (ohne Anmeldung), mit einem oder mehreren verbundenen Geräten. „Aktiv“ = App geöffnet. Am aussagekräftigsten: „Echte Nutzer“.</p>
         <div class="kpis">
-          ${kpi("Konten insgesamt", num(o.accounts), "So viele haben die App bisher genutzt.")}
-          ${kpi("Geräte insgesamt", num(o.devices), `${num(o.multi)} Konten nutzen mehrere Geräte.`)}
+          ${kpi("Echte Nutzer", num(o.used), `Konten, die mindestens eine Fahrt, einen Favoriten, einen Ort oder Mitteilungen angelegt haben. Davon in 7 Tagen aktiv: ${num(o.used_7d)}.`)}
+          ${kpi("Konten insgesamt", num(o.accounts), "Jede neue Installation, jeder neue Browser und jeder gelöschte Speicher ergibt ein neues Konto – auch deine Tests. Ab 25.11. erst, wenn jemand wirklich sucht oder anlegt.")}
+          ${kpi("Geräte", `${num(o.devices_used)} · ${num(o.devices)}`, `von echten Nutzern · insgesamt. ${num(o.multi)} Konten nutzen mehrere Geräte.`)}
           ${kpi("Gerade aktiv", num(o.active_1h), "Geräte, die in der letzten Stunde geöffnet wurden.")}
           ${kpi("Aktiv heute / 7 / 30 Tage", `${num(o.active_24h)} · ${num(o.devices_7d)} · ${num(o.active_30d)}`, `Geräte. In 7 Tagen waren ${num(o.acc_active_7d)} Konten aktiv.`)}
           ${kpi("Neu", `${num(o.devices_new_7d)} · ${num(o.devices_new_30d)}`, "neue Geräte in 7 bzw. 30 Tagen")}
@@ -95,6 +96,9 @@
           ${kpi("Als App installiert", o.active_30d ? pct(o.app, o.active_30d) : "–", `${num(o.app)} der in 30 Tagen aktiven Geräte nutzen sie vom Startbildschirm (wird ab jetzt erfasst).`)}
           ${kpi("Mitteilungen erlaubt", o.devices ? pct(o.push, o.devices) : "–", `${num(o.push)} Geräte bekommen Warnungen aufs Handy.`)}
         </div>
+        <h3 class="sec-h">Geräte und Browser (aktiv in 30 Tagen)</h3><p class="sec-sub">Nur grob: System und Browser. Browser und „Mitteilungen möglich“ werden seit 25.11. erfasst (beim nächsten Öffnen).</p>
+        <div class="card flat wrap"><table><tr><th>System</th><th>Browser</th><th>Geräte</th><th>als App</th><th>Mitteilungen möglich</th><th>an</th></tr>
+          ${(o.kinds || []).map(k => `<tr><td>${esc(k.os)}</td><td>${esc(k.browser === "?" ? "noch unbekannt" : k.browser)}</td><td>${k.n}</td><td>${k.app || ""}</td><td>${k.can_push || ""}</td><td>${k.push || ""}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Noch keine Daten</td></tr>`}</table></div>
         <div class="kpis" style="margin-top:10px">
           ${kpi("Fahrten gerade überwacht", num(o.trips_active), `${num(o.trips_all)} gespeichert`)}
           ${kpi("Regelmäßige Fahrten", num(o.routines_active), `aktiv · ${num(o.routines - o.routines_active)} pausiert`)}

@@ -217,6 +217,8 @@ async function api(req, env, url) {
   }
 
   if (p === "/api/register" && method === "POST") {
+    // Vorschau-Dienste, Suchmaschinen und Testautomaten legen keine Konten an
+    if (/bot|crawl|spider|slurp|preview|headless|lighthouse|facebookexternalhit|whatsapp|telegram/i.test(req.headers.get("User-Agent") || "")) return fail(403, "Kein Konto für automatische Aufrufe");
     if (!(await db.guard(env, `reg-ip:${(await sha(`rb-ip|${req.headers.get("CF-Connecting-IP") || "?"}`)).slice(0, 12)}`, 3600, 60))) return fail(429, "Gerade zu viele neue Geräte von diesem Anschluss. Bitte später noch einmal.");
     const token = b64u(crypto.getRandomValues(new Uint8Array(24)));
     const b = await req.json().catch(() => ({}));
@@ -231,6 +233,8 @@ async function api(req, env, url) {
 
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
+  // Wer etwas anlegt oder speichert, nutzt die App wirklich (für die Zahl „echte Nutzer“)
+  if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
 
   if (p === "/api/stations") {
     const q = url.searchParams.get("q") || "", st = await searchStations(env, q);
@@ -333,8 +337,11 @@ async function api(req, env, url) {
       await db.update(env, "rb_trips", t.id, { legs: t.legs, state: t.state }).catch(() => {});
     }
     // Keine Live-Abfragen beim Öffnen: die Überwachung läuft ohnehin jede Minute – so startet die App sofort
-    const app = req.headers.get("X-RB-App") === "1";
-    if (Date.parse(dev.last_seen || 0) < now - 3600e3 || !!dev.app !== app) await db.update(env, "rb_devices", dev.id, { last_seen: new Date().toISOString(), app }).catch(() => {});
+    // grob: als App installiert? welcher Browser? Mitteilungen möglich? (für die Betriebsstatistik)
+    const app = req.headers.get("X-RB-App") === "1", [bw0, cp0] = String(req.headers.get("X-RB-Env") || "").split("|");
+    const browser = ["Chrome", "Samsung Internet", "Firefox", "Edge", "Opera", "Brave", "Safari", "DuckDuckGo", "diesem Browser"].includes(bw0) ? (bw0 === "diesem Browser" ? "unbekannt" : bw0) : null, canPush = cp0 === "1";
+    if (Date.parse(dev.last_seen || 0) < now - 3600e3 || !!dev.app !== app || (browser && dev.browser !== browser) || !!dev.can_push !== canPush)
+      await db.update(env, "rb_devices", dev.id, { last_seen: new Date().toISOString(), app, ...(browser ? { browser } : {}), can_push: canPush }).catch(() => {});
     return json(trips.map(t => view(t, now)));
   }
 

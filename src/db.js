@@ -104,6 +104,12 @@ export async function statsAdd(env, x) {
     o.trips_max = Math.max(o.trips_max, x.trips || 0); if (x.runs) { o.db_max_run = Math.max(o.db_max_run, x.db || 0); o.last_at = new Date().toISOString(); } MEM.rb_stats.set(x.hour, o); return; }
   await rest(env, "rpc/rb_stats_add", { method: "POST", body: JSON.stringify({ p_hour: x.hour, p_db: x.db || 0, p_db429: x.db429 || 0, p_vbb: x.vbb || 0, p_motis: x.motis || 0, p_ai: x.ai || 0, p_runs: x.runs || 0, p_checks: x.checks || 0, p_trips: x.trips || 0 }) });
 }
+// Konto wirklich genutzt (erste Fahrt, Favorit, Ort, Mitteilungen …) – für die Zahl „echte Nutzer“
+export async function markUsed(env, accountId) {
+  if (!accountId) return;
+  if (mem(env)) { const a = MEM.rb_accounts.get(accountId); if (a && !a.used_at) a.used_at = new Date().toISOString(); return; }
+  await rest(env, `rb_accounts?id=eq.${accountId}&used_at=is.null`, { method: "PATCH", body: JSON.stringify({ used_at: new Date().toISOString() }) }).catch(() => {});
+}
 export async function statsEv(env, hour, ev) {
   if (mem(env)) { const o = MEM.rb_stats.get(hour) || { hour, db: 0, db429: 0, vbb: 0, motis: 0, ai: 0, runs: 0, checks: 0, trips_max: 0, db_max_run: 0 };
     o.ev = { ...(o.ev || {}) }; for (const [k, v] of Object.entries(ev)) o.ev[k] = (o.ev[k] || 0) + v; MEM.rb_stats.set(hour, o); return; }

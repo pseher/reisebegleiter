@@ -66,9 +66,12 @@ async function api(path, opts = {}, retry = true) {
   try { return await api0(path, opts, retry); }
   catch (e) { if (e instanceof TypeError) throw new Error("Keine Verbindung zum Internet. Bitte gleich noch einmal versuchen."); throw e; }
 }
+// Erst anmelden, wenn jemand die App wirklich nutzt (sucht, anlegt …) – bloßes Öffnen, Vorschau-Bots oder Testaufrufe zählen so nicht als Nutzer
+const EMPTY = { "/api/trips": [], "/api/routines": [], "/api/favs": [], "/api/prefs": {}, "/api/places": [], "/api/devices": [] };
 async function api0(path, { method = "GET", body } = {}, retry = true) {
+  if (!AUTH && method === "GET" && path in EMPTY) return structuredClone(EMPTY[path]);
   if (!AUTH) await register();
-  const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), "X-RB-Env": `${typeof BNAME === "function" ? BNAME() : ""}|${typeof pushHere === "function" && pushHere() ? 1 : 0}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401 && retry) { AUTH = null; return api0(path, { method, body }, false); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Fehler ${r.status}`);
@@ -83,7 +86,7 @@ const setMinT = (m, sync = true) => { MINT = m; try { localStorage.setItem("rb_m
 async function syncPrefs() { try { const p = await api("/api/prefs");
   if (p && Array.isArray(p.places) && JSON.stringify(p.places) !== JSON.stringify(PLACES)) { PLACES = p.places; try { localStorage.setItem("rb_places", JSON.stringify(PLACES)); } catch {} if (view === "add" && W?.step === "route") render(); }
   if (p && Number.isFinite(p.minT) && p.minT !== MINT) { setMinT(p.minT, false); return true; }
-  if (p && p.minT == null) api("/api/prefs", { method: "PUT", body: { minT: MINT } }).catch(() => {}); } catch {} return false; }
+  if (p && p.minT == null && AUTH) api("/api/prefs", { method: "PUT", body: { minT: MINT } }).catch(() => {}); } catch {} return false; }
 const minTChips = (attr = "data-mt") => `<div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" ${attr}="${m}" aria-pressed="${MINT === m}">${l}</button>`).join("")}</div>`;
 
 // Darstellung: auto | light | dark
