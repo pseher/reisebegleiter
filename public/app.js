@@ -1965,8 +1965,11 @@ const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
 function bahnUrl(t) {
   // Format wie die Links, die bahn.de selbst erzeugt: soid/zoid = „A=1@O=Name@X=Länge·10⁶@Y=Breite·10⁶@U=80@L=Bahnhofsnummer@“
-  const L = t.legs, first = L.find(isTrainLeg) || L[0], last = [...L].reverse().find(isTrainLeg) || L[L.length - 1];
-  const a = first.dep, z = last.arr, nm = s => String(s.name || "").replace(/\s*\(Berlin\)$/, "");
+  const L = t.legs, last = [...L].reverse().find(isTrainLeg) || L[L.length - 1];
+  // Start = deine erste Haltestelle (auch Bus/Tram), Ziel = Ankunft des letzten Zugs; Abfahrt = Abfahrt an der ersten Haltestelle
+  const a = L[0].dep, z = last.arr;
+  // Haltestellen ohne Bahnhofsnummer heißen bei der Bahn „Roseneck, Berlin“ statt „Roseneck (Berlin)“
+  const nm = s => /^\d{6,9}$/.test(String(s.eva || "")) ? String(s.name || "").replace(/\s*\(Berlin\)$/, "") : String(s.name || "").replace(/\s*\(([^)]+)\)\s*$/, ", $1");
   const loc = s => { const ok = /^\d{6,9}$/.test(String(s.eva || ""));
     return `A=1@O=${nm(s)}@${s.lat != null ? `X=${Math.round(s.lon * 1e6)}@Y=${Math.round(s.lat * 1e6)}@` : ""}${ok ? `U=80@L=${s.eva}@` : ""}`; };
   const hd = new Date(a.plan).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
