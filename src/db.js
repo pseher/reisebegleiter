@@ -1,7 +1,7 @@
 // Speicher: Supabase (PlanFlink-Projekt, Tabellen rb_devices / rb_trips) über REST mit dem Secret Key.
 // Mit MOCK=1 ein Speicher im Arbeitsspeicher (nur für lokale Tests).
 
-const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map(), rb_guard: new Map() };
+const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map(), rb_guard: new Map(), rb_shares: new Map() };
 
 function hdr(env) {
   const k = env.SUPABASE_SERVICE_KEY;
@@ -89,7 +89,8 @@ export async function cleanup(env) {
   if (mem(env)) { for (const [id, t] of MEM.rb_trips) if (!t.active && t.ends_at < day) MEM.rb_trips.delete(id); return; }
   await rest(env, `rb_trips?active=eq.false&ends_at=lt.${day}`, { method: "DELETE" });
   await rest(env, `rb_devices?last_seen=lt.${old}`, { method: "DELETE" });
-  await rest(env, `rb_guard?t=lt.${day}`, { method: "DELETE" }).catch(() => {});   // Schutz-Zähler nach einem Tag weg
+  await rest(env, `rb_guard?t=lt.${day}`, { method: "DELETE" }).catch(() => {});
+  await rest(env, `rb_shares?ends_at=lt.${day}`, { method: "DELETE" }).catch(() => {});   // geteilte Links nach der Fahrt weg   // Schutz-Zähler nach einem Tag weg
   // Konten ohne Geräte (alle entfernt oder lange unbenutzt) samt Reisen löschen
   // (zusätzlich hier prüfen, dass wirklich kein Gerät mehr dranhängt)
   const orphans = (await rest(env, "rb_accounts?select=id,rb_devices(id)&rb_devices=is.null&limit=200").catch(() => []) || [])

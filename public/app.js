@@ -871,7 +871,7 @@ function renderTrip(t, many) {
   const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
   $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
-      <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase === "before" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+      <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase === "before" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}${t.phase !== "done" ? `<button class="chip" data-share="${t.id}" title="Verbindung an andere schicken">↗ Teilen</button>` : ""}${t.phase !== "enroute" ? `<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${`<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
       ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? `<p>Laut Fahrplan klappt alles${t.transfers?.length ? ` (${t.transfers.map(x => `Umstieg ${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(", ")})` : ""}. Live-Zeiten kommen meist kurz vor der Abfahrt – dann prüfe ich laufend und melde mich, wenn etwas nicht passt.</p>` : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
@@ -902,6 +902,7 @@ function renderTrip(t, many) {
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
   // Regelmäßige Fahrt: gilt die Änderung nur heute oder für alle Fahrten?
+  $app.querySelectorAll("[data-share]").forEach(b => b.onclick = () => shareTrip(t, b));
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
     const r = t.routine && ROUTINES.find(x => x.id === t.routine);
     if (r) { const a = await ask(`Was möchtest du ändern?\n\n„${r.name}“ ist eine regelmäßige Fahrt.`, { ok: `Nur ${dateWord(new Date(t.legs[0].dep.plan).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }))}`, alt: "Alle Fahrten" });
@@ -1941,6 +1942,34 @@ if ("serviceWorker" in navigator) {
 }
 document.addEventListener("click", e => { if (e.target.closest('[data-go="add"]')) { startWizard(); } }, true);
 $app.innerHTML = `<div class="spinner"></div>`;
+// ---------- Verbindung teilen: kurzer Link, andere übernehmen sie mit einem Tipp in ihr Umstiegsheld ----------
+const legLine = l => `${hm(l.from.plan || l.dep?.plan)} ${l.label} ${cleanStop(l.from.name || l.dep?.name || "")} → ${cleanStop(l.to.name || l.arr?.name || "")}`;
+const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l => l.from || l.dep, e = l => l.to || l.arr;
+  return { head: `${cleanStop(f(a).name)} → ${cleanStop(e(z).name)}`, when: `${day(f(a).plan)} · ${hm(f(a).plan)} – ${hm(e(z).plan)}${legs.length > 1 ? ` · ${legs.length - 1} Umstieg${legs.length > 2 ? "e" : ""}` : ""}` }; };
+async function shareTrip(t, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const { url } = await api(`/api/trips/${t.id}/share`, { method: "POST" });
+    const L = tripLines(t.legs), text = `${L.head}\n${L.when}\n${t.legs.map(legLine).join("\n")}\n\nIn Umstiegsheld übernehmen und überwachen lassen:`;
+    if (navigator.share) { try { await navigator.share({ title: L.head, text, url }); } catch (e) { if (e?.name !== "AbortError") throw e; } }
+    else { await navigator.clipboard.writeText(`${text}\n${url}`); flash = "Link kopiert – du kannst ihn jetzt z. B. in WhatsApp einfügen."; render(); }
+  } catch (e) { alert(`Teilen ging nicht\n\n${e.message}`); }
+  finally { if (btn) btn.disabled = false; }
+}
+// Link „/?v=…“ geöffnet: Verbindung zeigen und auf Wunsch bei sich überwachen
+async function takeSharedTrip(code) {
+  let sh;
+  try { const r = await fetch(`/api/shared/${encodeURIComponent(code)}`); sh = await r.json().catch(() => ({})); if (!r.ok) throw new Error(sh.error || "Link nicht gefunden"); }
+  catch (e) { return alert(`Geteilte Verbindung\n\n${e.message}`); }
+  const L = tripLines(sh.legs);
+  const yes = await ask(`Verbindung übernehmen?\n\n${L.head}\n${L.when}\n\n${sh.legs.map(legLine).join("\n")}\n\nJemand hat dir diese Verbindung geschickt. Ich überwache sie dann auch für dich und melde mich, wenn etwas nicht klappt.`, { ok: "Bei mir überwachen", cancel: "Nein danke" });
+  if (!yes) return;
+  try {
+    const r = await api("/api/trips", { method: "POST", body: { legs: sh.legs.map(l => ({ ...l, minT: MINT })), ticket: "flex", src: "share" } });
+    flash = r.existed ? "Diese Verbindung überwachst du schon." : "Übernommen – ich überwache die Verbindung jetzt für dich.";
+    await loadTrips(); openId = r.id; sheetId = null; go("home");
+  } catch (e) { alert(`Übernehmen ging nicht\n\n${e.message}`); }
+}
 async function takeShared() {
   if (!new URLSearchParams(location.search).has("share")) return;
   history.replaceState(null, "", "/");
@@ -1969,10 +1998,13 @@ navigator.serviceWorker?.addEventListener("message", async e => {
   go("home");
 });
 // Link „/?link=123456“ von einem anderen Gerät: gleich zum Verbinden
+const shareCode = new URLSearchParams(location.search).get("v");
+if (shareCode) history.replaceState(null, "", "/");
 const linkCode = new URLSearchParams(location.search).get("link");
 if (linkCode) { history.replaceState(null, "", "/"); view = "settings"; DEV.join = true; DEV.input = linkCode; }
 // Sofort den letzten Stand zeigen (aus dem Gerät), dann im Hintergrund frisch laden
 try { const c = JSON.parse(localStorage.getItem("rb_trips_cache") || "null"); if (c?.trips?.length && Date.now() - c.at < 12 * 3600e3) { trips = c.trips; render(); } } catch {}
 loadTrips().then(() => { render(); schedule(); takeShared(); syncFavs().then(() => { if (view === "add") render(); }); syncPrefs().then(ch => { if (ch) render(); });
-  if (linkCode) setTimeout(() => joinDevice(linkCode), 300); },
+  if (linkCode) setTimeout(() => joinDevice(linkCode), 300);
+  if (shareCode) setTimeout(() => takeSharedTrip(shareCode), 300); },
   e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; });

@@ -48,3 +48,13 @@ create or replace function public.rb_overview() returns json language sql securi
 $$;
 revoke all on function public.rb_overview() from public, anon, authenticated;
 grant execute on function public.rb_overview() to service_role;
+
+-- Geteilte Verbindungen (kurzer Link, ohne persönliche Angaben, nach der Fahrt gelöscht)
+create table if not exists public.rb_shares (
+  id text primary key,
+  legs jsonb not null,
+  ends_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+alter table public.rb_shares enable row level security;
+create index if not exists rb_shares_ends on public.rb_shares (ends_at);

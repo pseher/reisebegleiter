@@ -179,3 +179,23 @@ test("Meine Orte: speichern, säubern, nur fürs eigene Konto", async () => {
   assert.equal((await call("/api/places", A)).j[0].name, "Zuhause");
   assert.deepEqual((await call("/api/places", B)).j, []);
 });
+
+test("Verbindung teilen: Link ohne Konto abrufen, anderer übernimmt sie, gleicher Link beim zweiten Teilen", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  const B = (await call("/api/register", { method: "POST", body: { label: "iPhone" } })).data;
+  const t = (await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(5), { ...leg(6.5), label: "RE 7" }], ticket: "flex" } })).data;
+  const s1 = await call(`/api/trips/${t.id}/share`, { auth: A, method: "POST" });
+  assert.equal(s1.status, 200, JSON.stringify(s1.data));
+  assert.match(s1.data.url, /\/\?v=[A-Za-z0-9_-]{8,16}$/);
+  assert.equal((await call(`/api/trips/${t.id}/share`, { auth: A, method: "POST" })).data.id, s1.data.id);
+  // fremde Reise darf B nicht teilen
+  assert.equal((await call(`/api/trips/${t.id}/share`, { auth: B, method: "POST" })).status, 404);
+  const g = await call(`/api/shared/${s1.data.id}`);
+  assert.equal(g.status, 200);
+  assert.equal(g.data.legs.length, 2);
+  assert.equal(JSON.stringify(g.data).includes(A.id), false);
+  const nb = await call("/api/trips", { auth: B, method: "POST", body: { legs: g.data.legs, ticket: "flex", src: "share" } });
+  assert.equal(nb.status, 201, JSON.stringify(nb.data));
+  assert.equal((await call("/api/trips", { auth: B })).data.length, 1);
+  assert.equal((await call("/api/shared/AAAAAAAAAAA")).status, 404);
+});

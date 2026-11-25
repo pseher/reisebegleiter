@@ -231,6 +231,16 @@ async function api(req, env, url) {
   // plus=N verschiebt auch die Testdaten (Verspätungen/Ausfälle gelten dann für diese Uhrzeit)
   if (p === "/api/mock/tick" && env.MOCK === "1") { const sh = (+url.searchParams.get("plus") || 0) * MIN; globalThis.RB_MOCK_SHIFT = sh; return json(await runMonitor(env, Date.now() + sh)); }
 
+  // Geteilte Verbindung abrufen – ohne Konto, damit auch neue Nutzer sie sehen können
+  const mg = /^\/api\/shared\/([A-Za-z0-9_-]{8,16})$/.exec(p);
+  if (mg && method === "GET") {
+    const sh = await db.get(env, "rb_shares", mg[1]).catch(() => null);
+    if (!sh) return fail(404, "Diesen Link gibt es nicht (mehr).");
+    if (Date.parse(sh.ends_at) < Date.now() - 30 * MIN) return fail(410, "Diese Verbindung ist schon vorbei.");
+    count("sh_open");
+    return json({ legs: sh.legs, ends_at: sh.ends_at });
+  }
+
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
   // Wer etwas anlegt oder speichert, nutzt die App wirklich (für die Zahl „echte Nutzer“)
@@ -356,7 +366,7 @@ async function api(req, env, url) {
     const twin = (await db.tripsOf(env, dev.account_id).catch(() => [])).find(t => t.active && sigOf(t.legs) === sigOf(clean));
     if (twin) return json({ ...view(twin, Date.now()), existed: true }, 200);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
-    countTrip(clean, ["search", "board", "import", "quick", "fav"].includes(b.src) ? b.src : "other");
+    countTrip(clean, ["search", "board", "import", "quick", "fav", "share"].includes(b.src) ? b.src : "other");
     const now = Date.now(), cache = new Map();
     // Erste Prüfung darf das Anlegen nicht scheitern lassen – sonst ist die Reise da, die App meldet aber einen Fehler
     try { await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache); await assess(env, trip, now, cache); }
@@ -365,6 +375,24 @@ async function api(req, env, url) {
     trip.state = { ...trip.state, rem: {}, start: null, pl: {}, zb: false };
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
     return json(view(trip, now), 201);
+  }
+
+  // Teilen: Verbindung ohne persönliche Angaben (keine Namen, kein Konto) unter einem kurzen Link ablegen
+  const msh = /^\/api\/trips\/([0-9a-f-]{36})\/share$/i.exec(p);
+  if (msh && method === "POST") {
+    const t = await ownTrip(env, dev, msh[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const sig = t.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
+    let id = t.state?.share?.sig === sig ? t.state.share.id : null;
+    if (!id || !(await db.get(env, "rb_shares", id).catch(() => null))) {
+      id = b64u(crypto.getRandomValues(new Uint8Array(8)));
+      const legs = t.legs.map(l => { const c = cleanLeg(l); delete c.minT; return c; });
+      await db.insert(env, "rb_shares", { id, legs, ends_at: t.legs[t.legs.length - 1].to.plan });
+      t.state = { ...(t.state || {}), share: { id, sig } };
+      await db.update(env, "rb_trips", t.id, { state: t.state });
+      count("sh_new");
+    }
+    return json({ id, url: `${url.origin}/?v=${id}` });
   }
 
   // SOS: Zug zuordnen (Standort optional), Ausstiege vor dir, Verbindungen zum Ziel – alles sofort

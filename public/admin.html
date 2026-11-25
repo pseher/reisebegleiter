@@ -102,7 +102,7 @@
         <div class="kpis" style="margin-top:10px">
           ${kpi("Fahrten gerade überwacht", num(o.trips_active), `${num(o.trips_all)} gespeichert`)}
           ${kpi("Regelmäßige Fahrten", num(o.routines_active), `aktiv · ${num(o.routines - o.routines_active)} pausiert`)}
-          ${wk("Fahrten angelegt", ["t_search", "t_board", "t_import", "t_quick", "t_fav", "t_other", "t_routine"], (() => { const l = [["Suche", "t_search"], ["Abfahrtstafel", "t_board"], ["Ticket-Import", "t_import"], ["Schnell weg", "t_quick"], ["Favorit", "t_fav"], ["automatisch (regelmäßig)", "t_routine"]]; return l.map(([n, k]) => `${n} ${S(W, k)}`).join(" · "); })())}
+          ${wk("Fahrten angelegt", ["t_search", "t_board", "t_import", "t_quick", "t_fav", "t_share", "t_other", "t_routine"], (() => { const l = [["Suche", "t_search"], ["Abfahrtstafel", "t_board"], ["Ticket-Import", "t_import"], ["Schnell weg", "t_quick"], ["Favorit", "t_fav"], ["geteilt bekommen", "t_share"], ["automatisch (regelmäßig)", "t_routine"]]; return l.map(([n, k]) => `${n} ${S(W, k)}`).join(" · "); })())}
           ${wk("Verkehrsmittel", ["m_bus", "m_nah", "m_fern"], `Bus/Tram ${S(W, "m_bus")} · Nahverkehr ${S(W, "m_nah")} · Fernverkehr ${S(W, "m_fern")}${S(W, "m_ausland") ? ` · ins Ausland ${S(W, "m_ausland")}` : ""}`)}
         </div>`;
 
