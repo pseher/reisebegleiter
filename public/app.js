@@ -917,12 +917,14 @@ function renderTrip(t, many) {
 function appCard() {
   const ps = pushState(), row = (l, v, c = "") => `<div class="kv"><span>${l}</span><b class="${c}">${v}</b></div>`;
   const pushTxt = { on: "eingeschaltet", off: "noch aus", blocked: "blockiert", none: isIOS && !standalone ? "erst in der App möglich" : "in diesem Browser nicht möglich" }[ps];
+  const bShown = BNAME() === "diesem Browser" ? "unbekannt (gibt sich als Chrome aus)" : BROWSER;
   return `<section class="card" id="appcard"><div class="k">App &amp; Mitteilungen</div>
-    ${row("Browser", esc(BROWSER) + (isIOS ? " (iPhone/iPad)" : isAndroid ? " (Android)" : ""))}
+    ${row("Browser", esc(bShown) + (isIOS ? " (iPhone/iPad)" : isAndroid ? " (Android)" : ""))}
     ${row("Als App", standalone ? "installiert" : "nicht installiert – läuft im Browser", standalone ? "ok-t" : "")}
     ${row("Mitteilungen", pushTxt, ps === "on" ? "ok-t" : ps === "off" ? "" : "late")}
-    ${standalone ? "" : weakBrowser() ? `<p class="small" style="margin:10px 0 6px">In ${esc(BROWSER)} gehen keine Mitteilungen und keine echte App-Installation. Öffne Umstiegsheld in ${isAndroid ? "Chrome" : "Chrome, Edge oder Firefox"}.
-        Deine Fahrten nimmst du mit: unten bei „Geräte“ einen Code anzeigen und im anderen Browser eingeben.</p><a class="btn sec" href="${chromeLink()}">In ${isAndroid ? "Chrome" : "einem anderen Browser"} öffnen</a>`
+    ${standalone ? "" : weakBrowser() ? `<p class="small" style="margin:10px 0 6px">In ${esc(BNAME())} gehen keine Mitteilungen aufs Handy, und „Zum Startbildschirm“ legt nur eine Verknüpfung an. Die App selbst funktioniert – Warnungen siehst du beim Öffnen.
+        Mitteilungen gehen z. B. in <b>Firefox</b>, <b>Samsung Internet</b>, <b>Edge</b> oder <b>Chrome</b>. Deine Fahrten nimmst du mit: unten bei „Geräte“ einen Code anzeigen und im anderen Browser eingeben.</p>
+        ${isAndroid ? `<div class="chips">${openerBtns("chip")}</div>` : ""}`
       : `<p class="small" style="margin:10px 0 6px"><b>Als App installieren:</b> ${INSTALL ? "Ein Tipp genügt." : installHow()}</p>${INSTALL ? `<button class="btn sec" id="installApp">Als App installieren</button>` : ""}
         ${isIOS ? `<p class="small muted">Die App auf dem iPhone startet leer. Deine Fahrten nimmst du mit: unten bei „Geräte“ einen Code anzeigen und in der App eingeben.</p>` : ""}`}
     ${ps === "on" ? `<button class="btn sec" id="pushTest">Test-Mitteilung senden</button>`
@@ -1037,15 +1039,20 @@ const later = k => { try { return Date.now() < +(localStorage.getItem(`rb_later_
 // Auf der Startseite höchstens EIN Hinweis: erst Mitteilungen, danach „Als App installieren“ – jeweils mit „Später“
 // Welcher Browser, was geht dort? (Installieren als App, Mitteilungen) – mit passender Anleitung
 const UA = navigator.userAgent, isAndroid = /Android/i.test(UA);
-const BROWSER = /DuckDuckGo/i.test(UA) ? "DuckDuckGo" : /SamsungBrowser/i.test(UA) ? "Samsung Internet" : /EdgA?\//.test(UA) ? "Edge" : /OPR\/|Opera/i.test(UA) ? "Opera"
+const BRANDS = (navigator.userAgentData?.brands || []).map(b => b.brand).join(" ");
+const BROWSER = /DuckDuckGo/i.test(UA + BRANDS) ? "DuckDuckGo" : /SamsungBrowser/i.test(UA) ? "Samsung Internet" : /EdgA?\//.test(UA) ? "Edge" : /OPR\/|Opera/i.test(UA) ? "Opera"
   : /Firefox|FxiOS/i.test(UA) ? "Firefox" : navigator.brave ? "Brave" : /CriOS/.test(UA) ? "Chrome" : /Chrome\//.test(UA) ? "Chrome" : /Safari/.test(UA) ? "Safari" : "Browser";
 const pushPossible = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const BNAME = () => (BROWSER === "Chrome" && !pushPossible() ? "diesem Browser" : BROWSER);   // z. B. DuckDuckGo gibt sich als Chrome aus
+// Andere Browser zum Öffnen (Android): Firefox, Samsung Internet, Edge, Chrome – wer kein Chrome will, hat Auswahl
+const OPENERS = [["Firefox", "org.mozilla.firefox"], ["Samsung Internet", "com.sec.android.app.sbrowser"], ["Edge", "com.microsoft.emmx"], ["Chrome", "com.android.chrome"]];
+const openIn = pkg => `intent://${location.host}/#Intent;scheme=https;package=${pkg};S.browser_fallback_url=${encodeURIComponent(`https://play.google.com/store/apps/details?id=${pkg}`)};end`;
+const openerBtns = cls => (isAndroid ? OPENERS.filter(([n]) => n !== BNAME()).map(([n, pkg]) => `<a class="${cls}" href="${openIn(pkg)}" style="text-decoration:none">${n}</a>`).join("") : "");
 // iPhone: Mitteilungen nur in der installierten App; sonst geht es, wenn der Browser Push kann
 const pushHere = () => (isIOS ? standalone && pushPossible() : pushPossible() && !(BROWSER === "DuckDuckGo" && !standalone));
 const pushState = () => (!pushHere() ? "none" : Notification.permission === "granted" && localStorage.getItem("rb_push") === "1" ? "on" : Notification.permission === "denied" ? "blocked" : "off");
 // ohne Push und ohne echte App-Installation (z. B. DuckDuckGo auf Android): lieber in Chrome öffnen
 const weakBrowser = () => !isIOS && !standalone && (!pushPossible() || BROWSER === "DuckDuckGo");
-const chromeLink = () => (isAndroid ? `intent://${location.host}/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.origin)};end` : location.origin);
 function installHow() {
   if (isIOS) return `${BROWSER === "Safari" ? "Unten" : "Im Browser"} auf „Teilen“ <span aria-hidden="true">⬆︎</span> tippen → „Zum Home-Bildschirm“ → „Hinzufügen“. Danach Umstiegsheld über das neue Symbol öffnen.`;
   if (BROWSER === "Samsung Internet") return "Unten auf das Menü ☰ tippen → „Seite hinzufügen zu“ → „Startbildschirm“ (oder das ⬇︎-Symbol in der Adresszeile). Danach über das neue Symbol öffnen.";
@@ -1063,8 +1070,9 @@ function unblockHow() {
 function hintCard() {
   const x = k => `<button class="link small hint-later" data-later-hint="${k}">Später</button>`, more = `<button class="link small" data-go="settings">Hilfe</button>`;
   // Browser ohne Mitteilungen (z. B. DuckDuckGo): ehrlich sagen und Chrome anbieten
-  if (weakBrowser()) return later("weak") ? "" : `<div class="banner info hint"><b>In ${esc(BROWSER)} kann ich dir keine Mitteilungen schicken</b> und die App nicht richtig installieren.
-    Öffne Umstiegsheld am besten in ${isAndroid ? "Chrome" : "Chrome, Edge oder Firefox"}. <div class="row" style="margin-top:6px;align-items:center"><a class="btn small-btn" href="${chromeLink()}" style="width:auto;margin:0;color:#fff;text-decoration:none">In ${isAndroid ? "Chrome" : "einem anderen Browser"} öffnen</a>${x("weak")}${more}</div></div>`;
+  if (weakBrowser()) return later("weak") ? "" : `<div class="banner info hint"><b>In ${esc(BNAME())} kann ich dir keine Mitteilungen aufs Handy schicken.</b> Die App funktioniert trotzdem – Warnungen siehst du dann, wenn du sie öffnest.
+    Für Mitteilungen: Umstiegsheld in einem dieser Browser öffnen${isAndroid ? "" : " (z. B. Firefox, Edge oder Chrome)"}:
+    <div class="chips" style="margin-top:6px">${openerBtns("chip")}</div><div class="row" style="margin-top:4px;align-items:center">${x("weak")}${more}</div></div>`;
   // 1. im Browser: zuerst als App installieren (danach dort die Mitteilungen)
   if (!standalone && !later("install") && (INSTALL || isIOS || isAndroid)) return `<div class="banner info hint"><b>Erst als App installieren:</b> Dann liegt Umstiegsheld auf dem Startbildschirm${isIOS ? " – und nur so bekommst du auf dem iPhone Mitteilungen" : ""}. Danach öffnest du die App und schaltest dort die Mitteilungen ein.
     <div class="row" style="margin-top:6px;align-items:center">${INSTALL ? `<button class="btn small-btn" id="installApp" style="width:auto;margin:0">Installieren</button>` : `<span class="small" style="flex:1">${installHow()}</span>`}${x("install")}</div></div>`;
