@@ -1434,17 +1434,16 @@ function toggleKeep(i) {
 function keepPicker() {
   if (!W.editId || !(W.ref.legs?.length > 1)) return W.editId ? `<p class="small muted" style="margin:0 2px 8px">Tippe eine frühere oder spätere Verbindung an. Ticket bleibt.</p>` : "";
   const K = keepInfo(), set = W.keepSet || [];
-  const opts = W.ref.legs.map((x, i) => (Date.parse(x.dep) > Date.now() ? `<button class="chip" data-keep="${i}" aria-pressed="${set.includes(i)}">${esc(x.label)} ${hm(x.dep)}</button>` : "")).join("");
+  const opts = W.ref.legs.map((x, i) => (Date.parse(x.dep) > Date.now() ? `<button class="kp-c" data-keep="${i}" aria-pressed="${set.includes(i)}">${esc(x.label)} ${hm(x.dep)}</button>` : "")).join("");
   const where = x => esc(cleanStop(x.at.name)), whereTo = x => esc(cleanStop(x.to || ""));
-  const txt = !K ? "Ich suche die ganze Fahrt neu – frühere und spätere Verbindungen."
-    : !K.pre && !K.post ? "Du behältst alle Züge – dann gibt es nichts neu zu suchen. Tippe einen Zug an, um ihn freizugeben."
-    : K.pre && K.post ? `Die markierten Züge bleiben. Ich suche erst, wie du zum ${esc(K.first.label)} in ${where(K.first)} kommst, dann wie es ab ${whereTo(K.last)} weitergeht.`
-    : K.pre ? `Ich suche, wie du zum ${esc(K.first.label)} um ${hm(K.first.dep)} in ${where(K.first)} kommst – auch mit anderen Bussen oder Bahnen. Ab dort bleibt alles wie bisher.`
-    : `Bis ${whereTo(K.last)} bleibt alles wie bisher. Ich suche, wie es ab ${hm(K.last.arr)} weitergeht.`;
-  const mt = `<div class="keep-mt"><span class="small muted">Umstiegszeit</span><div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-emt="${m}" aria-pressed="${(+W.minT || 0) === m}">${l}</button>`).join("")}</div></div>`;
-  return `<div class="card flat keep-card"><p class="small" style="margin:0 0 6px"><b>Züge fest behalten?</b> <span class="muted">Mehrere möglich</span></p>
-    <div class="chips"><button class="chip" data-keep="" aria-pressed="${!K}">Keinen</button>${opts}</div>
-    <p class="small muted" style="margin:6px 0 10px">${txt}</p>${mt}</div>`;
+  const txt = !K ? "Ganze Fahrt neu – Züge antippen, die bleiben sollen."
+    : !K.pre && !K.post ? "Alle Züge bleiben – nichts neu zu suchen."
+    : K.pre && K.post ? `Neu: bis ${where(K.first)} und ab ${whereTo(K.last)}.`
+    : K.pre ? `Neu: bis zum ${esc(K.first.label)} in ${where(K.first)}, danach wie bisher.`
+    : `Bis ${whereTo(K.last)} wie bisher, danach neu.`;
+  const mt = `<div class="kp-row"><span class="kp-l">Umstieg</span><div class="kp-sc">${MINT_OPTS.map(([m, l]) => `<button class="kp-c" data-emt="${m}" aria-pressed="${(+W.minT || 0) === m}">${m ? `${m} Min.` : "wie geplant"}</button>`).join("")}</div></div>`;
+  return `<div class="keep-card kp"><div class="kp-row"><span class="kp-l">Fest</span><div class="kp-sc"><button class="kp-c" data-keep="" aria-pressed="${!K}">keiner</button>${opts}</div></div>
+    ${mt}<p class="kp-t">${txt}</p></div>`;
 }
 // gleiche Fahrt wie die bisherige Reise? (gleiche Linien, gleiche Abfahrt)
 const lineKey = l => String(l.label || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
@@ -1679,7 +1678,7 @@ function renderWizard() {
     // Was wird gesucht? ganze Fahrt · bis zum ersten festen Zug · ab dem letzten festen Zug
     const sFrom = ph === "post" ? K.last.arrAt : W.rFrom, sTo = ph === "pre" ? K.first.at : W.rTo;
     const sub = !K ? `ab ${fullDate(W.when)}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
-    const stepNote = K && K.pre && K.post ? `<p class="small" style="margin:0 2px 8px"><b>${ph === "pre" ? "Teil 1 von 2" : "Teil 2 von 2"}:</b> ${ph === "pre" ? `bis ${esc(cleanStop(K.first.at.name))}` : `ab ${esc(cleanStop(K.last.to || ""))}`}</p>` : "";
+    const stepNote = K && K.pre && K.post ? `<p class="small" style="margin:0 2px 6px"><b>${ph === "pre" ? "Teil 1 von 2" : "Teil 2 von 2"}:</b> ${ph === "pre" ? `bis ${esc(cleanStop(K.first.at.name))}` : `ab ${esc(cleanStop(K.last.to || ""))}`}</p>` : "";
     const title = ph === "none" ? `${esc(W.rFrom.name)} → ${esc(W.rTo.name)}` : `${esc(sFrom.name)} → ${esc(sTo.name)}`;
     $app.innerHTML = `${head}<h1>${title}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${sub}</p>
       ${ph === "post" && K.pre ? "" : keepPicker()}${stepNote}
