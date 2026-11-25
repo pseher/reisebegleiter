@@ -241,7 +241,7 @@ function renderList(active) {
       <span class="tr-main"><b>${x.r.win ? `${esc(x.r.win[0])}–${esc(x.r.win[1])}` : hm(x.r.next.at)} ↻ ${esc(x.r.name)}</b>${x.r.win ? `<span class="muted small">eine Fahrt in diesem Zeitfenster</span>` : ""}</span>
       <span class="tr-state small">${pendText(x.r)}</span></button></li>`
     : `<li class="crow-li"><button data-open="${x.t.id}" class="crow"><span class="sdot d-${planOnly(x.t) ? "PLAN" : x.t.status}"></span>
-      <span class="tr-main"><b>${hm(x.t.legs[0].dep.rt)} ${x.t.rname ? `↻ ${esc(x.t.rname)}` : `${esc(cleanStop(x.t.legs[0].dep.name))} → ${esc(cleanStop(x.t.legs[x.t.legs.length - 1].arr.name))}`}</b></span>
+      <span class="tr-main"><b>${hm(x.t.legs[0].dep.rt)} ${x.t.follow === true ? "👀 " : ""}${x.t.rname ? `↻ ${esc(x.t.rname)}` : `${esc(cleanStop(x.t.legs[0].dep.name))} → ${esc(cleanStop(x.t.legs[x.t.legs.length - 1].arr.name))}`}</b></span>
       <span class="tr-state small">${esc(listState(x.t))}</span></button></li>`;
   // Alte Adresse (…workers.dev): Hinweis auf den Umzug mit Anleitung zum Mitnehmen
   const moved = /workers\.dev$/.test(location.hostname) ? `<section class="card move"><div class="k">Neue Adresse</div>
@@ -550,7 +550,7 @@ function nextCard(n, t) {
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
   // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
   const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
-  const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 20 * MIN
+  const missBtn = t && t.follow !== true && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 20 * MIN
     ? `<button class="link small miss" data-missed="${t.id}|${n.i}">Doch nicht eingestiegen? Neu suchen</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b>. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.</div></section>`;
@@ -879,7 +879,9 @@ function renderTrip(t, many) {
   const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
   $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
-      <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase === "before" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}${t.phase !== "done" ? `<button class="chip" data-share="${t.id}" title="Verbindung an andere schicken">↗ Teilen</button>` : ""}${t.phase !== "enroute" ? `<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+      <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase === "before" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}${t.phase !== "done" ? `<button class="chip" data-share="${t.id}" title="Verbindung an andere schicken">↗ Teilen</button>` : ""}${t.phase !== "enroute" ? `<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+    ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
+      : t.follow === "gone" ? `<p class="small explain">👀 Die geteilte Fahrt wurde beim Absender gelöscht – ich überwache diese Verbindung hier einfach weiter.</p>` : ""}
     ${`<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
       ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? `<p>Laut Fahrplan klappt alles${t.transfers?.length ? ` (${t.transfers.map(x => `Umstieg ${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(", ")})` : ""}. Live-Zeiten kommen meist kurz vor der Abfahrt – dann prüfe ich laufend und melde mich, wenn etwas nicht passt.</p>` : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
@@ -887,12 +889,12 @@ function renderTrip(t, many) {
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${nextCard(t.next, t)}
-    ${sosButton(t)}
-    ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
+    ${t.follow === true ? "" : `${sosButton(t)}
+    ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}`}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.phase === "enroute" && t.status !== "OK" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise · ${t.legs.length} ${t.legs.length === 1 ? "Fahrt" : "Fahrten"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
       : `${t.phase === "enroute" && t.status !== "OK" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise <span class="chev">▴</span></button>` : `<h3 class="sec-h">${t.phase === "enroute" ? "Ganze Reise" : "Verlauf"}</h3>`}<div class="card flat">${timeline(t)}</div>`}
-    ${t.phase === "before" && t.ticket !== "dticket" ? `<a class="btn sec" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" data-bahn>🎫 Ticket bei der Bahn buchen</a>
+    ${t.phase === "before" && t.ticket !== "dticket" && !t.follow ? `<a class="btn sec" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" data-bahn>🎫 Ticket bei der Bahn buchen</a>
       <p class="small muted" style="margin:-2px 0 8px">Öffnet die Suche auf bahn.de bzw. im DB Navigator mit Start, Ziel und Abfahrtszeit – deine Verbindung steht dort oben. Umstiegsheld verkauft selbst keine Tickets.</p>` : ""}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Reise"}</button>
@@ -1139,9 +1141,10 @@ function bindCommon() {
       if (a === "alt") { if (!(await ask(`„${r.name}“ ganz löschen?\n\nEs werden keine neuen Fahrten mehr angelegt.`, { ok: "Alle löschen", danger: true }))) return;
         await api(`/api/routines/${r.id}`, { method: "DELETE", body: { endTrips: true } }).catch(e => alert(e.message)); ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `„${r.name}“ gelöscht.`; openId = null; sheetId = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0); return; }
-    } else if (!(await ask("Fahrt löschen?\n\nSie wird nicht mehr überwacht und verschwindet aus der Liste.", { ok: "Löschen", danger: true }))) return;
+    } else if (tt?.follow === true) { if (!(await ask("Nicht mehr mitverfolgen?\n\nDu bekommst zu dieser Fahrt keine Mitteilungen mehr. Die reisende Person merkt davon nichts.", { ok: "Nicht mehr mitverfolgen", danger: true }))) return; }
+    else if (!(await ask("Fahrt löschen?\n\nSie wird nicht mehr überwacht und verschwindet aus der Liste.", { ok: "Löschen", danger: true }))) return;
     let okDel = true; await api(`/api/trips/${b.dataset.del}`, { method: "DELETE" }).catch(e => { okDel = false; alert(e.message); });
-    if (okDel) flash = "Fahrt gelöscht.";
+    if (okDel) flash = tt?.follow === true ? "Du verfolgst die Fahrt nicht mehr mit." : "Fahrt gelöscht.";
     openId = null; sheetId = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {
@@ -2026,6 +2029,14 @@ async function takeSharedRoutine(code, sh) {
     await loadTrips().catch(() => {}); go("routines");
   } catch (e) { alert(`Übernehmen ging nicht\n\n${e.message}`); }
 }
+// Vom Live-Link: Fahrt mitverfolgen – erscheint wie eine eigene, gleicht sich aber mit dem Original ab
+async function followTrip(code) {
+  try {
+    const r = await api("/api/follow", { method: "POST", body: { id: code } });
+    flash = r.own ? "Das ist deine eigene Fahrt." : r.existed ? "Diese Fahrt verfolgst du schon mit." : "Du verfolgst diese Fahrt jetzt mit. Erlaube Mitteilungen, dann melde ich mich, wenn sie sich verspätet oder geändert wird.";
+    await loadTrips(); openId = r.id; sheetId = null; go("home");
+  } catch (e) { alert(`Mitverfolgen ging nicht\n\n${e.message}`); }
+}
 // Link „/?v=…“ geöffnet: Verbindung zeigen und auf Wunsch bei sich überwachen
 async function takeSharedTrip(code) {
   let sh;
@@ -2069,6 +2080,8 @@ navigator.serviceWorker?.addEventListener("message", async e => {
   go("home");
 });
 // Link „/?link=123456“ von einem anderen Gerät: gleich zum Verbinden
+const followCode = new URLSearchParams(location.search).get("f");
+if (followCode) history.replaceState(null, "", "/");
 const shareCode = new URLSearchParams(location.search).get("v");
 if (shareCode) history.replaceState(null, "", "/");
 const linkCode = new URLSearchParams(location.search).get("link");
@@ -2077,5 +2090,6 @@ if (linkCode) { history.replaceState(null, "", "/"); view = "settings"; DEV.join
 try { const c = JSON.parse(localStorage.getItem("rb_trips_cache") || "null"); if (c?.trips?.length && Date.now() - c.at < 12 * 3600e3) { trips = c.trips; render(); } } catch {}
 loadTrips().then(() => { render(); schedule(); takeShared(); syncFavs().then(() => { if (view === "add") render(); }); syncPrefs().then(ch => { if (ch) render(); });
   if (linkCode) setTimeout(() => joinDevice(linkCode), 300);
-  if (shareCode) setTimeout(() => takeSharedTrip(shareCode), 300); },
+  if (shareCode) setTimeout(() => takeSharedTrip(shareCode), 300);
+  if (followCode) setTimeout(() => followTrip(followCode), 100); },
   e => { $app.innerHTML = `<p class="err">${esc(e.message)}</p><button class="btn sec" onclick="location.reload()">Noch einmal versuchen</button>`; });

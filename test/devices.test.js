@@ -236,3 +236,22 @@ test("Live-Link: ohne Konto ansehen, ohne Namen, gleicher Link, fremde Reise nic
   // Live-Code taugt nicht als „Verbindung übernehmen“-Link
   assert.equal((await call(`/api/shared/${l1.data.id}`)).status, 404);
 });
+
+test("Mitverfolgen vom Live-Link: Kopie gleicht Echtzeit und Plan-B-Wechsel vom Original ab", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  const B = (await call("/api/register", { method: "POST", body: { label: "iPhone" } })).data;
+  const t = (await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(2), { ...leg(3.5), label: "RE 7" }], ticket: "flex" } })).data;
+  const { id } = (await call(`/api/trips/${t.id}/live`, { auth: A, method: "POST" })).data;
+  const f = await call("/api/follow", { auth: B, method: "POST", body: { id } });
+  assert.equal(f.status, 201, JSON.stringify(f.data));
+  assert.equal(f.data.follow, true);
+  assert.equal((await call("/api/follow", { auth: B, method: "POST", body: { id } })).data.existed, true);
+  assert.equal((await call("/api/follow", { auth: A, method: "POST", body: { id } })).data.own, true);
+  // Absender ändert die Verbindung → Kopie zieht beim nächsten Lauf nach
+  const db = await import("../src/db.js"), src = await db.get(env, "rb_trips", t.id);
+  const nl = { ...leg(4), label: "RB 53" };
+  await db.update(env, "rb_trips", t.id, { legs: [src.legs[0], { ...nl, from: { ...nl.from }, to: { ...nl.to } }] });
+  await call("/api/mock/tick");
+  const mine = (await call("/api/trips", { auth: B })).data.find(x => x.id === f.data.id);
+  assert.equal(mine.legs[1].label, "RB 53");
+});

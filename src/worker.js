@@ -56,7 +56,7 @@ function view(trip, now = Date.now()) {
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   const sosV = st.sos && now - st.sos.at < 45 * MIN ? { ...st.sos, list: (st.sos.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs.slice((a.from ?? 0) + 1), a.legs || []) })) } : null;
   const win = st.win ? { from: st.win.from, to: st.win.to, picked: !!st.win.picked, prev: st.win.prev && Date.parse(st.win.prev.arr) > now ? { dep: st.win.prev.dep, label: st.win.prev.label } : null, list: (st.win.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs, a.legs || []) })) } : null;
-  return { id: trip.id, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  return { id: trip.id, follow: st.follow?.trip ? true : st.follow?.gone ? "gone" : false, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, zbWhy: v.zbWhy, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
@@ -260,7 +260,7 @@ async function api(req, env, url) {
   const dev = await device(env, req);
   if (!dev) return fail(401, "Gerät unbekannt");
   // Wer etwas anlegt oder speichert, nutzt die App wirklich (für die Zahl „echte Nutzer“)
-  if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
+  if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|follow|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
 
   if (p === "/api/stations") {
     const q = url.searchParams.get("q") || "", st = await searchStations(env, q);
@@ -391,6 +391,21 @@ async function api(req, env, url) {
     trip.state = { ...trip.state, rem: {}, start: null, pl: {}, zb: false };
     await db.update(env, "rb_trips", trip.id, { obs: trip.obs, state: trip.state });
     return json(view(trip, now), 201);
+  }
+
+  // Mitverfolgen (vom Live-Link): eigene Kopie der Fahrt, die sich mit dem Original abgleicht – mit ganz normalen Mitteilungen
+  if (p === "/api/follow" && method === "POST") {
+    const b = await req.json().catch(() => ({})), code = String(b.id || "");
+    const sh = /^[A-Za-z0-9_-]{8,16}$/.test(code) ? await db.get(env, "rb_shares", code).catch(() => null) : null;
+    const src = sh?.trip_id ? await db.get(env, "rb_trips", sh.trip_id).catch(() => null) : null;
+    if (!src || Date.parse(src.ends_at) < Date.now() - 30 * MIN) return fail(410, "Diese Fahrt ist schon vorbei oder wurde gelöscht.");
+    if ((src.account_id || src.device_id) === dev.account_id) return json({ ...view(src, Date.now()), own: true });   // eigene Fahrt: einfach öffnen
+    const mine = await db.tripsOf(env, dev.account_id).catch(() => []), twin = mine.find(t => t.state?.follow?.trip === src.id);
+    if (twin) return json({ ...view(twin, Date.now()), existed: true });
+    const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket: "flex", legs: src.legs.map(l => ({ ...l, minT: 0 })), obs: JSON.parse(JSON.stringify(src.obs || [])),
+      state: { follow: { trip: src.id, code }, rem: {}, start: null, pl: {}, zb: false, ...(src.state?.at ? { at: src.state.at } : {}) }, active: true, ends_at: src.ends_at });
+    countTrip(trip.legs, "follow");
+    return json(view(trip, Date.now()), 201);
   }
 
   // Teilen: Verbindung ohne persönliche Angaben (keine Namen, kein Konto) unter einem kurzen Link ablegen

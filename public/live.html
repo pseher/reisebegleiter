@@ -67,6 +67,9 @@ async function load() {
       return `<li class="${i === cur ? "now" : ""}"><span class="t">${time(l.dep, l.dep.cancelled)}</span><span><b>${esc(l.label)}</b> ab ${esc(clean(l.dep.name))}${l.dep.platform ? `, Gl. ${esc(l.dep.platform)}` : ""}${i === cur ? " · <b>gerade unterwegs</b>" : ""}</span>
         <span class="t">${time(l.arr, l.arr.cancelled)}</span><span>an ${esc(clean(l.arr.name))}</span>
         ${tr ? `<span class="lv-x ${tr.status === "RISK" || tr.status === "LOST" ? "bad" : ""}">Umstieg ${tr.status === "LOST" ? "klappt nicht" : `${tr.gap} Min.`}</span>` : ""}</li>`; }).join("")}</ul></section>
+    ${d.phase !== "done" ? `<section class="card" style="text-align:center"><b>Bescheid bekommen statt nachschauen?</b>
+      <p class="small muted" style="margin:4px 0 8px">Verfolge die Fahrt in Umstiegsheld mit: Du bekommst eine Mitteilung, wenn sie sich verspätet oder unterwegs geändert wird. Kostenlos, ohne Anmeldung.</p>
+      <a class="btn" href="/?f=${encodeURIComponent(id)}">In Umstiegsheld mitverfolgen</a></section>` : ""}
     <p class="small muted" style="text-align:center">Stand ${hm(d.checkedAt || new Date().toISOString())} · aktualisiert sich jede Minute von selbst</p>
     <p class="small muted" style="text-align:center">Selbst mit Bus oder Bahn unterwegs? <a href="/">Umstiegsheld</a> warnt dich, wenn ein Umstieg knapp wird.</p>`;
   if (d.phase === "done") clearInterval(timer);

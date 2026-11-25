@@ -386,14 +386,19 @@ export async function runMonitor(env, now = Date.now()) {
   const trips = await db.activeTrips(env), cache = new Map();
   for (const t of trips) await bindLate(env, t, now, cache).catch(() => {});
   for (const t of trips) await sitStill(env, t, now).catch(() => {});
-  const checks = trips.flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
+  // Mitverfolgte Fahrten (über einen Live-Link) fragen nichts selbst ab: sie übernehmen Stand und Verbindung vom Original
+  const followers = trips.filter(t => t.state?.follow?.trip);
+  const checks = trips.filter(t => !t.state?.follow?.trip).flatMap(t => dueChecks(t, now)).sort((a, b) => a.dist - b.dist).slice(0, 24);
   await observe(env, checks, now, cache);
-  const out = new Map();
+  const out = new Map(), fMsgs = new Map();
+  for (const f of followers) { const m = await followSync(env, f, trips).catch(e => (console.log("Mitverfolgen:", e.message), null)); if (m) fMsgs.set(f.id, m); }
   for (const t of trips) {
     const before = JSON.stringify(t.state || {});
     if (t.state?.win && !t.state.win.picked) await refreshWindow(env, t, now, opts => watchAlts(env, opts, now, +t.legs[0]?.minT || 0, cache)).catch(e => console.log("Zeitfenster:", e.message));
     if (!t.active) { await saveTrip(env, t).catch(() => {}); continue; }
     const { msgs } = await assess(env, t, now, cache);
+    if (fMsgs.has(t.id)) msgs.unshift(fMsgs.get(t.id));
+    if (t.state?.follow?.trip) for (const m of msgs) if (!m.tag?.endsWith("-follow")) m.title += " · mitverfolgt";   // klar: nicht die eigene Fahrt
     if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
     for (const m of msgs) { count(`p_${pushKind(m)}`); if (m.lead != null && m.lead >= 0) { count("lead_sum", m.lead); count("lead_n"); } }
@@ -419,6 +424,26 @@ export async function runMonitor(env, now = Date.now()) {
   if (new Date(now).getUTCMinutes() === 7) await db.cleanup(env).catch(() => {});
   return { trips: trips.length, checks: checks.length, requests: cache.size, msgs: [...out.values()].flat().length, sent };
 }
+
+// Mitverfolgen: Echtzeit vom Original übernehmen; hat der Reisende die Verbindung geändert (Plan B), hier auch – mit Meldung
+const legSig = L => L.map(l => `${l.label}@${l.from.plan}>${l.to.plan}`).join("|");
+async function followSync(env, f, trips) {
+  const src = trips.find(t => t.id === f.state.follow.trip) || await db.get(env, "rb_trips", f.state.follow.trip).catch(() => null);
+  if (!src) { f.state = { ...f.state, follow: { ...f.state.follow, trip: null, gone: true } }; return null; }   // Original gelöscht: ab jetzt selbst überwachen
+  if (legSig(src.legs) !== legSig(f.legs)) {
+    const z = src.legs[src.legs.length - 1], from = src.legs.findIndex(l => Date.parse(l.to.plan) > Date.now());
+    f.legs = src.legs.map(l => ({ ...l, minT: f.legs[0]?.minT ?? l.minT })); f._legsDirty = true; f.ends_at = src.ends_at;
+    f.state = { follow: f.state.follow, rem: {}, start: null, pl: {}, zb: false, rname: f.state.rname || null };
+    const next = src.legs.slice(Math.max(0, from)).map(l => `${l.label} ab ${l.from.name} ${hmB(l.from.plan)}`).join(", dann ");
+    f.obs = JSON.parse(JSON.stringify(src.obs || [])); if (src.state?.at) f.state.at = src.state.at;
+    return { title: "🔄 Verbindung geändert", body: `Die mitverfolgte Fahrt nach ${z.to.name} wurde geändert: jetzt ${next}. Ankunft ${hmB(z.to.plan)} (Fahrplan).`, tag: `${f.id}-follow` };
+  }
+  const o = JSON.stringify(src.obs || []);
+  if (o !== JSON.stringify(f.obs || [])) { f.obs = JSON.parse(o); f._dirty = true; }
+  if (src.state?.at && f.state.at !== src.state.at) f.state = { ...f.state, at: src.state.at };
+  return null;
+}
+const hmB = iso => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
 
 export async function deliver(env, sub, msg) {
   if (env.MOCK === "1") { console.log("PUSH", msg.title, "–", msg.body); return 201; }
@@ -476,7 +501,7 @@ export async function adopt(env, trip, k, idx, fromHere = false, fromSos = false
   const depKeep = a.kind === "stay" || a.stay || a.cut ? keep + 1 : keep;
   const low = (obj, n) => Object.fromEntries(Object.entries(obj || {}).filter(([i]) => +String(i).replace(/\D/g, "") < n));
   const st = trip.state || {};
-  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, zbAt, zbWhy: zbAt ? zbWhy : null, missed: null };
+  trip.state = { ...st, tr: [], alt: {}, altAt: {}, here: null, sos: null, rem: low(st.rem, keep), legC: low(st.legC, keep), pl: low(st.pl, depKeep), start: depKeep === 0 ? null : st.start, undo, origArr, zbAt, zbWhy: zbAt ? zbWhy : null, missed: null, follow: null };   // eigener Plan B: nicht mehr mit dem Original abgleichen
   trip.ends_at = trip.legs[trip.legs.length - 1].to.plan;
   return trip;
 }
