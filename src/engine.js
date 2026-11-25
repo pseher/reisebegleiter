@@ -178,7 +178,10 @@ const at = (s, ms, leg) => `${hm(ms)}${s.platform ? `, ${platWord(leg, s.platfor
 
 export function headline(v, trip, now = Date.now()) {
   const { legs, transfers, phase } = v, last = legs[legs.length - 1];
-  const next = transfers.find(t => t.status !== "DONE");
+  const open = transfers.filter(t => t.status !== "DONE"), first = open[0];
+  // Die Überschrift erklärt immer die Farbe: zählt der schlimmste offene Umstieg, nicht nur der nächste
+  const next = open.reduce((w, t) => (SEV[t.status] > SEV[w.status] ? t : w), first);
+  const later = !!next && next !== first;   // das Problem liegt erst bei einem späteren Umstieg
   const arrive = v.finalDelay == null ? "" : `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)}${v.finalDelay >= 3 ? ` (+${v.finalDelay})` : ""}.`;
   if (v.missed != null) { const l = legs[v.missed]; return { title: `${l.label} verpasst`, sub: `Ab ${cleanName(l.dep.name)}. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.` }; }
   if (phase === "done") return { title: "Angekommen", sub: `${last.arr.name} um ${hm(last.arr.rt)}.` };
@@ -188,8 +191,16 @@ export function headline(v, trip, now = Date.now()) {
   if (next?.status === "LOST") return { title: `Anschluss in ${next.at} klappt nicht`, sub: next.reason === "cancel" ? `${next.toLabel} in ${next.at} fällt aus.` : `${next.fromLabel} kommt in ${next.at} erst ${hm(next.arrRt)} an, ${next.toLabel} fährt ${hm(next.depRt)}.` };
   if (next?.status === "RISK" && next.gap < 0) return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} klappt wohl nicht` : `Anschluss in ${next.at} klappt wohl nicht`,
     sub: `Nach der aktuellen Verspätung kommst du in ${next.at} ca. ${mins(-next.gap)} nach der Abfahrt von ${next.toLabel} an. Das kann sich noch ändern – deine Möglichkeiten stehen darunter.` };
-  if (next?.status === "RISK") return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} gefährdet` : "Anschluss gefährdet", sub: `${xferText(next, `nur ${mins(next.gap)}`)} Ich behalte das im Blick.` };
-  if (next?.status === "WATCH") return { title: "Umstieg wird knapp", sub: `${xferText(next, `noch ${mins(next.gap)}`)} Ich behalte das im Blick.` };
+  // „8 Min. (Gleis 4 → Gleis 11), etwas weniger als deine 10 Min.“ – ohne den Ort doppelt zu nennen
+  const ownNote = t => (t.own > 0 && t.gap < t.own ? `, etwas weniger als deine ${mins(t.own)}` : "");
+  const end = x => (x.endsWith(".") ? x : x + ".");
+  const short = t => { const x = xferText(t, `nur ${mins(t.gap)}`).replace(/\.$/, "");
+    return x.startsWith("In ") ? ": " + end(x.replace(/^In .+? nur /, "nur ").replace(" zum Umsteigen", "") + ownNote(t)) : ". " + end(x + ownNote(t)); };
+  const sofar = later ? `Bis ${first.at} läuft alles nach Plan. ` : "";
+  if (next?.status === "RISK") return { title: next.toMust ? `${vehicle(next.toLeg).fest} ${next.toLabel} gefährdet` : `Anschluss in ${next.at} gefährdet`,
+    sub: `${sofar}Umstieg in ${next.at}${short(next)} Ich behalte das im Blick.` };
+  if (next?.status === "WATCH") return { title: later ? "Noch läuft alles nach Plan" : `Umstieg in ${next.at} wird knapp`,
+    sub: `${later ? "Aber der" : "Der"} Umstieg in ${next.at} könnte knapp werden${short(next)} Ich behalte das im Blick.` };
   // Kein Umstiegsproblem – aber ehrlich sagen, wenn es am Ziel später wird
   const d = v.finalDelay ?? 0;
   // Vor der Abfahrt zählt zuerst, wann es losgeht: „Abfahrt 22 Min. später“ – nie „nach Plan“, wenn der erste Zug spät ist

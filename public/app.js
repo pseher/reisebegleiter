@@ -182,6 +182,8 @@ function render0() {
 
 // Überall dieselben Worte: „Anschluss gefährdet“ → „Anschluss klappt wohl nicht“ → „Anschluss klappt nicht“
 const KICKER = { OK: "Alles gut", WATCH: "Knapp", RISK: "Anschluss gefährdet", LOST: "Plan B nötig", DONE: "Angekommen" };
+// Problem erst bei einem späteren Umstieg: in der Liste direkt sagen, wo es knapp wird
+const knappLine = t => { const w = (t.transfers || []).find(x => x.status === "WATCH"); return w ? `Umstieg ${cleanStop(w.at || "")} knapp · ${w.gap} Min.` : t.title; };
 const listState = t => {
   const tr = (t.transfers || []).find(x => x.status === t.status);
   if (t.status === "LOST") return t.missed != null ? "Verpasst – Plan B" : t.legCancel != null || tr?.reason === "cancel" ? "Fällt aus – Plan B" : "Anschluss klappt nicht – Plan B";
@@ -326,7 +328,7 @@ function jetztCard(t, slim = false) {
   return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? "PLAN" : t.status}" data-open="${t.id}">
     <div class="jk"><span>${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`} · ${esc(when)}</span><span>${esc(listState(t))}</span></div>
     ${n ? `<div class="jt"><b>${hm(n.at)}</b> <span>${what}</span></div>` : ""}
-    <div class="js">${esc(t.status === "OK" ? (n?.then && !n.then.lost ? `Umstieg ${cleanStop(n.then.station || "")} klappt · ${n.then.gap} Min.` : `${t.phase === "enroute" ? "an" : "Ankunft"} ${hm(t.legs[t.legs.length - 1].arr.rt)} ${cleanStop(t.legs[t.legs.length - 1].arr.name)}`) : t.title === listState(t) ? String(t.sub || "").split(/(?<=\.) /)[0] : t.title)}${t.status === "LOST" ? " – antippen" : ""}</div></button>`;
+    <div class="js">${esc(t.status === "OK" ? (n?.then && !n.then.lost ? `Umstieg ${cleanStop(n.then.station || "")} klappt · ${n.then.gap} Min.` : `${t.phase === "enroute" ? "an" : "Ankunft"} ${hm(t.legs[t.legs.length - 1].arr.rt)} ${cleanStop(t.legs[t.legs.length - 1].arr.name)}`) : t.status === "WATCH" && /^Noch läuft/.test(t.title || "") ? knappLine(t) : t.title === listState(t) ? String(t.sub || "").split(/(?<=\.) /)[0] : t.title)}${t.status === "LOST" ? " – antippen" : ""}</div></button>`;
 }
 
 // Angekündigte regelmäßige Fahrt: ab wann sie überwacht wird (überall derselbe Begriff)
