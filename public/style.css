@@ -434,3 +434,8 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .hero.jetzt.slim { margin: 6px 0 8px; padding-top: 10px; padding-bottom: 10px; }
 .jetzt.slim .jt b { font-size: 26px; } .jetzt.slim .jt { margin: 2px 0 0; }
 .now-more { display: block; margin: -2px 0 10px auto; }
+/* Plan B (auf Knopfdruck) – neutral, rot nur bei echter Gefahr */
+.card.planb { border: 2px solid var(--accent); }
+.card.planb .k { color: var(--accent); }
+.tl-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+.next .miss { display: block; margin: 8px 0 0; }

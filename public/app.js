@@ -537,8 +537,8 @@ function nextCard(n, t) {
       <button class="btn quiet small-btn" data-caught="${t.id}">Doch erwischt – zurück zum Plan</button></section>`;
   // erst nach der Abfahrt sinnvoll – und nur bis 2 Std. danach
   const since = n.depAt ? Date.now() - Date.parse(n.depAt) : -1, leg = t?.legs?.[n.i];
-  const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 120 * MIN
-    ? `<button class="btn sec small-btn miss" data-missed="${t.id}|${n.i}">Nicht eingestiegen – neu suchen</button>` : "";
+  const missBtn = t && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 20 * MIN
+    ? `<button class="link small miss" data-missed="${t.id}|${n.i}">Doch nicht eingestiegen? Neu suchen</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
       <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b>. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
@@ -550,10 +550,10 @@ function nextCard(n, t) {
       <div><b>${esc(/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label)}</b> ab ${esc(n.station)}${n.dest ? ` <span class="muted">→ ${esc(n.dest)}</span>` : ""}</div>
       <div class="muted small">${n.cancelled ? `<span class="late">fällt aus</span>` : inMin(n.at)}</div>
       ${t && n.kind === "board" && t.phase === "before" ? accessBox(t) : ""}
-      ${n.from && cleanStop(n.from.name) !== cleanStop(n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
+      ${n.from && !sameStation(n.from.name, n.station) ? `<div class="walk-box">Zu Fuß von ${esc(cleanStop(n.from.name))} zu ${esc(cleanStop(n.station))} ${walkBtn(n.from, { name: n.station, lat: n.lat, lon: n.lon })}</div>` : ""}`;
   else body = `<div class="big">${hm(n.at)} ${gl(n.platform, n)}</div>${lateLine(n.delay, n.plan)}
-      <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(n.station)}</b></div>
-      ${n.then && n.then.station && cleanStop(n.then.station) !== cleanStop(n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
+      <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(cleanStop(n.station))}</b>${n.platform ? "" : ""}</div>
+      ${n.then && n.then.station && !sameStation(n.then.station, n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
       ${n.then ? (n.then.lost ? `<div class="small"><span class="late">Anschluss ${esc(n.then.label)} ${n.then.cancelled ? "fällt aus" : "klappt nicht"}</span></div>`
         : `<div class="then">Dann <b>${esc(n.then.label)}</b> um ${hm(n.then.at)}${n.then.platform ? `, ${esc(platWord(n.then, n.then.platform))}` : ""}${n.then.platformChanged ? ` <span class="late">Gleiswechsel (statt ${esc(n.then.platformPlan)})</span>` : ""} · ${n.then.gap >= 0 ? `${n.then.gap} Min. Zeit` : `<span class="late">voraussichtlich ${-n.then.gap} Min. zu spät</span>`}</div>`) : `<div class="muted small">${inMin(n.at)}</div>`}`;
   return `<section class="card next"><div class="k">${head}</div>${body}${missBtn}</section>`;
@@ -562,6 +562,7 @@ function nextCard(n, t) {
 // Vergleich: pro Option nur das Entscheidende – der knappste Umstieg (an → weiter) und die Ankunft am Ziel.
 // Züge, Gleise, Startbahnhof erst auf Antippen.
 let openCmp = null;
+const sameStation = (a, b) => { const k = x => cleanStop(x).replace(/^Berlin[- ]/, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase(); return k(a) === k(b); };
 const cleanStop = n => String(n || "").replace(/^(S\+U|S|U)\s+/, "").replace(/\s+Bhf\b/, "").replace(/\s*\((Berlin|tief)\)/g, "").trim();
 function tightest(legs) {   // aus Plan-B-Teilstrecken (MOTIS)
   let best = null;
@@ -707,7 +708,7 @@ let sosBusy = null;
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
   const urgent = t.status === "RISK" || t.status === "LOST";
-  return `<button class="btn ${urgent ? "sos-btn" : "sec"} sos-big" data-sos="${t.id}"><b>SOS: Verspätung? Anschluss weg?</b><span>Ich sitze ${vehicleOf(t.legs[ridingLeg(t)]).im} – such mir sofort eine andere Verbindung</span></button>`;
+  return `<button class="btn ${urgent ? "sos-btn" : "sec"} sos-big" data-sos="${t.id}"><b>${urgent ? "SOS: Anschluss in Gefahr" : "Plan B: Verspätung? Anschluss weg?"}</b><span>Ich sitze ${vehicleOf(t.legs[ridingLeg(t)]).im} – such mir sofort eine andere Verbindung</span></button>`;
 }
 // In welcher Fahrt sitzt du gerade? (auch: Zug steht mit Verspätung noch am Startbahnhof) – sonst -1
 function ridingLeg(t) {
@@ -719,25 +720,27 @@ function ridingLeg(t) {
 // Nur sinnvoll, wenn du drin sitzt und danach noch umsteigst – auf der letzten Fahrt direkt zum Ziel bringt Aussteigen nichts
 const sosAvailable = t => { const i = ridingLeg(t); return i >= 0 && i < t.legs.length - 1; };
 function sosCard(t) {
-  if (sosBusy === t.id) return `<section class="card sos"><div class="k">SOS · Andere Verbindung</div><p style="margin:0">Dein Plan klappt wegen der Verspätung vielleicht nicht mehr. Ich suche, wo du aussteigen kannst und wie du am schnellsten ans Ziel kommst …</p><div class="spinner"></div></section>`;
+  const bad = t.status === "RISK" || t.status === "LOST";
+  if (sosBusy === t.id) return `<section class="card ${bad ? "sos" : "planb"}"><div class="k">Plan B</div><p style="margin:0">Ich suche, wo du aussteigen kannst und wie du am schnellsten ans Ziel kommst …</p><div class="spinner"></div></section>`;
   const s = t.sos; if (!s) return "";
   const i = s.info || {}, zb0 = t.ticket === "spar" && !t.zbLifted;
-  const where = i.onTrain ? `Du bist vermutlich in <b>${esc(i.label)}</b>${i.near ? ` bei ${esc(i.near)}` : ""}.` : `Als Nächstes laut Plan: <b>${esc(i.label)}</b>.`;
+  const where = i.onTrain ? `Du sitzt wohl im <b>${esc(i.label)}</b>${i.near ? ` bei ${esc(i.near)}` : ""}` : `Als Nächstes laut Plan: <b>${esc(i.label)}</b>`;
   const exits = (s.exits || []).slice(0, 4).map(x => `${esc(x.name)} ${hm(x.arr)}${x.delay >= 3 ? ` <span class="late">+${x.delay}</span>` : ""}`).join(" · ");
   const ci = Math.max(0, t.current), mine = { ...t, legs: t.legs.slice(ci), transfers: t.transfers.slice(ci) };
   const rec = bestIdx(s.list);
-  const plan = `<div class="cmp-row cur"><div class="cmp-tag">${s.plan && !s.plan.ok ? `Dein Plan klappt nicht: ${esc(t.title)}` : "Dein Plan"}</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, s.plan?.arr || t.plan.arr, null, t.planArr)}${stepsHtml(planSteps(mine))}</div></div>`;
+  const plan = `<div class="cmp-row cur"><div class="cmp-tag">${s.plan && !s.plan.ok ? `Dein Plan klappt nicht: ${esc(t.title)}` : "Dein Plan"}</div><div class="cmp-main">${losZiel(mine.legs[0].dep.rt, s.plan?.arr || t.plan.arr)}${stepsHtml(planSteps(mine))}</div></div>`;
   const rows = (s.list || []).map((a, k) => `<div class="cmp-row ${arrTone(a.arr, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${a.stayOn ? `Im ${esc(i.label)} sitzen bleiben` : `In ${esc(cleanStop(a.at))} aussteigen`}${recTag(k === rec)}</div><div class="cmp-main">
       <div class="small">${a.stayOn ? `Bis ${esc(cleanStop(a.at))}, an ca. <b>${hm(a.exitAt)}</b>` : `Mit ${esc(i.label)} bis ${esc(cleanStop(a.at))}, an <b>${hm(a.exitAt)}</b>`}${a.exitDelay >= 3 ? ` <span class="late">${a.exitDelay} Min. später</span>` : ""}</div>
       ${a.stayOn ? "" : losZiel(a.dep, a.arr, null, t.planArr)}${a.stayOn ? "" : stepsHtml(altSteps(a))}
       <div class="cmp-live">${a.stayOn ? "" : liveBadge(a)}${zb0 && a.zb ? ` ${zbBadge}` : ""}</div>
       ${takeBtn(`${t.id}|${a.from}|${k}|sos`, a, k === rec, a.stayOn ? `Im ${i.label} sitzen bleiben bis ${cleanStop(a.at)}, an ca. ${hm(a.exitAt)}` : `In ${cleanStop(a.at)} aussteigen (an ${hm(a.exitAt)}), dann ${a.label} – Ziel ca. ${hm(a.arr)}`)}
     </div></div>`).join("");
-  return `<section class="card sos"><div class="card-h"><div class="k">SOS · Andere Verbindung · Stand ${hm(new Date(s.at).toISOString())}</div><button class="card-x" data-sosx="${t.id}" aria-label="Schließen">✕</button></div>
-      <p style="margin:0 0 4px">${where}${i.located ? "" : ` <span class="small muted">(ohne Standort)</span>`}</p>
+  const ok = !s.plan || s.plan.ok !== false;
+  return `<section class="card ${bad ? "sos" : "planb"}"><div class="card-h"><div class="k">Plan B</div><button class="card-x" data-sosx="${t.id}" aria-label="Plan B schließen">✕</button></div>
+      <p style="margin:0 0 4px">${where} <span class="small muted">(${i.located ? "per Standort" : "geschätzt nach Fahrplan"})</span>.</p>
       ${exits ? `<p class="small muted" style="margin:0">Nächste Halte: ${exits}</p>` : ""}
-      <div class="seg-info small"><span></span><button class="link" data-sos="${t.id}">↻ Aktualisieren</button></div></section>
-    <div class="tiles">${plan}${rows || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine andere Verbindung gefunden. Ich behalte ${vehicleOf(t.legs[Math.max(0, t.current)]).dein} im Blick.</p></div>`}</div>`;
+      ${rows ? `<div class="tiles" style="margin-top:8px">${plan}${rows}</div>` : `<p style="margin:8px 0 0"><b>${ok ? "Keine bessere Verbindung – dein Plan klappt." : "Gerade keine andere Verbindung gefunden."}</b> <span class="small muted">Ich behalte ${vehicleOf(t.legs[Math.max(0, t.current)]).dein} im Blick.</span></p>`}
+      <div class="seg-info small"><span class="muted">Stand ${hm(new Date(s.at).toISOString())}</span><button class="link" data-sos="${t.id}">↻ Erneut suchen</button></div></section>`;
 }
 
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
@@ -745,7 +748,7 @@ let hereBusy = null;
 // Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
 function searchSeg(t, cur) {
   const enroute = t.phase === "enroute", ns = nextStop(t);
-  const opts = enroute ? [["next", `Ab ${cleanStop(ns.name)}`, "bei Ankunft dort"], ["now", "Mein Standort", "jetzt"]]
+  const opts = enroute ? [["next", `Ab ${cleanStop(ns.name)}`, `ab ${hm(ns.at)}`], ["now", "Mein Standort", "jetzt"]]
     : [["start", `Ab ${cleanStop(t.legs[0].dep.name).replace(/\//g, "/\u200b")}`, "zur Reisezeit"], ["trip", "Mein Standort", "zur Reisezeit"], ["now", "Mein Standort", "jetzt"]];
   return `<div class="seg" role="group" aria-label="Andere Verbindungen suchen" style="grid-template-columns:repeat(${opts.length},1fr)">${opts.map(([m, a, b]) =>
     `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "trip" || m === "now" ? PIN : ""}${esc(a)}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
@@ -854,6 +857,7 @@ function transferText(tr) {
   return `${tr.gap} Min.${pl}`;
 }
 
+let TL_OPEN = false;   // „Ganze Reise“ unterwegs aufgeklappt?
 function renderTrip(t, many) {
   CUR_OWN = +t.minT || 0; CUR_ZB = t.ticket === "spar" && !t.zbLifted;
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
@@ -862,22 +866,23 @@ function renderTrip(t, many) {
   const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
   $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
-      <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase !== "done" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button></div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+      <div class="th-act"><button class="chip fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}">${isFav(t) ? "★ Favorit" : "☆ Favorit"}</button>${t.phase === "before" ? `<button class="chip" data-edit="${t.id}">Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="chip del-chip" data-del="${t.id}" aria-label="Fahrt löschen">🗑 Löschen</button>` : ""}</div><p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${`<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
+      ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? `<p>Laut Fahrplan klappt alles${t.transfers?.length ? ` (${t.transfers.map(x => `Umstieg ${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(", ")})` : ""}. Live-Zeiten kommen meist kurz vor der Abfahrt – dann prüfe ich laufend und melde mich, wenn etwas nicht passt.</p>` : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
     ${t.win?.picked ? windowCard(t) : ""}
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${nextCard(t.next, t)}
     ${sosButton(t)}
-    ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) + hereCard({ ...t, here: null }) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
+    ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
-    <h3 class="sec-h">Verlauf</h3>
-    <div class="card flat">${timeline(t)}</div>
+    ${t.phase === "enroute" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise · ${t.legs.length} ${t.legs.length === 1 ? "Fahrt" : "Fahrten"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
+      : `${t.phase === "enroute" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise <span class="chev">▴</span></button>` : `<h3 class="sec-h">Verlauf</h3>`}<div class="card flat">${timeline(t)}</div>`}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Reise"}</button>
     ${sheet ? `<section class="card" id="sheet">
-      ${t.phase !== "done" ? `<button class="btn sec" data-edit="${t.id}">Reise ändern (Zeit, Strecke, Verbindung)</button>` : ""}
+      ${t.phase === "before" ? `<button class="btn sec" data-edit="${t.id}">Reise ändern (Zeit, Strecke, Verbindung)</button>` : ""}
       <p class="small muted">Zeit, die ich mindestens zum Umsteigen brauche</p>
       <div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-tmt="${m}" aria-pressed="${(t.minT || 0) === m}">${l}</button>`).join("")}</div>
       <p class="small muted">Ticket (nur für den Hinweis zur Zugbindung)</p>
@@ -890,6 +895,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
+  $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
   // Regelmäßige Fahrt: gilt die Änderung nur heute oder für alle Fahrten?
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
     const r = t.routine && ROUTINES.find(x => x.id === t.routine);
