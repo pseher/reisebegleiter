@@ -3,172 +3,170 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Umstiegsheld – dein Beifahrer für Bus und Bahn</title>
-  <meta name="description" content="Umstiegsheld behält deine Fahrt mit Bus und Bahn im Blick, warnt rechtzeitig vor knappen Umstiegen und Ausfällen und zeigt dir Plan B. Auch für den täglichen Arbeitsweg. Kostenlos, ohne Anmeldung.">
-  <meta property="og:title" content="Umstiegsheld – dein Beifahrer für Bus und Bahn">
-  <meta property="og:description" content="Warnt, bevor der Anschluss weg ist. Zeigt Plan B. Denkt jeden Morgen an deinen Arbeitsweg. Kostenlos, ohne Anmeldung.">
+  <title>Umstiegsheld – entspannt umsteigen mit Bus und Bahn</title>
+  <meta name="description" content="Umstiegsheld schaut für dich auf Verspätungen und Anschlüsse. Wird es knapp, bekommst du Bescheid – und gleich dazu, wie du am besten weiterkommst. Auch für den täglichen Arbeitsweg. Kostenlos, ohne Anmeldung.">
+  <meta property="og:title" content="Umstiegsheld – entspannt umsteigen mit Bus und Bahn">
+  <meta property="og:description" content="Wird dein Umstieg knapp, sagt dir Umstiegsheld Bescheid – und wie du am besten weiterkommst. Kostenlos, ohne Anmeldung.">
   <meta property="og:image" content="https://umstiegsheld.de/icon-512.png">
   <meta name="theme-color" content="#0f2a3d">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/fraunces-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
   <script>try { const t = localStorage.getItem("rb_theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch {}</script>
   <style>
-    .lp { max-width: 980px; margin: 0 auto; padding: 0 18px 40px; }
-    .lp h1 { font-size: clamp(32px, 7vw, 52px); line-height: 1.05; letter-spacing: -.02em; margin: 26px 0 12px; }
-    .lp h2 { font-size: clamp(24px, 4.6vw, 32px); line-height: 1.15; letter-spacing: -.01em; margin: 0 0 10px; }
-    .lp .kick { font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
-    .lp .lead { font-size: 19px; color: var(--muted); max-width: 34em; }
-    .lp section { padding: 34px 0; border-top: 1px solid var(--line); }
-    .lp section:first-of-type { border-top: 0; }
-    .cta { display: inline-flex; width: auto; padding: 14px 26px; font-size: 18px; border-radius: 14px; margin: 18px 0 6px; }
-    .fine { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+    /* Schriften liegen auf dem eigenen Server (keine Google-Verbindung) – Lizenz: SIL OFL, siehe /fonts */
+    @font-face { font-family: "Fraunces"; src: url(/fonts/fraunces-latin-wght-normal.woff2) format("woff2"); font-weight: 300 900; font-display: swap; }
+    @font-face { font-family: "Atkinson"; src: url(/fonts/atkinson-hyperlegible-latin-400-normal.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+    @font-face { font-family: "Atkinson"; src: url(/fonts/atkinson-hyperlegible-latin-700-normal.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+    body.lpb { font-family: "Atkinson", system-ui, sans-serif; }
+    .lp { max-width: 1040px; margin: 0 auto; padding: 0 18px 48px; }
+    .lp h1, .lp h2, .lp h3 { font-family: "Fraunces", Georgia, serif; font-weight: 650; letter-spacing: -.01em; }
+    .lp h1 { font-size: clamp(34px, 7.2vw, 58px); line-height: 1.04; margin: 0 0 16px; }
+    .lp h2 { font-size: clamp(26px, 4.6vw, 36px); line-height: 1.12; margin: 0 0 10px; }
+    .lp h3 { font-size: 22px; line-height: 1.2; margin: 0 0 8px; }
+    .lp p { font-size: 17.5px; line-height: 1.55; margin: 0 0 10px; }
+    .lp .sub { font-size: 20px; color: var(--muted); max-width: 31em; }
+    .cta { display: inline-flex; width: auto; padding: 15px 26px; font-size: 18px; border-radius: 999px; margin: 14px 0 8px; }
+    .fine { font-size: 15px !important; color: var(--muted); }
 
-    /* Kopf: Text links, Handy rechts (auf dem Handy untereinander) */
-    .lp-hero { display: grid; gap: 22px; align-items: center; padding-top: 18px !important; }
-    @media (max-width: 819px) { .phone { height: 420px; width: 250px; } }
-    @media (min-width: 820px) { .lp-hero { grid-template-columns: 1.15fr .85fr; } }
+    .top-hero { display: grid; gap: 26px; align-items: center; padding: 34px 0 30px; }
+    @media (min-width: 860px) { .top-hero { grid-template-columns: 1.2fr .8fr; padding: 54px 0 40px; } }
 
-    /* Handy mit wechselnden Bildschirmen (reines CSS, ruhig, respektiert „weniger Bewegung“) */
-    .phone { width: 270px; height: 500px; margin: 0 auto; border-radius: 38px; padding: 12px; background: #0b1822; box-shadow: 0 18px 50px rgba(15,42,61,.28), inset 0 0 0 2px #24384a; position: relative; }
-    .phone .scr { position: absolute; inset: 12px; border-radius: 28px; overflow: hidden; background: #f3f5f7; color: #14212b; }
-    .phone .bar { background: #0f2a3d; color: #fff; font: 600 13px/1 system-ui, sans-serif; padding: 16px 14px 12px; display: flex; gap: 8px; align-items: center; }
-    .phone .bar img { width: 18px; height: 18px; }
-    .slide { position: absolute; inset: 44px 0 0; padding: 12px; opacity: 0; animation: show 12s infinite; }
-    .slide:nth-child(2) { animation-delay: 4s; } .slide:nth-child(3) { animation-delay: 8s; }
-    @keyframes show { 0%, 30% { opacity: 1; transform: none; } 34%, 100% { opacity: 0; transform: translateY(6px); } }
-    @media (prefers-reduced-motion: reduce) { .slide { animation: none; } .slide:first-child { opacity: 1; } }
-    .m-card { background: #fff; border-radius: 14px; padding: 11px 12px; margin: 0 0 9px; box-shadow: 0 1px 2px rgba(0,0,0,.06); font-size: 13px; line-height: 1.35; }
-    .m-k { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3px; }
-    .m-big { font-size: 17px; font-weight: 800; margin: 0 0 3px; line-height: 1.2; }
-    .m-ok { border-left: 4px solid #1f8a4c; background: #e6f4ec; } .m-ok .m-k { color: #1f8a4c; }
-    .m-watch { border-left: 4px solid #a86a00; background: #fff4dc; } .m-watch .m-k { color: #a86a00; }
-    .m-plan { border-left: 4px solid #1b6fa8; } .m-plan .m-k { color: #1b6fa8; }
-    .m-btn { display: block; text-align: center; background: #1b6fa8; color: #fff; border-radius: 9px; padding: 8px; font-weight: 700; font-size: 13px; margin-top: 7px; }
-    .m-push { background: rgba(255,255,255,.96); border-radius: 14px; padding: 10px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.18); font-size: 12.5px; line-height: 1.3; margin: 0 0 10px; }
-    .m-push b { display: block; font-size: 13px; }
-    .m-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-top: 1px solid #e5eaee; font-size: 12.5px; }
-    .m-row:first-of-type { border-top: 0; } .m-late { color: #b42318; font-weight: 700; }
+    /* Ein Stück echte App statt Illustration */
+    .shot { max-width: 330px; width: 100%; margin: 0 auto; transform: rotate(1.5deg); }
+    .shot .m { background: var(--card); border-radius: 16px; padding: 12px 14px; margin: 0 0 10px; box-shadow: 0 10px 30px rgba(15,42,61,.12); font-size: 15px; line-height: 1.35; }
+    .shot .m:nth-child(2) { transform: rotate(-2.5deg) translateX(-10px); }
+    .shot .m:nth-child(3) { transform: rotate(1deg) translateX(8px); }
+    .m .k { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3px; }
+    .m b.t { display: block; font-size: 17px; margin-bottom: 2px; }
+    .m.push { border-left: 4px solid var(--watch); } .m.push .k { color: var(--watch); }
+    .m.plan { border-left: 4px solid var(--accent); } .m.plan .k { color: var(--accent); }
+    .m.ok { border-left: 4px solid var(--ok); } .m.ok .k { color: var(--ok); }
+    .m .go { display: inline-block; margin-top: 8px; background: var(--accent); color: var(--on-accent); border-radius: 99px; padding: 6px 14px; font-weight: 700; font-size: 14px; }
 
     /* Kacheln */
-    .grid3 { display: grid; gap: 14px; margin-top: 18px; }
-    @media (min-width: 760px) { .grid3 { grid-template-columns: repeat(3, 1fr); } }
-    .tile { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; }
-    .tile .ic { font-size: 28px; line-height: 1; }
-    .tile h3 { font-size: 18px; margin: 10px 0 6px; }
-    .tile p { margin: 0; color: var(--muted); font-size: 15.5px; }
+    .bento { display: grid; gap: 14px; grid-template-columns: 1fr; }
+    @media (min-width: 760px) { .bento { grid-template-columns: repeat(6, 1fr); } .w2 { grid-column: span 2; } .w3 { grid-column: span 3; } .w4 { grid-column: span 4; } .tall { grid-row: span 2; } }
+    .tile { border-radius: 22px; padding: 22px; background: var(--card); border: 1px solid var(--line); position: relative; overflow: hidden; }
+    .tile p { color: var(--muted); font-size: 16.5px; }
+    .tile .emo { font-size: 30px; line-height: 1; display: block; margin-bottom: 12px; }
+    .t-watch { background: var(--watch-bg); border-color: transparent; }
+    .t-ok { background: var(--ok-bg); border-color: transparent; }
+    .t-blue { background: #e7f0f8; border-color: transparent; }
+    .t-dark { background: #0f2a3d; color: #fff; border-color: transparent; } .t-dark p { color: #c9d6df; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) .t-blue { background: #132c3d; } }
+    :root[data-theme=dark] .t-blue { background: #132c3d; }
+    .tile .mini { margin-top: 14px; }
+    .week { background: var(--card); border-radius: 14px; padding: 6px 14px; }
+    .week div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15.5px; }
+    .week div:first-child { border-top: 0; }
+    .week span:first-child { color: var(--muted); width: 2.2em; }
+    .week span:nth-child(2) { flex: 1; }
+    .tag { font-size: 13px; font-weight: 700; padding: 2px 10px; border-radius: 99px; background: var(--ok-bg); color: var(--ok); white-space: nowrap; }
+    .tag.y { background: var(--watch-bg); color: var(--watch); } .tag.g { background: var(--line); color: var(--muted); }
+    .t-ok .week { background: rgba(255,255,255,.65); }
+    :root[data-theme=dark] .t-ok .week { background: rgba(0,0,0,.2); }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) .t-ok .week { background: rgba(0,0,0,.2); } }
 
-    /* Täglich: zwei Spalten */
-    .daily { display: grid; gap: 22px; align-items: center; }
-    @media (min-width: 820px) { .daily { grid-template-columns: 1fr 1fr; } }
-    .week { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
-    .week .d { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
-    .week .d:first-of-type { border-top: 0; }
-    .week .d b { font-size: 13px; color: var(--muted); }
-    .pill { font-size: 12.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: var(--ok-bg); color: var(--ok); white-space: nowrap; }
-    .pill.w { background: var(--watch-bg); color: var(--watch); } .pill.off { background: var(--line); color: var(--muted); }
-    .checks { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
-    .checks li { display: flex; gap: 10px; align-items: baseline; } .checks li::before { content: "✓"; color: var(--ok); font-weight: 800; }
-
-    /* Schritte */
-    .steps { counter-reset: s; list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 12px; }
+    .sec { padding: 46px 0 6px; }
+    .steps { display: grid; gap: 14px; margin-top: 16px; }
     @media (min-width: 760px) { .steps { grid-template-columns: repeat(3, 1fr); } }
-    .steps li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 18px 16px 60px; position: relative; }
-    .steps li::before { content: counter(s); position: absolute; left: 16px; top: 16px; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 800; display: grid; place-items: center; }
-    .steps b { display: block; margin-bottom: 4px; } .steps span { color: var(--muted); font-size: 15px; }
+    .step { border-radius: 22px; padding: 20px 22px; border: 1.5px dashed var(--line); }
+    .step b { font-family: "Fraunces", Georgia, serif; font-size: 34px; color: var(--accent); display: block; line-height: 1; margin-bottom: 8px; }
+    .step p { margin: 0; }
 
-    .trust { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-    .trust span { background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px; font-size: 15px; }
-    .quote { font-size: clamp(20px, 4vw, 26px); font-weight: 700; line-height: 1.3; margin: 0 0 8px; }
-    .end { text-align: center; }
+    .note { border-radius: 22px; padding: 24px; background: var(--card); border: 1px solid var(--line); display: grid; gap: 6px; }
+    @media (min-width: 760px) { .note { grid-template-columns: 70px 1fr; align-items: start; } }
+    .note .face { font-size: 44px; line-height: 1; }
+    .end { text-align: center; padding: 50px 0 10px; }
   </style>
 </head>
-<body>
+<body class="lpb">
   <header class="top"><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Umstiegsheld</span></a></header>
   <main class="lp">
 
-    <section class="lp-hero">
+    <section class="top-hero">
       <div>
-        <p class="kick">Dein Beifahrer für Bus &amp; Bahn</p>
-        <h1>Du schaust aus dem Fenster.<br>Ich schau auf den Anschluss.</h1>
-        <p class="lead">Umstiegsheld behält deine Fahrt im Blick und meldet sich, bevor der Anschluss weg ist – mit Plan B, den du nur noch antippen musst. Solange alles läuft: Funkstille. Versprochen.</p>
-        <a class="btn cta" href="/">Jetzt ausprobieren</a>
-        <p class="fine">Kostenlos · ohne Anmeldung · läuft im Browser oder als App</p>
+        <h1>Umsteigen, ohne dauernd auf die Uhr zu schauen</h1>
+        <p class="sub">Umstiegsheld behält deine Verbindung im Auge. Wird ein Anschluss knapp oder fällt ein Zug aus, bekommst du eine Nachricht – und gleich dazu, wie du jetzt am besten weiterkommst. Läuft alles, hörst du nichts von mir.</p>
+        <a class="btn cta" href="/">Gleich ausprobieren</a>
+        <p class="fine">Kostenlos und ohne Anmeldung. Läuft im Browser oder als App auf dem Startbildschirm.</p>
       </div>
-      <div class="phone" aria-label="Beispiel: Umstiegsheld meldet einen knappen Umstieg und zeigt Plan B" role="img">
-        <div class="scr">
-          <div class="bar"><img src="/icon.svg" alt="">Umstiegsheld</div>
-          <div class="slide">
-            <div class="m-card m-ok"><p class="m-k">Unterwegs</p><p class="m-big">Alles läuft nach Plan</p>Umstieg in Hamburg Hbf: 14 Min.</div>
-            <div class="m-card"><div class="m-row"><span>11:28 S 7</span><span>pünktlich</span></div><div class="m-row"><span>12:03 ICE 789</span><span>pünktlich</span></div><div class="m-row"><span>15:38 RE 54</span><span>an 16:32</span></div></div>
-            <p style="font-size:12px;color:#5d6b76;text-align:center;margin:14px 0 0">☕ Kaffee trinken erlaubt.</p>
-          </div>
-          <div class="slide">
-            <div class="m-push"><b>⚠️ Anschluss in Würzburg gefährdet</b>ICE 789 kommt 9 Min. später – nur noch 1 Min. zum Umsteigen.</div>
-            <div class="m-card m-watch"><p class="m-k">Unterwegs</p><p class="m-big">Anschluss in Würzburg gefährdet</p>Bis Hamburg lief alles nach Plan. Ich behalte das im Blick.</div>
-            <div class="m-card"><div class="m-row"><span>ICE 789</span><span class="m-late">+9</span></div><div class="m-row"><span>RE 54 ab 15:38</span><span>Gleis 11</span></div></div>
-          </div>
-          <div class="slide">
-            <div class="m-card m-plan"><p class="m-k">Plan B · empfohlen</p><p class="m-big">Später, ohne Umstieg</p>ab Würzburg Hbf 15:46 → an Bamberg 17:01<span class="m-btn">Diese Verbindung nehmen</span></div>
-            <div class="m-push" style="margin-top:12px"><b>✅ Neuer Plan steht</b>Abholer bekommen die neue Ankunft automatisch.</div>
-          </div>
+      <div class="shot" aria-label="So sieht das in der App aus" role="img">
+        <div class="m ok"><p class="k">Unterwegs</p><b class="t">Alles läuft nach Plan</b>Umstieg in Hamburg Hbf: 14 Min.</div>
+        <div class="m push"><p class="k">Mitteilung · gerade eben</p><b class="t">Anschluss in Würzburg gefährdet</b>Dein ICE ist 9 Minuten später dran, der RE 54 wartet nicht.</div>
+        <div class="m plan"><p class="k">Plan B · empfohlen</p><b class="t">Direkt nach Bamberg, 15:46</b>29 Minuten später da, dafür ohne Umsteigen.<br><span class="go">Diese Verbindung nehmen</span></div>
+      </div>
+    </section>
+
+    <section class="bento" aria-label="Das Wichtigste auf einen Blick">
+      <div class="tile t-watch w3">
+        <span class="emo">⏱️</span>
+        <h3>Du weißt es, bevor du am Bahnsteig stehst</h3>
+        <p>Verspätung, Ausfall, anderes Gleis: Ich schaue die ganze Fahrt über nach und sage dir Bescheid, solange du noch etwas ändern kannst. Und zwar mit deiner Umstiegszeit – wer mit Koffer und Kind reist, braucht nun mal länger als zwei Minuten.</p>
+      </div>
+      <div class="tile t-blue w3">
+        <span class="emo">🔀</span>
+        <h3>Plan B ist schon rausgesucht</h3>
+        <p>Sitzen bleiben, eine Station früher raus oder doch der Bus? Ich vergleiche die Möglichkeiten und markiere die beste. Hast du einen Sparpreis, sage ich dir auch, ob du gerade einen anderen Zug nehmen darfst.</p>
+      </div>
+
+      <div class="tile t-ok w4 tall">
+        <span class="emo">🔁</span>
+        <h3>Dein Arbeitsweg läuft einfach mit</h3>
+        <p>Du fährst jeden Morgen dieselbe Strecke? Dann leg sie einmal an und wähl die Tage. Ab da kümmere ich mich: An jedem Fahrtag lege ich die Fahrt selbst an und passe auf – morgens hin, abends zurück. An Feiertagen hast du Ruhe, und für den Urlaub setzt du ein paar Tage einfach aus.</p>
+        <p>Du nimmst nicht immer denselben Zug? Dann gib ein Zeitfenster an, etwa „zwischen 7 und 8“. Ich schlage dir die passenden Fahrten vor.</p>
+        <div class="mini week" aria-label="Beispiel: eine Woche Arbeitsweg">
+          <div><span>Mo</span><span>07:41 · S 41, dann U 7</span><span class="tag">pünktlich</span></div>
+          <div><span>Di</span><span>07:41 · S 41, dann U 7</span><span class="tag y">knapp – Bescheid gesagt</span></div>
+          <div><span>Mi</span><span>07:41 · S 41, dann U 7</span><span class="tag">pünktlich</span></div>
+          <div><span>Do</span><span>Feiertag</span><span class="tag g">frei</span></div>
+          <div><span>Fr</span><span>Urlaub</span><span class="tag g">ausgesetzt</span></div>
+        </div>
+      </div>
+      <div class="tile w2">
+        <span class="emo">👋</span>
+        <h3>Wer dich abholt, sieht mit</h3>
+        <p>Schick einen Link – dann sieht man live, wann du ankommst. Auch wenn du unterwegs umplanen musst. Eine App braucht dafür niemand.</p>
+      </div>
+      <div class="tile w2">
+        <span class="emo">📸</span>
+        <h3>Ticket? Einfach Screenshot</h3>
+        <p>Bild von der Buchung hochladen, den Rest liest Umstiegsheld selbst heraus.</p>
+      </div>
+
+      <div class="tile t-dark" style="grid-column: 1 / -1">
+        <h3>Kostet nichts, will nichts von dir</h3>
+        <p style="margin:0">Keine Anmeldung, keine Werbung, kein Ticketverkauf. Deine Fahrten lösche ich ein paar Stunden nach der Ankunft. Tickets kaufst du wie gewohnt bei der Bahn – auf Wunsch springst du direkt mit ausgefüllter Suche hin.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>So fängst du an</h2>
+      <div class="steps">
+        <div class="step"><b>1</b><p>Fahrt eintragen: von – nach suchen, am Bahnsteig den Zug antippen oder einen Ticket-Screenshot hochladen.</p></div>
+        <div class="step"><b>2</b><p>Mitteilungen erlauben. Sonst kann ich dich unterwegs nicht erreichen.</p></div>
+        <div class="step"><b>3</b><p>Buch raus, Kopfhörer rein. Ich melde mich, wenn es etwas zu tun gibt.</p></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="note">
+        <span class="face" aria-hidden="true">🙋‍♂️</span>
+        <div>
+          <h3>Warum es das gibt</h3>
+          <p>Ich bin Peter aus Berlin und seit einiger Zeit fast nur noch mit Bus und Bahn unterwegs. Das klappt erstaunlich gut – nur beim Umsteigen habe ich oft am Bahnsteig gestanden und gerechnet: Reicht das noch? Und wenn nicht, was dann?</p>
+          <p>Umstiegsheld ist das, was ich mir in solchen Momenten gewünscht hätte. Ich nutze es jeden Tag selbst. Die ganze Geschichte, inklusive Blitzerfoto, steht <a href="/ueber.html">hier</a>.</p>
+          <p style="margin:0">Kein Bahn-Bashing übrigens: Die meisten Fahrten laufen gut. Für die anderen gibt’s jetzt Umstiegsheld.</p>
         </div>
       </div>
     </section>
 
-    <section>
-      <p class="kick">Was er kann</p>
-      <h2>Weniger Durchsagen-Kopfrechnen. Mehr Fensterplatz.</h2>
-      <div class="grid3">
-        <div class="tile"><div class="ic">⏱️</div><h3>Warnt rechtzeitig</h3><p>Verspätung, Ausfall, Gleiswechsel, knapper Umstieg – du erfährst es, bevor du am falschen Bahnsteig stehst. Mit deinem eigenen Umstiegstempo.</p></div>
-        <div class="tile"><div class="ic">🔀</div><h3>Plan B mit einem Tipp</h3><p>Sitzen bleiben? Früher raus? Lieber den Bus? Die beste Möglichkeit ist markiert – inklusive Hinweis, ob dein Sparpreis noch gilt.</p></div>
-        <div class="tile"><div class="ic">👀</div><h3>Abholer sehen live mit</h3><p>Ein Link, und Oma weiß, wann sie losfahren muss. Ändert sich deine Ankunft, sieht sie es auch. Ohne App, ohne Anmeldung.</p></div>
-      </div>
-    </section>
-
-    <section class="daily">
-      <div>
-        <p class="kick">Für jeden Tag</p>
-        <h2>Einmal einrichten.<br>Jeden Morgen mitgedacht.</h2>
-        <p class="lead">Arbeitsweg, Schulweg, Training: Lege deine Strecke einmal als regelmäßige Fahrt an. Ab dann legt Umstiegsheld an jedem Fahrtag die Fahrt selbst an und passt auf – morgens wie abends.</p>
-        <ul class="checks">
-          <li>Feste Abfahrt oder ein Zeitfenster („irgendwas zwischen 7 und 8“)</li>
-          <li>Feiertage frei, Urlaub mit zwei Tipps aussetzen</li>
-          <li>„Wann muss ich los?“ – samt Fußweg vom aktuellen Standort</li>
-          <li>Teilbar: die Kollegin fährt dieselbe Strecke? Ein Link genügt.</li>
-        </ul>
-      </div>
-      <div class="week" aria-label="Beispielwoche einer regelmäßigen Fahrt">
-        <p class="m-k" style="color:var(--muted);margin-bottom:6px">↻ Zur Arbeit · Mo–Fr · 07:41</p>
-        <div class="d"><b>Mo</b><span>S 41 → U 7</span><span class="pill">läuft</span></div>
-        <div class="d"><b>Di</b><span>S 41 → U 7</span><span class="pill w">knapp · gewarnt</span></div>
-        <div class="d"><b>Mi</b><span>S 41 → U 7</span><span class="pill">läuft</span></div>
-        <div class="d"><b>Do</b><span>Feiertag</span><span class="pill off">frei</span></div>
-        <div class="d"><b>Fr</b><span>Urlaub</span><span class="pill off">ausgesetzt</span></div>
-      </div>
-    </section>
-
-    <section>
-      <p class="kick">So geht’s</p>
-      <h2>Drei Schritte. Danach nur noch fahren.</h2>
-      <ol class="steps">
-        <li><b>Fahrt anlegen</b><span>Von – nach suchen, am Bahnsteig den Zug antippen oder einfach einen Screenshot deines Tickets hochladen.</span></li>
-        <li><b>Mitteilungen an</b><span>Damit ich mich melden kann, wenn’s eng wird. Sonst bleibe ich still.</span></li>
-        <li><b>Zurücklehnen</b><span>Ich rechne, du liest. Wenn nötig, kommt Plan B aufs Handy.</span></li>
-      </ol>
-    </section>
-
-    <section>
-      <p class="kick">Ehrlich gesagt</p>
-      <p class="quote">Ich verkaufe keine Tickets, zeige keine Werbung und will nicht wissen, wer du bist.</p>
-      <p class="lead">Fahrten werden kurz nach der Ankunft gelöscht. Tickets kaufst du weiter bei der Bahn – auf Wunsch mit vorausgefüllter Suche. Und kein Bahn-Bashing: Hinter jeder Durchsage stehen Menschen, die jeden Tag Millionen ans Ziel bringen. Ich mache nur das Umsteigen entspannter.</p>
-      <div class="trust"><span>🆓 kostenlos</span><span>🙈 ohne Anmeldung</span><span>🚫 keine Werbung</span><span>🧹 Daten nach der Fahrt weg</span><span>🇩🇪 aus Berlin</span></div>
-    </section>
-
     <section class="end">
-      <h2>Nächste Fahrt schon geplant?</h2>
-      <p class="lead" style="margin:0 auto">Dann lass mich mitfahren. Platz brauche ich keinen.</p>
+      <h2>Wohin geht’s als Nächstes?</h2>
+      <p class="sub" style="margin:0 auto">Trag deine nächste Fahrt ein und schau, wie es sich anfühlt.</p>
       <a class="btn cta" href="/">Umstiegsheld öffnen</a>
-      <p class="fine"><a href="/ueber.html">Wie ein Blitzerfoto zu dieser App wurde →</a></p>
     </section>
   </main>
   <footer class="foot-legal"><nav aria-label="Rechtliches und Hilfe"><a href="/hilfe.html">Hilfe</a><a href="/ueber.html">Über Umstiegsheld</a><a href="/impressum.html">Impressum</a><a href="/datenschutz.html">Datenschutz</a></nav>
