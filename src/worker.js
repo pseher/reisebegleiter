@@ -88,8 +88,9 @@ async function departures(env, eva, fromMs) {
 }
 
 function validLeg(l) {
-  const ok = s => s && (l.jid ? /^\d{6,9}$/.test(String(s.eva)) : true) && typeof s.name === "string" && !Number.isNaN(Date.parse(s.plan));
-  return l && typeof l.jid === "string" && typeof l.label === "string" && ok(l.from) && ok(l.to) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
+  // Zug mit DB-Fahrtkennung braucht Bahnhofsnummern – außer am Ziel im Ausland (z. B. London, Paris: dort gibt es keine DB-Nummer)
+  const ok = (s, abroad) => s && (l.jid && !abroad ? /^\d{6,9}$/.test(String(s.eva)) : true) && typeof s.name === "string" && !Number.isNaN(Date.parse(s.plan));
+  return l && typeof l.jid === "string" && typeof l.label === "string" && ok(l.from) && ok(l.to, !!l.to?.abroad) && Date.parse(l.to.plan) > Date.parse(l.from.plan);
 }
 const coord = s => (Number.isFinite(+s.lat) && Number.isFinite(+s.lon) && s.lat != null ? { lat: +(+s.lat).toFixed(5), lon: +(+s.lon).toFixed(5) } : {});
 const sid = s => (s.stopId ? { stopId: String(s.stopId).slice(0, 120) } : {});
@@ -98,8 +99,19 @@ const cleanLeg = l => ({ jid: l.jid, ...(l.tid ? { tid: String(l.tid).slice(0, 2
   to: { eva: String(l.to.eva || ""), name: l.to.name.slice(0, 80), plan: l.to.plan, platform: String(l.to.platform || "").slice(0, 8), ...coord(l.to), ...sid(l.to), ...(l.to.estimated ? { estimated: true } : {}), ...(l.to.abroad ? { abroad: true } : {}) }, ...(l.must ? { must: true } : {}) });
 
 // Prüfung neuer Teilstrecken (Anlegen und Ändern)
+function tidyLegs(legs) {
+  for (const l of legs) { if (!l || typeof l !== "object") continue;
+    if (l.jid == null) l.jid = ""; l.jid = String(l.jid); if (l.label != null) l.label = String(l.label);
+    const bad = s => !/^\d{6,9}$/.test(String(s?.eva || ""));
+    if (l.jid && (bad(l.from) || (bad(l.to) && !l.to?.abroad))) l.jid = ""; }
+  return legs;
+}
 function checkLegs(legs) {
-  if (!legs.length || legs.length > 6 || !legs.every(validLeg)) return "Reise ungültig";
+  tidyLegs(legs);
+  if (!legs.length) return "Reise ungültig";
+  if (legs.length > 8) return "Höchstens 8 Teilstrecken pro Reise.";
+  const i = legs.findIndex(l => !validLeg(l));
+  if (i >= 0) return `Teilstrecke ${i + 1}${legs[i]?.label ? ` (${legs[i].label})` : ""} ist unvollständig – bitte die Verbindung noch einmal suchen.`;
   if (legs.some((l, i) => i > 0 && Date.parse(l.from.plan) < Date.parse(legs[i - 1].to.plan) - MIN)) return "Anschluss fährt vor der Ankunft ab";
   if (Date.parse(legs[legs.length - 1].to.plan) < Date.now() - 30 * MIN) return "Diese Fahrt ist schon vorbei. Bitte prüfe Datum und Uhrzeit.";
   return "";

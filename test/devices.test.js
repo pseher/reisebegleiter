@@ -283,3 +283,14 @@ test("Verbinden: Wiederherstellungscodes gelten danach nicht mehr", async () => 
   const N = (await call("/api/register", { method: "POST", body: {} })).data;
   assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: cA } })).status, 400);
 });
+
+test("Reise nach London: Zug mit Ziel im Ausland (ohne DB-Nummer) und U-Bahn ohne Kennung werden angenommen", async () => {
+  const A = (await call("/api/register", { method: "POST", body: {} })).data;
+  const at = h => new Date(Date.now() + h * 3600e3).toISOString();
+  const legs = [
+    { jid: "20261129-abc", label: "ICE 858", mode: "HIGHSPEED_RAIL", from: { name: "Berlin Hbf", eva: "8011160", plan: at(20) }, to: { name: "Köln Hbf", eva: "8000207", plan: at(25.5) } },
+    { jid: "20261129-def", label: "EST 9167", mode: "HIGHSPEED_RAIL", from: { name: "Bruxelles-Midi", eva: "8800004", plan: at(26) }, to: { name: "St-Pancras-International", eva: "", plan: at(28), abroad: true } },
+    { label: "U Victoria", mode: "SUBWAY", from: { name: "King's Cross St. Pancras", plan: at(28.3) }, to: { name: "Victoria", plan: at(28.5) } }];
+  const r = await call("/api/trips", { auth: A, method: "POST", body: { legs, ticket: "flex" } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+});
