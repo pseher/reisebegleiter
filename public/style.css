@@ -424,3 +424,4 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .acc-line .chev { margin-left: auto; color: var(--muted); }
 .acc .chips { margin-top: 6px; gap: 6px; }
 .chip.sm { min-width: 44px; padding-left: 10px; padding-right: 10px; }
+.trips .day-sub { list-style: none; padding: 8px 16px 2px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }

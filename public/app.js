@@ -216,13 +216,17 @@ function renderList(active) {
       && !active.some(t => t.rname === r.name && sameDay(depOf(t), Date.parse(r.next.at))))
     .map(r => ({ pend: true, r, at: Date.parse(r.next.at) }));
   const items = [...rest.map(t => ({ t, at: depOf(t) })), ...pend].sort((a, b) => a.at - b.at);
-  const today = items.filter(x => isToday(x.at)), tomorrow = items.filter(x => isTomorrow(x.at)), later = items.filter(x => !isToday(x.at) && !isTomorrow(x.at));
+  // Sichtbar nur, was bald ansteht (≤ 3 Std.), schon Live-Daten hat oder ein Problem – alles andere eingeklappt
+  const soonT = t => depOf(t) - now <= 3 * 3600e3 || !planOnly(t) || t.status !== "OK";
+  const soon = items.filter(x => !x.pend && soonT(x.t)), later = items.filter(x => !x.pend && !soonT(x.t)), pendL = items.filter(x => x.pend);
+  const dayHead = x => (isToday(x.at) ? "Heute" : isTomorrow(x.at) ? "Morgen" : day(new Date(x.at).toISOString()));
+  const grouped = list => list.map((x, i) => `${!i || dayHead(list[i - 1]) !== dayHead(x) ? `<li class="day-sub">${esc(dayHead(x))}</li>` : ""}${row(x)}`).join("");
   const row = x => x.pend
     ? `<li class="crow-li"><button data-ropenr="${x.r.id}" class="crow pend"><span class="sdot d-pend"></span>
       <span class="tr-main"><b>${x.r.win ? `${esc(x.r.win[0])}–${esc(x.r.win[1])}` : hm(x.r.next.at)} ↻ ${esc(x.r.name)}</b>${x.r.win ? `<span class="muted small">eine Fahrt in diesem Zeitfenster</span>` : ""}</span>
       <span class="tr-state small">${pendText(x.r)}</span></button></li>`
     : `<li class="crow-li"><button data-open="${x.t.id}" class="crow"><span class="sdot d-${planOnly(x.t) ? "PLAN" : x.t.status}"></span>
-      <span class="tr-main"><b>${hm(x.t.legs[0].dep.rt)} ${x.t.rname ? `↻ ${esc(x.t.rname)}` : `${esc(cleanStop(x.t.legs[0].dep.name))} → ${esc(cleanStop(x.t.legs[x.t.legs.length - 1].arr.name))}`}</b>${!isToday(x.at) && !isTomorrow(x.at) ? `<span class="muted small">${day(x.t.legs[0].dep.plan)}</span>` : ""}</span>
+      <span class="tr-main"><b>${hm(x.t.legs[0].dep.rt)} ${x.t.rname ? `↻ ${esc(x.t.rname)}` : `${esc(cleanStop(x.t.legs[0].dep.name))} → ${esc(cleanStop(x.t.legs[x.t.legs.length - 1].arr.name))}`}</b></span>
       <span class="tr-state small">${esc(listState(x.t))}</span></button></li>`;
   // Alte Adresse (…workers.dev): Hinweis auf den Umzug mit Anleitung zum Mitnehmen
   const moved = /workers\.dev$/.test(location.hostname) ? `<section class="card move"><div class="k">Neue Adresse</div>
@@ -234,14 +238,16 @@ function renderList(active) {
     ${cur ? jetztCard(cur) : ""}
     ${tiles(cur)}
     ${fresh ? iosFirst() : hintCard()}
-    ${today.length ? `<div class="sec-row"><span>Heute</span></div><ul class="trips compact">${today.map(row).join("")}</ul>` : ""}
-    ${tomorrow.length ? `<div class="sec-row"><span>Morgen</span></div><ul class="trips compact">${tomorrow.map(row).join("")}</ul>` : ""}
+    ${soon.length ? `<div class="sec-row"><span>Demnächst</span></div><ul class="trips compact">${grouped(soon)}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
-      ${LATER_OPEN ? `<ul class="trips compact">${later.map(row).join("")}</ul>` : ""}` : ""}
+      ${LATER_OPEN ? `<p class="small muted" style="margin:-4px 2px 6px">Live geprüft wird ab ca. 3 Std. vor der Abfahrt – dann erscheinen sie oben.</p><ul class="trips compact">${grouped(later)}</ul>` : ""}` : ""}
+    ${pendL.length ? `<div class="sec-row"><span>Regelmäßig angekündigt · ${pendL.length}</span><button class="link" data-pendopen>${PEND_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
+      ${PEND_OPEN ? `<ul class="trips compact">${grouped(pendL)}</ul>` : ""}` : ""}
     ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät? Verbinden"}</button>` : ""}`;
   if (fresh && !DEV.list && !DEV.asked) { DEV.asked = true; api("/api/devices").then(l => { DEV.list = l; if (view === "home" && !openId && l.length > 1) render(); }).catch(() => {}); }
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
+  $app.querySelector("[data-pendopen]")?.addEventListener("click", () => { PEND_OPEN = !PEND_OPEN; render(); });
   bindTiles(cur);
   bindHints();
   bindRoutines();
@@ -388,7 +394,7 @@ async function saveWindowRoutine() {
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
 const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && (W.regIntent || !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name)));
 // ---------- Regelmäßige Fahrten ----------
-let LATER_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
+let LATER_OPEN = false, PEND_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
 try { R_LIST_OPEN = localStorage.getItem("rb_rlist") === "1"; } catch {}
 const DOW = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 // [1,2,3,4,5] → „Mo–Fr“, alle → „täglich“, sonst „Mo, Mi, Fr“ (Folgen ab 3 Tagen zusammengefasst)
