@@ -894,7 +894,7 @@ function renderTrip(t, many) {
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.phase === "enroute" && t.status !== "OK" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise · ${t.legs.length} ${t.legs.length === 1 ? "Fahrt" : "Fahrten"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
       : `${t.phase === "enroute" && t.status !== "OK" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise <span class="chev">▴</span></button>` : `<h3 class="sec-h">${t.phase === "enroute" ? "Ganze Reise" : "Verlauf"}</h3>`}<div class="card flat">${timeline(t)}</div>`}
-    ${t.phase === "before" && t.ticket !== "dticket" && !t.follow ? `<a class="btn sec" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" data-bahn>🎫 Ticket bei der Bahn buchen</a>
+    ${t.phase === "before" && t.ticket !== "dticket" && !t.follow && t.legs.some(isTrainLeg) ? `<a class="btn sec" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" data-bahn>🎫 Ticket bei der Bahn buchen</a>
       <p class="small muted" style="margin:-2px 0 8px">Öffnet die Suche auf bahn.de bzw. im DB Navigator mit Start, Ziel und Abfahrtszeit – deine Verbindung steht dort oben. Umstiegsheld verkauft selbst keine Tickets.</p>` : ""}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Reise"}</button>
@@ -1959,6 +1959,9 @@ $app.innerHTML = `<div class="spinner"></div>`;
 const legLine = l => { const f = l.from || l.dep, e = l.to || l.arr; return `${hm(f.plan)} ${l.label} ${cleanStop(f.name || "")} → ${cleanStop(e.name || "")}`; };   // gespeicherte (from/to) und angezeigte (dep/arr) Teilstrecken
 const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l => l.from || l.dep, e = l => l.to || l.arr;
   return { head: `${cleanStop(f(a).name)} → ${cleanStop(e(z).name)}`, when: `${day(f(a).plan)} · ${hm(f(a).plan)} – ${hm(e(z).plan)}${legs.length > 1 ? ` · ${legs.length - 1} Umstieg${legs.length > 2 ? "e" : ""}` : ""}` }; };
+// Nur „richtige“ Züge (Regional- und Fernverkehr) – S-Bahn, U-Bahn, Tram und Bus bucht man nicht bei der Bahn
+const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l.mode || "") && !/^(S|U|STR|Tram|Bus|Fähre)\s?\d*\b/i.test(String(l.label || ""))
+  && (/RAIL|HIGHSPEED|LONG_DISTANCE|NIGHT/.test(l.mode || "") || /^(ICE|IC|EC|ECE|ICD|IRE|RE|RB|MEX|RJX?|NJ|EN|D|TGV|EST|FEX)\s?\d/i.test(String(l.label || "")));
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
 function bahnUrl(t) {
   const a = t.legs[0].dep, z = t.legs[t.legs.length - 1].arr, nm = s => cleanStop(s.name);

@@ -86,8 +86,9 @@ export async function devicesByIds(env, ids) {
 // Aufräumen: beendete Reisen nach 24 Std., Geräte ohne Lebenszeichen nach 60 Tagen
 export async function cleanup(env) {
   const day = new Date(Date.now() - 864e5).toISOString(), old = new Date(Date.now() - 60 * 864e5).toISOString();
-  if (mem(env)) { for (const [id, t] of MEM.rb_trips) if (!t.active && t.ends_at < day) MEM.rb_trips.delete(id); return; }
-  await rest(env, `rb_trips?active=eq.false&ends_at=lt.${day}`, { method: "DELETE" });
+  const h3 = new Date(Date.now() - 3 * 3600e3).toISOString();   // beendete Fahrten: 3 Std. nach Ankunft ganz weg
+  if (mem(env)) { for (const [id, t] of MEM.rb_trips) if (!t.active && t.ends_at < h3) MEM.rb_trips.delete(id); return; }
+  await rest(env, `rb_trips?active=eq.false&ends_at=lt.${h3}`, { method: "DELETE" });
   await rest(env, `rb_devices?last_seen=lt.${old}`, { method: "DELETE" });
   await rest(env, `rb_guard?t=lt.${day}`, { method: "DELETE" }).catch(() => {});
   await rest(env, `rb_shares?ends_at=lt.${day}`, { method: "DELETE" }).catch(() => {});   // geteilte Links nach der Fahrt weg   // Schutz-Zähler nach einem Tag weg
