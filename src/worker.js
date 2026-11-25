@@ -238,7 +238,7 @@ async function api(req, env, url) {
     if (!sh) return fail(404, "Diesen Link gibt es nicht (mehr).");
     if (Date.parse(sh.ends_at) < Date.now() - 30 * MIN) return fail(410, "Diese Verbindung ist schon vorbei.");
     count("sh_open");
-    return json({ legs: sh.legs, ends_at: sh.ends_at });
+    return json(sh.routine ? { kind: "routine", legs: sh.legs, routine: sh.routine } : { kind: "trip", legs: sh.legs, ends_at: sh.ends_at });
   }
 
   const dev = await device(env, req);
@@ -586,6 +586,19 @@ async function api(req, env, url) {
     const pn = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
     const dupOf = (fromN, toN, dep) => mineR.find(r => pn(r.tpl[0].from.name) === pn(fromN) && pn(r.tpl[r.tpl.length - 1].to.name) === pn(toN) && r.dep === dep);
     const dupMsg = r => `Diese Strecke zu dieser Zeit wird schon überwacht („${r.name}“). Du findest sie unter „Regelmäßige Fahrten“.`;
+    if (b.share) {
+      // aus einem geteilten Link: gleiche Strecke, Tage und Zeiten wie beim Absender
+      const sh = /^[A-Za-z0-9_-]{8,16}$/.test(String(b.share)) ? await db.get(env, "rb_shares", String(b.share)).catch(() => null) : null;
+      if (!sh?.routine || Date.parse(sh.ends_at) < Date.now()) return fail(404, "Diesen Link gibt es nicht (mehr).");
+      const R = sh.routine, tpl = sh.legs, dep = R.win_from || R.dep;
+      { const d = dupOf(tpl[0].from.name, tpl[tpl.length - 1].to.name, dep); if (d) return fail(409, dupMsg(d)); }
+      const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${tpl[tpl.length - 1].to.name}`, days,
+        dep, ...(R.win_to ? { win_from: R.win_from, win_to: R.win_to } : {}), tpl, ticket: ["spar", "flex", "dticket", "bc100"].includes(R.ticket) ? R.ticket : "flex", min_t: Math.min(30, Math.max(0, +R.min_t || 0)),
+        holidays: R.holidays !== false, paused: false, skip: [], made: [] });
+      count("t_share_r");
+      const { makeDue } = await import("./routines.js"); await makeDue(env, Date.now()).catch(() => {});
+      return json(routineView(r), 201);
+    }
     if (b.from && b.to) {
       // direkt aus der Verbindungssuche: Start, Ziel, Tage und Zeitfenster
       const hhmm = s => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(s)) ? String(s) : null), wf = hhmm(b.winFrom), wt = hhmm(b.winTo);
@@ -611,6 +624,18 @@ async function api(req, env, url) {
     await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
     await retire();
     return json(routineView(r), 201);
+  }
+  // Regelmäßige Fahrt teilen: Strecke, Tage, Zeit – ohne den eigenen Namen der Fahrt (der kann persönlich sein)
+  const mrs = /^\/api\/routines\/([0-9a-f-]{36})\/share$/.exec(p);
+  if (mrs && method === "POST") {
+    const r = await db.get(env, "rb_routines", mrs[1]);
+    if (!r || r.account_id !== dev.account_id) return fail(404, "Regelmäßige Fahrt nicht gefunden");
+    const id = b64u(crypto.getRandomValues(new Uint8Array(8)));
+    const tpl = r.tpl.map(({ jid, tid, ...l }) => ({ ...l, jid: "" }));
+    await db.insert(env, "rb_shares", { id, legs: tpl, ends_at: new Date(Date.now() + 60 * 864e5).toISOString(),
+      routine: { days: r.days, dep: r.dep, win_from: r.win_from || null, win_to: r.win_to || null, holidays: r.holidays !== false, ticket: r.ticket, min_t: r.min_t || 0 } });
+    count("sh_new_r");
+    return json({ id, url: `${url.origin}/?v=${id}` });
   }
   const mr = /^\/api\/routines\/([0-9a-f-]{36})(\/skip)?$/.exec(p);
   if (mr) {

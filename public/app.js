@@ -443,6 +443,7 @@ function routineRow(r) {
       ${r.skip.length ? `<p class="small" style="margin:6px 0 0">Ausgesetzt: ${skipChips(r)}</p>` : ""}
       <div class="rbtns"><button class="btn sec small-btn" data-rchange="${r.id}">Zeit oder Strecke ändern</button>
         <button class="btn sec small-btn" data-rname="${r.id}">Umbenennen</button>
+        <button class="btn sec small-btn" data-rshare="${r.id}">↗ Teilen</button>
         <button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren"}</button>
         <button class="btn danger small-btn" data-rdel="${r.id}">Löschen</button></div>
       </div>` : ""}</div>`;
@@ -482,6 +483,7 @@ function bindRoutines() {
     await rCall(`/api/routines/${id}/skip`, { method: "POST", body: { date } }); await loadTrips().catch(() => {}); reloadRoutines(); });
   $app.querySelectorAll("[data-runskip]").forEach(b => b.onclick = async () => { const [id, date, to] = b.dataset.runskip.split("|");
     await rCall(`/api/routines/${id}/skip`, { method: "POST", body: { date, to: to || date, on: false } }); reloadRoutines(); });
+  $app.querySelectorAll("[data-rshare]").forEach(b => b.onclick = () => shareRoutine(R(b.dataset.rshare), b));
   $app.querySelectorAll("[data-rdel]").forEach(b => b.onclick = async () => { const r = R(b.dataset.rdel);
     if (!(await ask(`„${r.name}“ löschen?\n\nEs werden keine neuen Fahrten mehr angelegt. Schon angelegte Fahrten bleiben, bis sie vorbei sind.`, { ok: "Löschen", danger: true }))) return;
     await rCall(`/api/routines/${r.id}`, { method: "DELETE" }); R_OPEN = null; flash = `„${r.name}“ wird nicht mehr überwacht.`; await loadTrips().catch(() => {}); reloadRoutines(); });
@@ -1956,11 +1958,36 @@ async function shareTrip(t, btn) {
   } catch (e) { alert(`Teilen ging nicht\n\n${e.message}`); }
   finally { if (btn) btn.disabled = false; }
 }
+const routineWhen = (R, legs) => `${daysText(R.days)} · ${R.win_to ? `alle Fahrten ${R.win_from}–${R.win_to}` : `ab ${R.dep}`}${R.holidays ? " · nicht an Feiertagen" : ""}`;
+async function shareRoutine(r, btn) {
+  if (!r) return; if (btn) btn.disabled = true;
+  try {
+    const { url } = await api(`/api/routines/${r.id}/share`, { method: "POST" });
+    const head = `${cleanStop(r.from)} → ${cleanStop(r.to)}`;
+    const text = `Regelmäßige Fahrt: ${head}\n${daysText(r.days)} · ${r.win ? `alle Fahrten ${r.win[0]}–${r.win[1]}` : `ab ${r.dep} · ${r.label}`}\n\nIn Umstiegsheld übernehmen – dann wirst du an jedem Fahrtag gewarnt, wenn etwas nicht klappt:`;
+    if (navigator.share) { try { await navigator.share({ title: head, text, url }); } catch (e) { if (e?.name !== "AbortError") throw e; } }
+    else { await navigator.clipboard.writeText(`${text}\n${url}`); flash = "Link kopiert – du kannst ihn jetzt z. B. in WhatsApp einfügen."; render(); }
+  } catch (e) { alert(`Teilen ging nicht\n\n${e.message}`); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function takeSharedRoutine(code, sh) {
+  const R = sh.routine, legs = sh.legs, head = `${cleanStop(legs[0].from.name)} → ${cleanStop(legs[legs.length - 1].to.name)}`;
+  const via = R.win_to ? "" : `\n\n${legs.map(l => `${l.label} ${cleanStop(l.from.name)} → ${cleanStop(l.to.name)}`).join("\n")}`;
+  const yes = await ask(`Regelmäßige Fahrt übernehmen?\n\n${head}\n${routineWhen(R)}${via}\n\nJemand hat dir diese Strecke geschickt. An jedem Fahrtag lege ich die Fahrt ein paar Stunden vorher für dich an und melde mich, wenn etwas nicht klappt. Tage und Zeit kannst du danach ändern.`, { ok: "Bei mir überwachen", cancel: "Nein danke" });
+  if (!yes) return;
+  try {
+    const r = await api("/api/routines", { method: "POST", body: { share: code, days: R.days } });
+    ROUTINES = await api("/api/routines").catch(() => ROUTINES); R_OPEN = r.id;
+    flash = `Übernommen: „${r.name}“. Du kannst sie unter „Umbenennen“ anders nennen.`;
+    await loadTrips().catch(() => {}); go("routines");
+  } catch (e) { alert(`Übernehmen ging nicht\n\n${e.message}`); }
+}
 // Link „/?v=…“ geöffnet: Verbindung zeigen und auf Wunsch bei sich überwachen
 async function takeSharedTrip(code) {
   let sh;
   try { const r = await fetch(`/api/shared/${encodeURIComponent(code)}`); sh = await r.json().catch(() => ({})); if (!r.ok) throw new Error(sh.error || "Link nicht gefunden"); }
   catch (e) { return alert(`Geteilte Verbindung\n\n${e.message}`); }
+  if (sh.kind === "routine") return takeSharedRoutine(code, sh);
   const L = tripLines(sh.legs);
   const yes = await ask(`Verbindung übernehmen?\n\n${L.head}\n${L.when}\n\n${sh.legs.map(legLine).join("\n")}\n\nJemand hat dir diese Verbindung geschickt. Ich überwache sie dann auch für dich und melde mich, wenn etwas nicht klappt.`, { ok: "Bei mir überwachen", cancel: "Nein danke" });
   if (!yes) return;

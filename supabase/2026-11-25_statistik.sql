@@ -58,3 +58,4 @@ create table if not exists public.rb_shares (
 );
 alter table public.rb_shares enable row level security;
 create index if not exists rb_shares_ends on public.rb_shares (ends_at);
+alter table public.rb_shares add column if not exists routine jsonb;   -- geteilte regelmäßige Fahrt (Tage, Zeit, Fenster)

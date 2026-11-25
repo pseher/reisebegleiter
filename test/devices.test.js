@@ -199,3 +199,22 @@ test("Verbindung teilen: Link ohne Konto abrufen, anderer übernimmt sie, gleich
   assert.equal((await call("/api/trips", { auth: B })).data.length, 1);
   assert.equal((await call("/api/shared/AAAAAAAAAAA")).status, 404);
 });
+
+test("Regelmäßige Fahrt teilen: ohne eigenen Namen, anderer übernimmt Tage und Zeit, doppelt nicht", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  const B = (await call("/api/register", { method: "POST", body: { label: "iPhone" } })).data;
+  const t = (await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(20)], ticket: "dticket" } })).data;
+  const r = (await call("/api/routines", { auth: A, method: "POST", body: { tripId: t.id, name: "Schulweg Testkind", days: [1, 2, 3, 4, 5] } })).data;
+  const s = await call(`/api/routines/${r.id}/share`, { auth: A, method: "POST" });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  assert.equal((await call(`/api/routines/${r.id}/share`, { auth: B, method: "POST" })).status, 404);
+  const g = (await call(`/api/shared/${s.data.id}`)).data;
+  assert.equal(g.kind, "routine");
+  assert.equal(JSON.stringify(g).includes("Testkind"), false);
+  assert.deepEqual(g.routine.days, [1, 2, 3, 4, 5]);
+  const nb = await call("/api/routines", { auth: B, method: "POST", body: { share: s.data.id, days: g.routine.days } });
+  assert.equal(nb.status, 201, JSON.stringify(nb.data));
+  assert.equal(nb.data.dep, r.dep);
+  assert.equal(nb.data.name, "Nach Potsdam Hbf");
+  assert.equal((await call("/api/routines", { auth: B, method: "POST", body: { share: s.data.id, days: g.routine.days } })).status, 409);
+});
