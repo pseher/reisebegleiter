@@ -430,3 +430,7 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .rchip.pl { background: var(--card); border: 1.5px solid var(--accent); color: var(--ink); font-weight: 600; }
 .rchip.add { background: none; border: 1.5px dashed var(--line); color: var(--accent); }
 .rchip[aria-pressed="true"] { background: var(--accent); color: #fff; }
+/* Mehrere Fahrten gleichzeitig: schlankere Karten untereinander */
+.hero.jetzt.slim { margin: 6px 0 8px; padding-top: 10px; padding-bottom: 10px; }
+.jetzt.slim .jt b { font-size: 26px; } .jetzt.slim .jt { margin: 2px 0 0; }
+.now-more { display: block; margin: -2px 0 10px auto; }

@@ -210,8 +210,13 @@ function renderList(active) {
   const now = Date.now(), cur = active.filter(t => t.phase !== "done" && (t.phase === "enroute" || Date.parse(t.legs[0].dep.rt) - now < 6 * 3600e3
       || ((t.status === "LOST" || t.status === "RISK") && Date.parse(t.legs[0].dep.rt) - now < 48 * 3600e3)))   // Ausfall schon heute Abend für morgen früh: gleich oben zeigen
     .sort((a, b) => (a.phase === "enroute" ? -1 : 0) - (b.phase === "enroute" ? -1 : 0) || Date.parse(a.legs[0].dep.rt) - Date.parse(b.legs[0].dep.rt))[0];
+  // Mehrere gleichzeitig (Familie, geteiltes Gerät): alle, die gerade laufen oder in 30 Min. starten, oben zeigen – Probleme zuerst
+  const RANK = { LOST: 0, RISK: 1, WATCH: 2 };
+  const nowList = !cur ? [] : [cur, ...active.filter(t => t !== cur && t.phase !== "done" && (t.phase === "enroute" || Date.parse(t.legs[0].dep.rt) - now < 30 * MIN))]
+    .sort((a, b) => (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3) || (a.phase === "enroute" ? -1 : 0) - (b.phase === "enroute" ? -1 : 0) || Date.parse(a.legs[0].dep.rt) - Date.parse(b.legs[0].dep.rt));
+  const nowShown = NOW_MORE ? nowList : nowList.slice(0, 3);
   // Nach Kalendertag: Heute · Morgen · Später (jeweils nach Abfahrt sortiert)
-  const depOf = t => Date.parse(t.legs[0].dep.plan), rest = active.filter(t => t !== cur).sort((a, b) => depOf(a) - depOf(b));
+  const depOf = t => Date.parse(t.legs[0].dep.plan), rest = active.filter(t => !nowList.includes(t)).sort((a, b) => depOf(a) - depOf(b));
   const isToday = ms => sameDay(ms, now), isTomorrow = ms => sameDay(ms, now + 864e5);
   // Regelmäßige Fahrten, die heute/morgen anstehen, aber erst 3 Std. vorher angelegt werden: schon mal zeigen
   const pend = ROUTINES.filter(r => !r.paused && r.next?.at && (isToday(Date.parse(r.next.at)) || isTomorrow(Date.parse(r.next.at)))
@@ -237,7 +242,8 @@ function renderList(active) {
       <div class="row"><button class="btn sec small-btn" data-go="settings">Code anzeigen</button><a class="btn small-btn" href="https://umstiegsheld.de/" target="_blank" rel="noopener">umstiegsheld.de öffnen</a></div></section>` : "";
   $app.innerHTML = `${flashBox()}${moved}
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
-    ${cur ? jetztCard(cur) : ""}
+    ${nowShown.map((t, i) => jetztCard(t, i > 0 || nowList.length > 1)).join("")}
+    ${nowList.length > 3 ? `<button class="link small now-more" data-nowmore>${NOW_MORE ? "Weniger zeigen" : `+ ${nowList.length - 3} weitere jetzt`}</button>` : ""}
     ${tiles(cur)}
     ${fresh ? iosFirst() : hintCard()}
     ${soon.length ? `<div class="sec-row"><span>Demnächst</span></div><ul class="trips compact">${grouped(soon)}</ul>` : ""}
@@ -249,6 +255,7 @@ function renderList(active) {
   if (fresh && !DEV.list && !DEV.asked) { DEV.asked = true; api("/api/devices").then(l => { DEV.list = l; if (view === "home" && !openId && l.length > 1) render(); }).catch(() => {}); }
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
+  $app.querySelector("[data-nowmore]")?.addEventListener("click", () => { NOW_MORE = !NOW_MORE; render(); });
   $app.querySelector("[data-pendopen]")?.addEventListener("click", () => { PEND_OPEN = !PEND_OPEN; render(); });
   bindTiles(cur);
   bindHints();
@@ -309,11 +316,11 @@ function bindAccess(t) {
     }, () => { ACC[id] = { err: "Ohne Standort kann ich den Weg nicht schätzen. Bitte den Standort für Umstiegsheld erlauben." }; render(); }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
   });
 }
-function jetztCard(t) {
+function jetztCard(t, slim = false) {
   const n = t.next, lbl = n ? (/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label) : "";
   const when = t.phase === "enroute" ? "unterwegs" : inMin(t.legs[0].dep.rt);
   const what = !n ? "" : n.cancelled ? `<span class="late">${esc(lbl)} fällt aus</span>` : `${esc(lbl)}${n.platform ? ` · ${esc(platWord(n, n.platform))}` : ""}`;
-  return `<button class="hero jetzt s-${planOnly(t) ? "PLAN" : t.status}" data-open="${t.id}">
+  return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? "PLAN" : t.status}" data-open="${t.id}">
     <div class="jk"><span>${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`} · ${esc(when)}</span><span>${esc(listState(t))}</span></div>
     ${n ? `<div class="jt"><b>${hm(n.at)}</b> <span>${what}</span></div>` : ""}
     <div class="js">${esc(t.status === "OK" ? (n?.then && !n.then.lost ? `Umstieg ${cleanStop(n.then.station || "")} klappt · ${n.then.gap} Min.` : `${t.phase === "enroute" ? "an" : "Ankunft"} ${hm(t.legs[t.legs.length - 1].arr.rt)} ${cleanStop(t.legs[t.legs.length - 1].arr.name)}`) : t.title === listState(t) ? String(t.sub || "").split(/(?<=\.) /)[0] : t.title)}${t.status === "LOST" ? " – antippen" : ""}</div></button>`;
@@ -396,7 +403,7 @@ async function saveWindowRoutine() {
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
 const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && (W.regIntent || !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name)));
 // ---------- Regelmäßige Fahrten ----------
-let LATER_OPEN = false, PEND_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
+let NOW_MORE = false, LATER_OPEN = false, PEND_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
 try { R_LIST_OPEN = localStorage.getItem("rb_rlist") === "1"; } catch {}
 const DOW = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 // [1,2,3,4,5] → „Mo–Fr“, alle → „täglich“, sonst „Mo, Mi, Fr“ (Folgen ab 3 Tagen zusammengefasst)
