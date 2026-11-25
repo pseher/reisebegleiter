@@ -227,7 +227,10 @@ function renderList(active) {
   const pend = ROUTINES.filter(r => !r.paused && r.next?.at && (isToday(Date.parse(r.next.at)) || isTomorrow(Date.parse(r.next.at)))
       && !active.some(t => t.rname === r.name && sameDay(depOf(t), Date.parse(r.next.at))))
     .map(r => ({ pend: true, r, at: Date.parse(r.next.at) }));
-  const items = [...rest.map(t => ({ t, at: depOf(t) })), ...pend].sort((a, b) => a.at - b.at);
+  // Angekommen: kurz noch oben zeigen (15 Min.), danach eingeklappt unter „Erledigt“
+  const arrOf = t => Date.parse(t.legs[t.legs.length - 1].arr.rt), gone = t => t.phase === "done" && arrOf(t) < now - 15 * MIN;
+  const doneL = rest.filter(gone).map(t => ({ t, at: depOf(t) })).sort((a, b) => b.at - a.at);
+  const items = [...rest.filter(t => !gone(t)).map(t => ({ t, at: depOf(t) })), ...pend].sort((a, b) => a.at - b.at);
   // Sichtbar nur, was bald ansteht (≤ 3 Std.), schon Live-Daten hat oder ein Problem – alles andere eingeklappt
   const soonT = t => depOf(t) - now <= 3 * 3600e3 || !planOnly(t) || t.status !== "OK";
   const soon = items.filter(x => !x.pend && soonT(x.t)), later = items.filter(x => !x.pend && !soonT(x.t)), pendL = items.filter(x => x.pend);
@@ -256,10 +259,13 @@ function renderList(active) {
       ${LATER_OPEN ? `<p class="small muted" style="margin:-4px 2px 6px">Live geprüft wird ab ca. 3 Std. vor der Abfahrt – dann erscheinen sie oben.</p><ul class="trips compact">${grouped(later)}</ul>` : ""}` : ""}
     ${pendL.length ? `<div class="sec-row"><span>Regelmäßig angekündigt · ${pendL.length}</span><button class="link" data-pendopen>${PEND_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${PEND_OPEN ? `<ul class="trips compact">${grouped(pendL)}</ul>` : ""}` : ""}
+    ${doneL.length ? `<div class="sec-row"><span>Erledigt · ${doneL.length}</span><button class="link" data-doneopen>${DONE_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
+      ${DONE_OPEN ? `<ul class="trips compact">${doneL.map(row).join("")}</ul>` : ""}` : ""}
     ${fresh && !(DEV.list && DEV.list.length > 1) ? `<button class="btn quiet" data-linkjoin>${isIOS && standalone ? "Fahrten schon in Safari angelegt? Code eingeben" : "Schon auf einem anderen Gerät? Verbinden"}</button>` : ""}`;
   if (fresh && !DEV.list && !DEV.asked) { DEV.asked = true; api("/api/devices").then(l => { DEV.list = l; if (view === "home" && !openId && l.length > 1) render(); }).catch(() => {}); }
   $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openId = b.dataset.open; openLeg = null; render(); scrollTo(0, 0); });
   $app.querySelector("[data-later]")?.addEventListener("click", () => { LATER_OPEN = !LATER_OPEN; render(); });
+  $app.querySelector("[data-doneopen]")?.addEventListener("click", () => { DONE_OPEN = !DONE_OPEN; render(); });
   $app.querySelector("[data-nowmore]")?.addEventListener("click", () => { NOW_MORE = !NOW_MORE; render(); });
   $app.querySelector("[data-pendopen]")?.addEventListener("click", () => { PEND_OPEN = !PEND_OPEN; render(); });
   bindTiles(cur);
@@ -408,7 +414,7 @@ async function saveWindowRoutine() {
 // Frage „Fährst du das regelmäßig?“ nur bei einer neuen, einzelnen Reise
 const canRegular = () => !!W && !W.editId && !W.multi && !W.quick && W.legs?.length > 0 && (W.regIntent || !ROUTINES.some(r => plainStop(r.from) === plainStop(W.legs[0].from.name) && plainStop(r.to) === plainStop(W.legs[W.legs.length - 1].to.name)));
 // ---------- Regelmäßige Fahrten ----------
-let NOW_MORE = false, LATER_OPEN = false, PEND_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
+let NOW_MORE = false, LATER_OPEN = false, PEND_OPEN = false, DONE_OPEN = false, R_OPEN = null, R_LIST_OPEN = false;
 try { R_LIST_OPEN = localStorage.getItem("rb_rlist") === "1"; } catch {}
 const DOW = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 // [1,2,3,4,5] → „Mo–Fr“, alle → „täglich“, sonst „Mo, Mi, Fr“ (Folgen ab 3 Tagen zusammengefasst)
