@@ -101,8 +101,13 @@ export async function cleanup(env) {
 export async function statsAdd(env, x) {
   if (mem(env)) { const o = MEM.rb_stats.get(x.hour) || { hour: x.hour, db: 0, db429: 0, vbb: 0, motis: 0, ai: 0, runs: 0, checks: 0, trips_max: 0, db_max_run: 0 };
     for (const k of ["db", "db429", "vbb", "motis", "ai", "runs", "checks"]) o[k] += x[k] || 0;
-    o.trips_max = Math.max(o.trips_max, x.trips || 0); if (x.runs) o.db_max_run = Math.max(o.db_max_run, x.db || 0); MEM.rb_stats.set(x.hour, o); return; }
+    o.trips_max = Math.max(o.trips_max, x.trips || 0); if (x.runs) { o.db_max_run = Math.max(o.db_max_run, x.db || 0); o.last_at = new Date().toISOString(); } MEM.rb_stats.set(x.hour, o); return; }
   await rest(env, "rpc/rb_stats_add", { method: "POST", body: JSON.stringify({ p_hour: x.hour, p_db: x.db || 0, p_db429: x.db429 || 0, p_vbb: x.vbb || 0, p_motis: x.motis || 0, p_ai: x.ai || 0, p_runs: x.runs || 0, p_checks: x.checks || 0, p_trips: x.trips || 0 }) });
+}
+export async function statsEv(env, hour, ev) {
+  if (mem(env)) { const o = MEM.rb_stats.get(hour) || { hour, db: 0, db429: 0, vbb: 0, motis: 0, ai: 0, runs: 0, checks: 0, trips_max: 0, db_max_run: 0 };
+    o.ev = { ...(o.ev || {}) }; for (const [k, v] of Object.entries(ev)) o.ev[k] = (o.ev[k] || 0) + v; MEM.rb_stats.set(hour, o); return; }
+  await rest(env, "rpc/rb_stats_ev", { method: "POST", body: JSON.stringify({ p_hour: hour, p_ev: ev }) });
 }
 export async function statsSince(env, sinceIso) {
   if (mem(env)) return [...MEM.rb_stats.values()].filter(r => r.hour >= sinceIso).sort((a, b) => (a.hour < b.hour ? 1 : -1));
@@ -119,7 +124,10 @@ export async function guard(env, key, sec, max) {
 // Überblick für die Betreiber-Seite: Nutzer, Geräte, Fahrten, gebremste Versuche
 export async function overview(env) {
   if (mem(env)) { const d = [...MEM.rb_devices.values()], wk = Date.now() - 7 * 864e5, tr = [...MEM.rb_trips.values()], ro = [...MEM.rb_routines.values()];
+    const seen = ms => d.filter(x => Date.parse(x.last_seen || x.created_at) > Date.now() - ms).length;
     return { accounts: MEM.rb_accounts.size, devices: d.length, devices_7d: d.filter(x => Date.parse(x.last_seen || x.created_at) > wk).length, devices_new_7d: d.filter(x => Date.parse(x.created_at) > wk).length,
+      active_1h: seen(75 * 60e3), active_24h: seen(864e5), active_30d: seen(30 * 864e5), multi: 0, acc_active_7d: new Set(d.filter(x => Date.parse(x.last_seen || x.created_at) > wk).map(x => x.account_id)).size,
+      devices_new_30d: d.length, ret_base: 0, ret_kept: 0, app: d.filter(x => x.app).length, last_run: [...MEM.rb_stats.values()].map(r => r.last_at).filter(Boolean).sort().pop() || null,
       push: d.filter(x => x.push).length, trips_active: tr.filter(t => t.active).length, trips_all: tr.length, routines: ro.length, routines_active: ro.filter(r => !r.paused).length,
       guard: [...MEM.rb_guard.entries()].filter(([, g]) => g.n > 5).map(([key, g]) => ({ key, n: g.n, t: new Date(g.t).toISOString() })) }; }
   return rest(env, "rpc/rb_overview", { method: "POST", body: "{}" });

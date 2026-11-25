@@ -1,4 +1,4 @@
-import { flush } from "./stats.js";
+import { flush, count } from "./stats.js";
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
@@ -151,6 +151,16 @@ async function replaceLegs(env, t, legs, ticket) {
   return view(t, now);
 }
 
+// Statistik: Quelle und Art einer neuen Fahrt (nur Summen)
+export function countTrip(legs, src) {
+  count(`t_${src}`);
+  const fern = legs.some(l => /^(ICE|IC|EC|ECE|RJ|RJX|NJ|EN|TGV|FLX|FEX)\b/i.test(String(l.label || "")) || /HIGHSPEED|LONG_DISTANCE|NIGHT_RAIL/.test(l.mode || ""));
+  const bus = legs.every(l => /^(BUS|COACH|TRAM|SUBWAY|METRO|FERRY)$/.test(l.mode || "") || /^(Bus|Tram|STR|U\s?\d)/i.test(String(l.label || "")));
+  count(fern ? "m_fern" : bus ? "m_bus" : "m_nah");
+  if (legs.some(l => l.to?.abroad)) count("m_ausland");
+  count("t_legs", legs.length);
+}
+
 async function api(req, env, url) {
   const p = url.pathname, method = req.method;
 
@@ -263,15 +273,16 @@ async function api(req, env, url) {
     const files = (Array.isArray(b.files) ? b.files : []).filter(f => f && typeof f.data === "string" && f.data.length < 7e6).slice(0, 3);
     const text = String(b.text || "").slice(0, 8000);
     if (!files.length && text.trim().length < 10) return fail(400, "Bitte einen Screenshot, ein PDF oder einen Text mit der Verbindung einfügen.");
-    if (!files.length && onlyBahnLink(text)) return fail(400, "In diesem Link steht die Verbindung selbst nicht drin – die Bahn speichert sie nur auf ihrer Seite. So klappt es: in der DB-App bei der Verbindung „Teilen“ → „Text kopieren“ und hier einfügen, oder einfach einen Screenshot der Reiseübersicht.");
+    if (!files.length && onlyBahnLink(text)) return count("imp_reject"), fail(400, "In diesem Link steht die Verbindung selbst nicht drin – die Bahn speichert sie nur auf ihrer Seite. So klappt es: in der DB-App bei der Verbindung „Teilen“ → „Text kopieren“ und hier einfügen, oder einfach einen Screenshot der Reiseübersicht.");
     const day = new Date().toISOString().slice(0, 10), use = dev.usage?.day === day ? dev.usage.n : 0, limit = +(env.IMPORT_DAILY_LIMIT || 10);
-    if (use >= limit) return fail(429, `Heute schon ${limit} Reisen eingelesen. Morgen geht es weiter – oder die Verbindung über „Von / Nach“ suchen.`);
+    count("imp_try");
+    if (use >= limit) { count("imp_limit"); return fail(429, `Heute schon ${limit} Reisen eingelesen. Morgen geht es weiter – oder die Verbindung über „Von / Nach“ suchen.`); }
     // Gesamt-Deckel für alle zusammen (Kostenbremse), Standard 150 Einlesungen am Tag
     const all = +(env.IMPORT_GLOBAL_LIMIT || 150), since = new Date(Date.parse(day + "T00:00:00Z")).toISOString();
     const usedAll = (await db.statsSince(env, since).catch(() => [])).reduce((a, x) => a + (x.ai || 0), 0);
-    if (usedAll >= all) return fail(429, "Das Einlesen ist für heute ausgelastet. Bitte die Verbindung über „Von / Nach“ suchen – das geht genauso.");
+    if (usedAll >= all) { count("imp_limit"); return fail(429, "Das Einlesen ist für heute ausgelastet. Bitte die Verbindung über „Von / Nach“ suchen – das geht genauso."); }
     await db.update(env, "rb_devices", dev.id, { usage: { day, n: use + 1 } }).catch(() => {});
-    return json(await importTrip(env, { text, files }));
+    return json(await importTrip(env, { text, files }).catch(e => { count("imp_err"); throw e; }));
   }
 
   // Verbindungssuche Von → Nach
@@ -322,7 +333,8 @@ async function api(req, env, url) {
       await db.update(env, "rb_trips", t.id, { legs: t.legs, state: t.state }).catch(() => {});
     }
     // Keine Live-Abfragen beim Öffnen: die Überwachung läuft ohnehin jede Minute – so startet die App sofort
-    if (Date.parse(dev.last_seen || 0) < now - 3600e3) await db.update(env, "rb_devices", dev.id, { last_seen: new Date().toISOString() }).catch(() => {});
+    const app = req.headers.get("X-RB-App") === "1";
+    if (Date.parse(dev.last_seen || 0) < now - 3600e3 || !!dev.app !== app) await db.update(env, "rb_devices", dev.id, { last_seen: new Date().toISOString(), app }).catch(() => {});
     return json(trips.map(t => view(t, now)));
   }
 
@@ -337,6 +349,7 @@ async function api(req, env, url) {
     const twin = (await db.tripsOf(env, dev.account_id).catch(() => [])).find(t => t.active && sigOf(t.legs) === sigOf(clean));
     if (twin) return json({ ...view(twin, Date.now()), existed: true }, 200);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
+    countTrip(clean, ["search", "board", "import", "quick", "fav"].includes(b.src) ? b.src : "other");
     const now = Date.now(), cache = new Map();
     // Erste Prüfung darf das Anlegen nicht scheitern lassen – sonst ist die Reise da, die App meldet aber einen Fehler
     try { await observe(env, dueChecks(trip, now, true).slice(0, 8), now, cache); await assess(env, trip, now, cache); }
@@ -356,7 +369,7 @@ async function api(req, env, url) {
     if (method === "DELETE") { t.state = { ...(t.state || {}), sos: null }; await db.update(env, "rb_trips", t.id, { state: t.state }); return json(view(t, now)); }
     const b = await req.json().catch(() => ({}));
     const lat = +b.lat, lon = +b.lon, here = lat > 45 && lat < 56 && lon > 4 && lon < 18 ? { lat, lon } : null;   // Standort nur für diese Suche
-    t.state = { ...(t.state || {}), sos: await sos(env, t, here, now) };
+    count("pb_sos"); t.state = { ...(t.state || {}), sos: await sos(env, t, here, now) };
     await db.update(env, "rb_trips", t.id, { state: t.state });
     return json(view(t, now));
   }
@@ -417,7 +430,7 @@ async function api(req, env, url) {
       if (!(lat > 45 && lat < 56 && lon > 4 && lon < 18)) return fail(400, "Standort liegt außerhalb des Suchgebiets.");
       here = { lat: +lat.toFixed(4), lon: +lon.toFixed(4) };
     }
-    const list = await planFromHere(env, t, evaluate(t, now), here, now, mode);
+    count("pb_here"); const list = await planFromHere(env, t, evaluate(t, now), here, now, mode);
     t.state = { ...(t.state || {}), here: { at: now, mode, list } };
     await db.update(env, "rb_trips", t.id, { state: t.state });
     return json(view(t, now));
@@ -431,6 +444,7 @@ async function api(req, env, url) {
     const b = await req.json().catch(() => ({}));
     const nat = x => x == null || (Number.isInteger(+x) && +x >= 0 && +x < 50);
     if (ma[2] === "adopt" && (!nat(b.idx) || !nat(b.k))) return fail(400, "Ungültige Auswahl");
+    count(ma[2] === "undo" ? "pb_undo" : b.win ? "pb_win" : "pb_adopt");
     if (ma[2] === "undo") undoAdopt(t);
     else if (b.win) {
       // Zeitfenster: diese Fahrt nehmen → ab jetzt normal überwachen (mit Meldungen)
@@ -719,7 +733,7 @@ async function adminStats(req, env) {
   let diff = key.length ^ want.length; for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ (key.charCodeAt(i) || 0);
   if (want.length < 16 || diff) { await new Promise(r => setTimeout(r, 400)); return fail(403, "Kein Zugriff"); }
   await flush(env).catch(() => {});
-  const [rows, ov] = await Promise.all([db.statsSince(env, new Date(Date.now() - 14 * 864e5).toISOString()), db.overview(env).catch(() => null)]);
+  const [rows, ov] = await Promise.all([db.statsSince(env, new Date(Date.now() - 28 * 864e5).toISOString()), db.overview(env).catch(() => null)]);
   return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
@@ -729,7 +743,7 @@ export default {
     if (url.pathname === "/api/admin/stats") return adminStats(req, env);
     if (url.pathname.startsWith("/api/")) {
       try { return await api(req, env, url); }
-      catch (e) { console.log("API-Fehler:", e.stack || e.message); return fail(502, e.user ? e.message : "Da ist gerade etwas schiefgelaufen. Bitte gleich noch einmal versuchen."); }
+      catch (e) { if (!e.user) count("err_api"); console.log("API-Fehler:", e.stack || e.message); return fail(502, e.user ? e.message : "Da ist gerade etwas schiefgelaufen. Bitte gleich noch einmal versuchen."); }
       finally { ctx?.waitUntil?.(flush(env).catch(() => {})); }   // Abfragen dieser Anfrage mitzählen
     }
     return env.ASSETS.fetch(req);

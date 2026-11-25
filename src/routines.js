@@ -1,3 +1,4 @@
+import { count } from "./stats.js";
 // Regelmäßige Fahrten (z. B. „Arbeit hin“ Mo–Fr 07:40): jeden Fahrtag ca. 3 Std. vorher eine Reise anlegen und überwachen.
 // Fahrplanwechsel: Es wird jeden Tag neu gesucht – gleiche Linien zur gleichen Zeit, sonst die nächstpassende Verbindung (mit Hinweis).
 import * as db from "./db.js";
@@ -145,7 +146,7 @@ export async function makeDue(env, now = Date.now(), watch = null) {
         if (!list.length) { msgs.push({ acc: r.account_id, title: `↻ ${r.name}: keine Verbindung`, body: `Zwischen ${r.win_from} und ${r.win_to} habe ich keine Verbindung gefunden. Bitte selbst prüfen.`, tag: `r-${r.id}` }); continue; }
         const legs = await toLegs(env, list[0], r.min_t), toName = legs[legs.length - 1].to.name, opts = list.slice(1, 6).map(c => asOption(c, toName));
         if (watch) await watch(opts, r.min_t).catch(() => {});
-        keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true, ends_at: legs[legs.length - 1].to.plan,
+        countR(), keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true, ends_at: legs[legs.length - 1].to.plan,
           state: { routine: r.id, rname: r.name, win: { from: r.win_from, to: r.win_to, date, picked: false, at: now, from0: r.tpl[0].from, to0: r.tpl[r.tpl.length - 1].to,
             list: opts } } }));
         continue;
@@ -155,8 +156,8 @@ export async function makeDue(env, now = Date.now(), watch = null) {
       const legs = (await resolveConnection(env, hit.c.legs)).map(({ live, ...l }) => ({ ...l, minT: r.min_t || 0 }));
       const dep = Date.parse(legs[0].from.plan), label = legs.map(l => l.label).join(" → ");
       const note = hit.changed ? `Heute andere Verbindung: ${label}, ab ${hm(dep)} (sonst ${r.dep}).` : null;
-      const trip = keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true,
-        state: { routine: r.id, rname: r.name, ...(note ? { rnote: note } : {}) }, ends_at: legs[legs.length - 1].to.plan }));
+      const trip = (countR(), keep(await db.insert(env, "rb_trips", { account_id: r.account_id, device_id: null, ticket: r.ticket, legs, obs: [], active: true,
+        state: { routine: r.id, rname: r.name, ...(note ? { rnote: note } : {}) }, ends_at: legs[legs.length - 1].to.plan })));
       if (note) msgs.push({ acc: r.account_id, title: `↻ ${r.name}: Fahrplan geändert`, body: `${note} Ich überwache diese.`, tag: `r-${r.id}`, url: `/?trip=${encodeURIComponent(trip.id)}` });
     }
   }
@@ -165,6 +166,7 @@ export async function makeDue(env, now = Date.now(), watch = null) {
 
 // Anzeige in der App
 const pl = s => ({ name: s.name, eva: s.eva || "", ...(s.lat != null ? { lat: s.lat, lon: s.lon } : {}), ...(s.stopId ? { stopId: s.stopId } : {}) });
+const countR = () => count("t_routine");
 export function routineView(r, now = Date.now()) {
   const n = nextRun(r, now), today = berlinDate(now);
   return { id: r.id, name: r.name, days: r.days, dep: r.dep, win: r.win_to ? [r.win_from, r.win_to] : null, holidays: r.holidays !== false, paused: !!r.paused, ticket: r.ticket,

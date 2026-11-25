@@ -68,7 +68,7 @@ async function api(path, opts = {}, retry = true) {
 }
 async function api0(path, { method = "GET", body } = {}, retry = true) {
   if (!AUTH) await register();
-  const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401 && retry) { AUTH = null; return api0(path, { method, body }, false); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Fehler ${r.status}`);
@@ -1826,7 +1826,7 @@ async function saveTrip(ticket) {
   W.busy = "Reise wird angelegt …"; render();
   try {
     let newId = null;
-    for (const legs of W.multi || [W.legs]) newId = (await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket } })).id || newId;
+    for (const legs of W.multi || [W.legs]) newId = (await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket, src: W.mode === "import" ? "import" : W.mode === "train" ? "board" : W.quick ? "quick" : W.fav ? "fav" : "search" } })).id || newId;
     if (W.reg && newId && !W.multi) {
       // gleich regelmäßig: genaue Abfahrt (aus dieser Reise) oder Zeitfenster (Start/Ziel dieser Reise)
       const R = W.reg, f = W.legs[0].from, t = W.legs[W.legs.length - 1].to;

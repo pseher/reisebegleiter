@@ -4,33 +4,50 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Umstiegsheld · Abfragen</title>
+  <title>Umstiegsheld · Betrieb</title>
   <link rel="stylesheet" href="/style.css">
   <style>
-    main { max-width: 820px; margin: 0 auto; padding: 16px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
-    th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-    th:first-child, td:first-child { text-align: left; }
-    th { color: var(--muted); font-weight: 600; font-size: 12px; }
-    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 18px; }
-    .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
-    .kpi b { display: block; font-size: 26px; } .kpi span { color: var(--muted); font-size: 13px; }
-    .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 8px; }
-    .bar i { display: block; height: 100%; background: var(--ok); } .bar i.w { background: var(--watch); } .bar i.r { background: var(--lost); }
-    .wrap { overflow-x: auto; }
+    main { max-width: 860px; margin: 0 auto; padding: 16px; }
+    h2.sec { margin: 22px 0 4px; font-size: 18px; }
+    .sec-sub { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+    .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
+    .kpi .t { font-size: 13px; font-weight: 600; }
+    .kpi b { font-size: 26px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+    .kpi .d { font-size: 12px; color: var(--muted); }
+    .kpi .x { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+    .up { color: var(--ok); } .down { color: var(--lost); }
+    .lights { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0 4px; }
+    .light { border-radius: 14px; padding: 10px 12px; border: 1px solid var(--line); background: var(--card); }
+    .light .t { font-size: 13px; color: var(--muted); } .light b { display: block; font-size: 17px; margin-top: 2px; }
+    .light.g { border-left: 6px solid var(--ok); } .light.y { border-left: 6px solid var(--watch); } .light.r { border-left: 6px solid var(--lost); }
+    .spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 6px; }
+    .spark i { flex: 1; background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 2px 2px 0 0; min-height: 1px; }
+    .rows { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; }
+    .rows div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+    .rows div:last-child { border-bottom: 0; } .rows span { color: var(--muted); } .rows b { font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    th, td { text-align: right; padding: 5px 7px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; } th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    .wrap { overflow-x: auto; } details { margin-top: 18px; } summary { cursor: pointer; font-weight: 700; font-size: 18px; }
   </style>
 </head>
 <body>
-  <header class="top"><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Abfragen</span></a></header>
+  <header class="top"><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Betrieb</span></a></header>
   <main id="m"></main>
   <script>
-    const $m = document.getElementById("m"), LIMIT_MIN = 600;   // DB OpenBoards: 10 je Sekunde
+    const $m = document.getElementById("m"), LIMIT_MIN = 600;   // DB OpenBoards: 10 je Sekunde (geteilt mit PlanFlink)
+    // KI-Preise in US-$ je 1 Mio. Tokens (geschätzt – bei Bedarf hier anpassen)
+    const PRICE = { fast: { in: 1, out: 5 }, strong: { in: 3, out: 15 } };
     const key = () => localStorage.getItem("rb_admin") || "";
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const hh = iso => new Date(iso).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
-    const dd = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+    const dd = d => new Date(d + "T12:00:00Z").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+    const num = n => (n == null ? "–" : Math.round(n).toLocaleString("de-DE"));
+    const usd = n => `${n < 10 ? n.toFixed(2).replace(".", ",") : Math.round(n)} $`;
+    const pct = (a, b) => (b ? `${Math.round(a / b * 100)} %` : "–");
     function login(msg = "") {
-      $m.innerHTML = `<h1>Abfragezähler</h1><p class="muted small">Nur für dich: den Schlüssel, den du im Cloudflare-Dashboard als <code>ADMIN_KEY</code> hinterlegt hast. Er bleibt nur auf diesem Gerät gespeichert.</p>
+      $m.innerHTML = `<h1>Betrieb</h1><p class="muted small">Nur für dich: den Schlüssel, den du im Cloudflare-Dashboard als <code>ADMIN_KEY</code> hinterlegt hast. Er bleibt nur auf diesem Gerät gespeichert.</p>
         ${msg ? `<p class="err">${esc(msg)}</p>` : ""}<input class="txt" id="k" type="password" autocomplete="current-password" placeholder="Schlüssel"><button class="btn" id="go">Anzeigen</button>`;
       document.getElementById("go").onclick = () => { localStorage.setItem("rb_admin", document.getElementById("k").value.trim()); load(); };
     }
@@ -39,35 +56,96 @@
       $m.innerHTML = `<div class="spinner"></div>`;
       const r = await fetch("/api/admin/stats", { headers: { "X-Admin-Key": key() } }).catch(() => null);
       if (!r || r.status === 403) { localStorage.removeItem("rb_admin"); return login(r ? "Schlüssel stimmt nicht." : "Keine Verbindung."); }
-      const { rows, ov } = await r.json();
-      const o = ov || {}, ipShort = k => esc(String(k).replace(/^(join-ip|reg-ip):/, m => (m === "join-ip:" ? "Code-Raten · " : "Neuanmeldungen · ")).replace(/^join-all$/, "Code-Raten insgesamt"));
-      const users = `<h3 class="sec-h">Nutzung</h3><div class="kpis">
-          <div class="kpi"><span>Konten (Personen)</span><b>${o.accounts ?? "–"}</b></div>
-          <div class="kpi"><span>Geräte · aktiv in 7 Tagen</span><b>${o.devices ?? "–"} · ${o.devices_7d ?? "–"}</b><span>neu in 7 Tagen: ${o.devices_new_7d ?? "–"}</span></div>
-          <div class="kpi"><span>Mit Mitteilungen</span><b>${o.push ?? "–"}</b></div>
-          <div class="kpi"><span>Fahrten überwacht gerade</span><b>${o.trips_active ?? "–"}</b><span>gespeichert: ${o.trips_all ?? "–"}</span></div>
-          <div class="kpi"><span>Regelmäßige Fahrten</span><b>${o.routines ?? "–"}</b><span>davon aktiv: ${o.routines_active ?? "–"}</span></div>
-        </div>
-        <h3 class="sec-h">Gebremste Versuche (24 Std.)</h3><div class="card flat wrap"><table><tr><th>Was · Anschluss</th><th>Versuche</th><th>Seit</th></tr>
-          ${(o.guard || []).map(g => `<tr><td>${ipShort(g.key)}</td><td>${g.n}</td><td>${hh(g.t)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nichts Auffälliges</td></tr>`}</table></div>`;
-      const last24 = rows.filter(x => Date.parse(x.hour) > Date.now() - 24 * 3600e3), sum = (l, k) => l.reduce((a, x) => a + (x[k] || 0), 0);
-      const peakRun = Math.max(0, ...last24.map(x => x.db_max_run)), peakHour = last24.reduce((m, x) => (x.db > (m?.db || 0) ? x : m), null);
-      const pct = Math.round(peakRun / LIMIT_MIN * 100), cls = pct > 60 ? "r" : pct > 30 ? "w" : "";
-      const days = {}; for (const x of rows) { const d = new Date(x.hour).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }); (days[d] ||= []).push(x); }
-      $m.innerHTML = `<h1>Abfragen</h1><p class="muted small">Stand ${hh(new Date().toISOString())} · DB-Limit ${LIMIT_MIN} je Minute (10 je Sek., geteilt mit PlanFlink)</p>
+      const { rows, ov } = await r.json(), o = ov || {}, now = Date.now();
+      // ---- Zahlen aus den Stunden-Zeilen: Spalten (db, vbb …) und Ereignisse (ev)
+      const val = (x, k) => (k in x ? +x[k] || 0 : +(x.ev?.[k]) || 0);
+      const inDays = (a, b) => rows.filter(x => { const t = Date.parse(x.hour); return t > now - a * 864e5 && t <= now - b * 864e5; });
+      const S = (list, ...ks) => list.reduce((s, x) => s + ks.reduce((a, k) => a + val(x, k), 0), 0);
+      const W = inDays(7, 0), P = inDays(14, 7), D1 = inDays(1, 0);
+      const berlin = t => new Date(t).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }), today = berlin(now), month = today.slice(0, 7);
+      const days = [...Array(14)].map((_, i) => berlin(now - (13 - i) * 864e5));
+      const perDay = (...ks) => days.map(d => S(rows.filter(x => berlin(Date.parse(x.hour)) === d), ...ks));
+      const spark = arr => { const mx = Math.max(1, ...arr); return `<div class="spark" title="letzte 14 Tage">${arr.map(v => `<i style="height:${Math.max(4, v / mx * 100)}%"></i>`).join("")}</div>`; };
+      const trend = (a, b) => (!b && !a ? "" : !b ? `<span class="up">neu</span>` : a === b ? "wie Vorwoche" : `<span class="${a > b ? "up" : "down"}">${a > b ? "▲" : "▼"} ${Math.abs(Math.round((a - b) / b * 100))} %</span> zur Vorwoche`);
+      const kpi = (t, v, x, extra = "") => `<div class="kpi"><span class="t">${t}</span><b>${v}</b>${extra}${x ? `<span class="x">${x}</span>` : ""}</div>`;
+      const wk = (t, ks, x) => { const a = S(W, ...ks), b = S(P, ...ks); const tr = trend(a, b); return kpi(t, num(a), x, `<span class="d">7 Tage${tr ? ` · ${tr}` : ""}</span>${spark(perDay(...ks))}`); };
+      const cost = list => (S(list, "tok_in_fast") * PRICE.fast.in + S(list, "tok_out_fast") * PRICE.fast.out + S(list, "tok_in_strong") * PRICE.strong.in + S(list, "tok_out_strong") * PRICE.strong.out) / 1e6;
+      const costToday = cost(rows.filter(x => berlin(Date.parse(x.hour)) === today)), costMonth = cost(rows.filter(x => berlin(Date.parse(x.hour)).startsWith(month)));
+
+      // ---- 1. Auf einen Blick
+      const runAge = o.last_run ? Math.round((now - Date.parse(o.last_run)) / 60e3) : null;
+      const errH = S(inDays(1 / 24, 0), "err_api", "err_db", "err_motis", "err_vbb"), peak = Math.max(0, ...D1.map(x => x.db_max_run || 0)), peakPct = Math.round(peak / LIMIT_MIN * 100);
+      const light = (cls, t, b, x) => `<div class="light ${cls}"><span class="t">${t}</span><b>${b}</b>${x ? `<span class="small muted">${x}</span>` : ""}</div>`;
+      const lights = `<div class="lights">
+        ${light(runAge == null ? "y" : runAge <= 3 ? "g" : runAge <= 10 ? "y" : "r", "Überwachung", runAge == null ? "noch kein Lauf erfasst" : runAge <= 1 ? "läuft" : `letzter Lauf vor ${runAge} Min.`, "läuft jede Minute")}
+        ${light(errH ? (errH > 10 ? "r" : "y") : "g", "Fehler, letzte Stunde", errH ? `${errH} Fehler` : "keine", "fehlgeschlagene Abrufe und Serverfehler")}
+        ${light(peakPct > 60 ? "r" : peakPct > 30 ? "y" : "g", "DB-Auslastung, 24 Std.", `${peakPct} % der Grenze`, `Spitze ${peak} von ${LIMIT_MIN} Abrufen je Minute`)}
+        ${light(costMonth > 20 ? "y" : "g", "KI-Kosten", `${usd(costToday)} heute · ${usd(costMonth)} im Monat`, "geschätzt, Ticket-Einlesen")}
+      </div>`;
+
+      // ---- 2. Wer nutzt die App?
+      const users = `<h2 class="sec">Nutzer</h2><p class="sec-sub">Ein Konto = eine Person bzw. ein Haushalt (ohne Anmeldung). Ein Konto kann mehrere verbundene Geräte haben. „Aktiv“ = App geöffnet.</p>
         <div class="kpis">
-          <div class="kpi"><span>DB-Abfragen, 24 Std.</span><b>${sum(last24, "db").toLocaleString("de-DE")}</b></div>
-          <div class="kpi"><span>Meiste DB-Abfragen in einer Minute (Überwachung)</span><b>${peakRun}</b><div class="bar"><i class="${cls}" style="width:${Math.min(100, pct)}%"></i></div><span>${pct} % des Limits</span></div>
-          <div class="kpi"><span>Stärkste Stunde</span><b>${peakHour ? peakHour.db : 0}</b><span>${peakHour ? hh(peakHour.hour) : "–"}</span></div>
-          <div class="kpi"><span>„Zu viele Anfragen“ (429), 24 Std.</span><b style="color:${sum(last24, "db429") ? "var(--lost)" : "inherit"}">${sum(last24, "db429")}</b></div>
-          <div class="kpi"><span>Höchstens gleichzeitig überwachte Reisen</span><b>${Math.max(0, ...last24.map(x => x.trips_max))}</b></div>
+          ${kpi("Konten insgesamt", num(o.accounts), "So viele haben die App bisher genutzt.")}
+          ${kpi("Geräte insgesamt", num(o.devices), `${num(o.multi)} Konten nutzen mehrere Geräte.`)}
+          ${kpi("Gerade aktiv", num(o.active_1h), "Geräte, die in der letzten Stunde geöffnet wurden.")}
+          ${kpi("Aktiv heute / 7 / 30 Tage", `${num(o.active_24h)} · ${num(o.devices_7d)} · ${num(o.active_30d)}`, `Geräte. In 7 Tagen waren ${num(o.acc_active_7d)} Konten aktiv.`)}
+          ${kpi("Neu", `${num(o.devices_new_7d)} · ${num(o.devices_new_30d)}`, "neue Geräte in 7 bzw. 30 Tagen")}
+          ${kpi("Bleiben dabei", o.ret_base ? pct(o.ret_kept, o.ret_base) : "–", o.ret_base ? `Von ${o.ret_base} Geräten, die vor 1–2 Wochen neu waren, nutzen ${o.ret_kept} die App eine Woche später noch.` : "Zeigt sich, sobald Geräte älter als eine Woche sind.")}
+          ${kpi("Als App installiert", o.active_30d ? pct(o.app, o.active_30d) : "–", `${num(o.app)} der in 30 Tagen aktiven Geräte nutzen sie vom Startbildschirm (wird ab jetzt erfasst).`)}
+          ${kpi("Mitteilungen erlaubt", o.devices ? pct(o.push, o.devices) : "–", `${num(o.push)} Geräte bekommen Warnungen aufs Handy.`)}
         </div>
-        ${users}
-        <h3 class="sec-h">Abfragen · letzte 48 Stunden</h3><div class="card flat wrap"><table><tr><th>Stunde</th><th>DB</th><th>Max/Min.</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th><th>Prüfungen</th><th>Reisen</th></tr>
-          ${rows.filter(x => Date.parse(x.hour) > Date.now() - 48 * 3600e3).map(x => `<tr><td>${hh(x.hour)}</td><td>${x.db}</td><td>${x.db_max_run}</td><td>${x.db429 || ""}</td><td>${x.vbb}</td><td>${x.motis}</td><td>${x.ai || ""}</td><td>${x.checks}</td><td>${x.trips_max}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Noch keine Daten</td></tr>`}</table></div>
-        <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>VBB</th><th>Transitous</th><th>KI</th></tr>
-          ${Object.entries(days).map(([d, l]) => `<tr><td>${dd(d + "T12:00:00Z")}</td><td>${sum(l, "db").toLocaleString("de-DE")}</td><td>${sum(l, "db429") || ""}</td><td>${sum(l, "vbb")}</td><td>${sum(l, "motis")}</td><td>${sum(l, "ai") || ""}</td></tr>`).join("")}</table></div>
-        <button class="btn quiet" id="out">Schlüssel auf diesem Gerät vergessen</button>`;
+        <div class="kpis" style="margin-top:10px">
+          ${kpi("Fahrten gerade überwacht", num(o.trips_active), `${num(o.trips_all)} gespeichert`)}
+          ${kpi("Regelmäßige Fahrten", num(o.routines_active), `aktiv · ${num(o.routines - o.routines_active)} pausiert`)}
+          ${wk("Fahrten angelegt", ["t_search", "t_board", "t_import", "t_quick", "t_fav", "t_other", "t_routine"], (() => { const l = [["Suche", "t_search"], ["Abfahrtstafel", "t_board"], ["Ticket-Import", "t_import"], ["Schnell weg", "t_quick"], ["Favorit", "t_fav"], ["automatisch (regelmäßig)", "t_routine"]]; return l.map(([n, k]) => `${n} ${S(W, k)}`).join(" · "); })())}
+          ${wk("Verkehrsmittel", ["m_bus", "m_nah", "m_fern"], `Bus/Tram ${S(W, "m_bus")} · Nahverkehr ${S(W, "m_nah")} · Fernverkehr ${S(W, "m_fern")}${S(W, "m_ausland") ? ` · ins Ausland ${S(W, "m_ausland")}` : ""}`)}
+        </div>`;
+
+      // ---- 4. Bringt die App etwas?
+      const kinds = [["gefaehrdet", "Anschluss gefährdet"], ["verpasst", "Anschluss verpasst"], ["ausfall", "Ausfall"], ["verspaetung", "Start verspätet"], ["gleis", "Gleiswechsel"], ["entwarnung", "Entwarnung"], ["aussteigen", "Gleich aussteigen"], ["zugbindung", "Zugbindung aufgehoben"], ["regel", "Regelmäßige Fahrt"]];
+      const leadN = S(W, "lead_n"), lead = leadN ? Math.round(S(W, "lead_sum") / leadN) : null;
+      const benefit = `<h2 class="sec">Nutzen</h2><p class="sec-sub">Wie oft die App gewarnt und geholfen hat (letzte 7 Tage).</p>
+        <div class="kpis">
+          ${wk("Mitteilungen erzeugt", kinds.map(k => `p_${k[0]}`), `${num(S(W, "p_sent"))} davon zugestellt (nur Geräte mit erlaubten Mitteilungen).`)}
+          ${wk("Probleme erkannt", ["p_gefaehrdet", "p_verpasst", "p_ausfall"], "gefährdete oder verpasste Anschlüsse und Ausfälle, zu denen gewarnt wurde")}
+          ${kpi("Vorwarnzeit", lead == null ? "–" : `${lead} Min.`, lead == null ? "Noch keine Warnung in 7 Tagen." : `So lange vor dem Umstieg kam im Schnitt die erste Warnung (${leadN} Warnungen).`)}
+          ${wk("Plan B gesucht", ["pb_sos", "pb_here"], `über „Plan B/SOS“ ${S(W, "pb_sos")} · „Andere Verbindungen“ ${S(W, "pb_here")}`)}
+          ${wk("Alternative übernommen", ["pb_adopt"], `${S(W, "pb_undo")}× „Zurück zum alten Plan“ · ${S(W, "pb_win")}× Fahrt aus Zeitfenster gewählt`)}
+        </div>
+        <div class="rows" style="margin-top:10px">${kinds.map(([k, n]) => `<div><span>${n}</span><b>${num(S(W, `p_${k}`))}</b></div>`).join("")}</div>`;
+
+      // ---- 6. Ticket-Import
+      const tries = S(W, "imp_try");
+      const imp = `<h2 class="sec">Ticket-Import (KI)</h2><p class="sec-sub">Screenshots, PDFs und geteilte Texte, die mit KI ausgelesen werden (letzte 7 Tage).</p>
+        <div class="kpis">
+          ${wk("Versuche", ["imp_try"], "")}
+          ${kpi("Erfolgreich", tries ? pct(S(W, "imp_ok"), tries) : "–", `${S(W, "imp_ok")} mit erkannter Reise · ${S(W, "imp_none")} ohne Ergebnis · ${S(W, "imp_err")} Fehler`)}
+          ${kpi("Abgelehnt / Grenze", `${S(W, "imp_reject")} · ${S(W, "imp_limit")}`, "DB-Link ohne Inhalt · Tages-Grenze erreicht")}
+          ${kpi("Starkes Modell nötig", tries ? pct(S(W, "imp_strong"), tries) : "–", `${S(W, "imp_strong")}× reichte das günstige Modell nicht`)}
+          ${kpi("Kosten", usd(cost(W)), `7 Tage · Monat bisher ${usd(costMonth)} (geschätzt)`)}
+        </div>`;
+
+      // ---- 7. Technik (eingeklappt)
+      const runs = S(W, "runs"), runMs = runs ? Math.round(S(W, "run_ms") / runs) : 0;
+      const dayRows = days.slice().reverse().map(d => { const l = rows.filter(x => berlin(Date.parse(x.hour)) === d);
+        return `<tr><td>${dd(d)}</td><td>${num(S(l, "db"))}</td><td>${S(l, "db429") || ""}</td><td>${num(S(l, "motis"))}</td><td>${num(S(l, "vbb"))}</td><td>${S(l, "ai") || ""}</td><td>${S(l, "err_api", "err_db", "err_motis", "err_vbb") || ""}</td><td>${Math.max(0, ...l.map(x => x.trips_max || 0))}</td></tr>`; }).join("");
+      const tech = `<details><summary>Technik und Datenquellen</summary>
+        <div class="kpis" style="margin-top:10px">
+          ${kpi("DB-Abrufe, 24 Std.", num(S(D1, "db")), `Spitze ${peak} je Minute · ${S(D1, "db429")}× „zu viele Anfragen“ (429)`)}
+          ${kpi("Transitous / VBB, 24 Std.", `${num(S(D1, "motis"))} · ${num(S(D1, "vbb"))}`, "Verbindungssuche, Busse und Ausland")}
+          ${kpi("Fehler je Quelle, 7 Tage", `${S(W, "err_db")} · ${S(W, "err_motis")} · ${S(W, "err_vbb")}`, `DB · Transitous · VBB – dazu ${S(W, "err_api")} Serverfehler`)}
+          ${kpi("Prüflauf", runMs ? `${(runMs / 1000).toFixed(1).replace(".", ",")} s` : "–", `Ø Dauer eines Laufs · höchstens ${Math.max(0, ...W.map(x => x.trips_max || 0))} Fahrten gleichzeitig`)}
+        </div>
+        <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>Transitous</th><th>VBB</th><th>KI</th><th>Fehler</th><th>Fahrten max.</th></tr>${dayRows}</table></div>
+        <h3 class="sec-h">Gebremste Versuche (24 Std.)</h3><p class="sec-sub">Schutz gegen Durchprobieren: zu viele Versuche von einem Anschluss werden kurz gesperrt.</p>
+        <div class="card flat wrap"><table><tr><th>Was</th><th>Versuche</th><th>Seit</th></tr>
+          ${(o.guard || []).map(g => `<tr><td>${esc(String(g.key).startsWith("join-ip") ? "Gerät verbinden: Code von einem Anschluss" : g.key === "join-all" ? "Gerät verbinden: alle zusammen" : String(g.key).startsWith("reg-ip") ? "Neue Geräte von einem Anschluss" : g.key)}</td><td>${g.n}</td><td>${hh(g.t)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nichts Auffälliges</td></tr>`}</table></div>
+      </details>`;
+
+      $m.innerHTML = `<h1>Betrieb</h1><p class="muted small">Stand ${hh(new Date().toISOString())} · nur Summen, keine Angaben zu einzelnen Personen, Strecken oder Orten. Neue Zähler (Nutzen, Import, Quellen) laufen seit 25.11.2026.</p>
+        ${lights}${users}${benefit}${imp}${tech}
+        <button class="btn quiet" id="out" style="margin-top:18px">Schlüssel auf diesem Gerät vergessen</button>`;
       document.getElementById("out").onclick = () => { localStorage.removeItem("rb_admin"); login(); };
     }
     load();

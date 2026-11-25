@@ -1,4 +1,4 @@
-import { flush } from "./stats.js";
+import { flush, count } from "./stats.js";
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
 import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
 import { findJourney } from "./openboards.js";
@@ -360,6 +360,18 @@ export async function bindLate(env, trip, now, cache) {
 }
 
 // Mehrere Meldungen einer Fahrt aus demselben Durchlauf → eine Mitteilung (die wichtigste oben, der Rest darunter)
+// Art einer Mitteilung (für die Statistik)
+export function pushKind(m) {
+  const t = String(m.title || "");
+  if (/^❌/.test(t)) return /fällt aus/.test(t) ? "ausfall" : "verpasst";
+  if (/^⚠️/.test(t)) return "gefaehrdet";
+  if (/^(✅|↩️)/.test(t)) return "entwarnung";
+  if (/^🔀/.test(t)) return "gleis";
+  if (/^🚆/.test(t)) return "verspaetung";
+  if (/^🎫/.test(t)) return "zugbindung";
+  if (/^Gleich /.test(t)) return "aussteigen";
+  return "sonst";
+}
 export function bundle(msgs) {
   if (msgs.length === 1) return msgs[0];
   const list = [...msgs].sort((x, y) => (y.urgent ? 1 : 0) - (x.urgent ? 1 : 0)), top = list[0];
@@ -384,9 +396,10 @@ export async function runMonitor(env, now = Date.now()) {
     const { msgs } = await assess(env, t, now, cache);
     if (t._dirty || t._legsDirty || !t.active || JSON.stringify(t.state) !== before) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
+    for (const m of msgs) { count(`p_${pushKind(m)}`); if (m.lead != null && m.lead >= 0) { count("lead_sum", m.lead); count("lead_n"); } }
     if (msgs.length) out.set(acc, [...(out.get(acc) || []), { ...bundle(msgs), url: `/?trip=${encodeURIComponent(t.id)}` }]);
   }
-  for (const m of rMsgs) { const { acc, ...msg } = m; out.set(acc, [...(out.get(acc) || []), msg]); }
+  for (const m of rMsgs) { const { acc, ...msg } = m; count("p_regel"); out.set(acc, [...(out.get(acc) || []), msg]); }
   let sent = 0;
   if (out.size) {
     const devs = await db.devicesOf(env, [...out.keys()], "id,push,account_id");
@@ -400,6 +413,8 @@ export async function runMonitor(env, now = Date.now()) {
       }
     }
   }
+  if (sent) count("p_sent", sent);
+  count("run_ms", Date.now() - now);
   await flush(env, { checks: checks.length, trips: trips.length }).catch(() => {});
   if (new Date(now).getUTCMinutes() === 7) await db.cleanup(env).catch(() => {});
   return { trips: trips.length, checks: checks.length, requests: cache.size, msgs: [...out.values()].flat().length, sent };

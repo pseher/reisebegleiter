@@ -28,7 +28,7 @@ async function post(env, kind, body) {
     if (r.status === 429) count("db429");
     if (r.status === 429 && attempt < 3) { count("db"); await sleep(1000 * (attempt + 1)); continue; }   // zu viele Anfragen: kurz warten, erneut
     if (r.status === 429) throw new BoardError("Die DB-Schnittstelle ist gerade ausgelastet. Bitte in einer Minute noch einmal versuchen.");
-    if (!r.ok) throw new BoardError(`OpenBoards HTTP ${r.status}`);
+    if (!r.ok) { count("err_db"); throw new BoardError(`OpenBoards HTTP ${r.status}`); }
     return r.json();
   }
 }

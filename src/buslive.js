@@ -46,7 +46,7 @@ async function vbbOne(env, s, label, kind, cache) {
   }
   const plan = Date.parse(s.plan), when = new Date(plan - 5 * MIN).toISOString();
   count("vbb"); const r = await fetch(`${base}/stops/${encodeURIComponent(stopId)}/${kind === "dep" ? "departures" : "arrivals"}?when=${encodeURIComponent(when)}&duration=20&results=60`, { headers: h }).catch(() => null);
-  if (!r?.ok) return null;
+  if (!r?.ok) { count("err_vbb"); return null; }
   const d = await r.json().catch(() => ({}));
   const list = d.departures || d.arrivals || (Array.isArray(d) ? d : []);
   const ln = lineOf(label);

@@ -19,7 +19,7 @@ async function motis(env, params) {
   for (const v of ["v6", "v5", "v4"]) {
     count("motis"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } });
     if (r.status === 404) continue;
-    if (!r.ok) throw new Error(`Verbindungssuche: HTTP ${r.status}`);
+    if (!r.ok) { count("err_motis"); throw new Error(`Verbindungssuche: HTTP ${r.status}`); }
     return r.json();
   }
   throw new Error("Verbindungssuche nicht erreichbar");

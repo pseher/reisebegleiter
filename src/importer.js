@@ -51,7 +51,8 @@ async function ask(env, model, content) {
       tools: [TOOL], tool_choice: { type: "tool", name: "reise" }, messages: [{ role: "user", content }] }),
   });
   if (!r.ok) throw new Error(`KI: HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 200)}`);
-  const j = await r.json();
+  const j = await r.json(), strong = model === MODEL_STRONG(env) ? "strong" : "fast";
+  count(`tok_in_${strong}`, j.usage?.input_tokens || 0); count(`tok_out_${strong}`, j.usage?.output_tokens || 0);
   return j.content?.find(c => c.type === "tool_use")?.input || { trips: [] };
 }
 
@@ -149,6 +150,7 @@ export async function importTrip(env, { text = "", files = [] }) {
     let fail = null;
     data = await ask(env, MODEL(env), content).catch(e => { fail = e; console.log("Import (schnell):", e.message); return { trips: [] }; });
     if (!data.trips?.some(t => t.legs?.length)) {
+      count("imp_strong");
       const d2 = await ask(env, MODEL_STRONG(env), content).catch(e => { console.log("Import (stark):", e.message); return null; });
       if (d2) data = d2;
       else if (fail) throw userErr("Das Einlesen klappt gerade nicht. Bitte gleich noch einmal versuchen – oder die Verbindung über „Von / Nach“ suchen.");
@@ -165,6 +167,7 @@ export async function importTrip(env, { text = "", files = [] }) {
   }
   const note = [skipped.length ? `Nicht übernommen: ${skipped.join(", ")} (Bahnhof oder Zeit nicht erkannt).` : "",
     trips.some(t => t.estimated) ? "Ankunftszeiten mit ≈ sind geschätzt und werden vor der Fahrt mit den DB-Daten ersetzt." : ""].filter(Boolean).join(" ");
+  count(trips.length ? "imp_ok" : "imp_none");
   return { trips, ticket: ["spar", "flex", "dticket", "bc100"].includes(data.ticket) ? data.ticket : null, note };
 }
 
