@@ -150,3 +150,20 @@ test("Wann muss ich los: Wegzeit vom Standort zum Start (zu Fuß/Auto), nur für
   assert.ok(w.min > 5 && w.min < 40 && c.min < w.min, JSON.stringify([w, c]));
   assert.equal((await call(`/api/trips/${t.id}/access`, B, "POST", { lat: 52.52, lon: 13.35, mode: "WALK" })).s, 404);
 });
+
+test("Regelmäßige Fahrt: Zeitraum aussetzen und ganze Serie ersetzen", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.12", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j;
+  const base = { days: [1, 2, 3, 4, 5], from: { eva: "8011160", name: "Berlin Hbf" }, to: { eva: "8010205", name: "Leipzig Hbf" }, winFrom: "07:00", winTo: "08:00" };
+  const r = (await call("/api/routines", A, "POST", { ...base, name: "Arbeit" })).j;
+  const d = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  const s1 = (await call(`/api/routines/${r.id}/skip`, A, "POST", { date: d(3), to: d(9) })).j;
+  assert.equal(s1.skip.length, 7);
+  const s2 = (await call(`/api/routines/${r.id}/skip`, A, "POST", { date: d(3), to: d(9), on: false })).j;
+  assert.equal(s2.skip.length, 0);
+  assert.equal((await call("/api/routines", A, "POST", { ...base, name: "Arbeit 2" })).s, 409);   // doppelt
+  const n = (await call("/api/routines", A, "POST", { ...base, winFrom: "07:00", winTo: "08:30", name: "Arbeit neu", replace: r.id })).j;
+  const all = (await call("/api/routines", A)).j;
+  assert.deepEqual(all.map(x => x.name), ["Arbeit neu"]); assert.deepEqual(n.win, ["07:00", "08:30"]);
+});

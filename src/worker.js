@@ -527,7 +527,11 @@ async function api(req, env, url) {
     // aus einer angelegten Reise: gleiche Strecke, gleiche Abfahrtszeit, gewählte Tage
     const b = await req.json().catch(() => ({}));
     const days = cleanDays(b.days); if (!days.length) return fail(400, "Bitte mindestens einen Tag wählen.");
-    const mineR = await db.routinesOf(env, dev.account_id);
+    // „Alle Fahrten ändern“: die neue Fassung ersetzt die alte (alte zählt nicht als doppelt und wird danach entfernt)
+    const allR = await db.routinesOf(env, dev.account_id), oldR = b.replace ? allR.find(r => r.id === String(b.replace)) : null;
+    const mineR = oldR ? allR.filter(r => r.id !== oldR.id) : allR;
+    const retire = async () => { if (!oldR) return; await db.remove(env, "rb_routines", oldR.id);
+      for (const t of await db.tripsOf(env, dev.account_id)) if (t.state?.routine === oldR.id && Date.parse(t.legs[0].from.plan) > Date.now()) await db.remove(env, "rb_trips", t.id); };
     if (mineR.length >= 12) return fail(400, "Höchstens 12 regelmäßige Fahrten.");
     // Gleiche Strecke zur gleichen Zeit gibt es schon? Dann keine zweite (sonst doppelte Mitteilungen)
     const pn = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
@@ -546,6 +550,7 @@ async function api(req, env, url) {
       const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
         tpl: [{ jid: "", label: "", from, to }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made });
       if (t0) await db.update(env, "rb_trips", t0.id, { state: { ...(t0.state || {}), routine: r.id, rname: r.name } });
+      await retire();
       return json(routineView(r), 201);
     }
     const t = await ownTrip(env, dev, String(b.tripId || ""));
@@ -555,6 +560,7 @@ async function api(req, env, url) {
     const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${legs[legs.length - 1].to.name}`, days, dep: wallTime(dep0),
       tpl: legs.map(({ jid, tid, ...l }) => ({ ...l, jid: "" })), ticket: t.ticket, min_t: +legs[0].minT || 0, holidays: b.holidays !== false, paused: false, skip: [], made: [berlinDate(dep0)] });
     await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
+    await retire();
     return json(routineView(r), 201);
   }
   const mr = /^\/api\/routines\/([0-9a-f-]{36})(\/skip)?$/.exec(p);
@@ -568,13 +574,16 @@ async function api(req, env, url) {
       const real = new Date(date + "T12:00:00Z"), today0 = berlinDate(Date.now());
       if (isNaN(real) || real.toISOString().slice(0, 10) !== date) return fail(400, "Ungültiges Datum");
       if (b.on !== false && (date < today0 || Date.parse(date) - Date.parse(today0) > 366 * 864e5)) return fail(400, "Das Datum liegt nicht in der Zukunft.");
-      const skip = b.on === false ? (r.skip || []).filter(d => d !== date) : [...new Set([...(r.skip || []), date])].filter(d => d >= berlinDate(Date.now())).slice(-30);
+      // Zeitraum (z. B. Urlaub, Semesterferien): alle Tage von date bis to, höchstens 120 Tage
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(b.to) && b.to >= date ? b.to : date, range = [];
+      for (let d = date, i = 0; d <= to && i < 120; i++) { range.push(d); d = new Date(Date.parse(d + "T12:00:00Z") + 864e5).toISOString().slice(0, 10); }
+      const skip = b.on === false ? (r.skip || []).filter(d => !range.includes(d)) : [...new Set([...(r.skip || []), ...range])].filter(d => d >= berlinDate(Date.now())).sort().slice(0, 200);
       // wieder fahren: Tag als „noch nicht angelegt“ markieren, damit die Fahrt neu erscheint (falls es sie nicht mehr gibt)
       let made = r.made || [];
-      if (b.on === false && !(await db.tripsOf(env, dev.account_id)).some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === date)) made = made.filter(d => d !== date);
+      if (b.on === false) { const tr = await db.tripsOf(env, dev.account_id); made = made.filter(d => !range.includes(d) || tr.some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === d)); }
       await db.update(env, "rb_routines", r.id, { skip, made });
       if (b.on === false) { const { makeDue } = await import("./routines.js"); await makeDue(env, Date.now()).catch(() => {}); }
-      if (b.on !== false) for (const t of await db.tripsOf(env, dev.account_id)) if (t.state?.routine === r.id && berlinDate(Date.parse(t.legs[0].from.plan)) === date) await db.remove(env, "rb_trips", t.id);
+      if (b.on !== false) for (const t of await db.tripsOf(env, dev.account_id)) if (t.state?.routine === r.id && range.includes(berlinDate(Date.parse(t.legs[0].from.plan)))) await db.remove(env, "rb_trips", t.id);
       return json(routineView({ ...r, skip }));
     }
     if (method === "PATCH") {

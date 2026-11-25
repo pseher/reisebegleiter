@@ -164,9 +164,12 @@ export async function makeDue(env, now = Date.now(), watch = null) {
 }
 
 // Anzeige in der App
+const pl = s => ({ name: s.name, eva: s.eva || "", ...(s.lat != null ? { lat: s.lat, lon: s.lon } : {}), ...(s.stopId ? { stopId: s.stopId } : {}) });
 export function routineView(r, now = Date.now()) {
   const n = nextRun(r, now), today = berlinDate(now);
   return { id: r.id, name: r.name, days: r.days, dep: r.dep, win: r.win_to ? [r.win_from, r.win_to] : null, holidays: r.holidays !== false, paused: !!r.paused, ticket: r.ticket,
     from: r.tpl[0].from.name, to: r.tpl[r.tpl.length - 1].to.name, label: r.win_to ? `alle Fahrten zwischen ${r.win_from} und ${r.win_to}` : r.tpl.map(l => l.label).join(" → "),
-    next: n, today, todayOff: offReason({ ...r, paused: false }, today), skip: (r.skip || []).filter(d => d >= today) };
+    next: n, today, todayOff: offReason({ ...r, paused: false }, today), skip: (r.skip || []).filter(d => d >= today),
+    // für „Alle Fahrten ändern“ (Start/Ziel vorbelegen) und die Umstiege in der Übersicht
+    fromPl: pl(r.tpl[0].from), toPl: pl(r.tpl[r.tpl.length - 1].to), via: r.win_to ? [] : r.tpl.slice(1).map(l => ({ at: l.from.name, label: l.label, platform: l.from.platform || "" })), minT: r.min_t || 0 };
 }
