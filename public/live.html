@@ -43,7 +43,7 @@ let timer = null;
 async function load() {
   let d;
   try { const r = await fetch(`/api/live/${encodeURIComponent(id)}`, { cache: "no-store" }); d = await r.json().catch(() => ({}));
-    if (!r.ok) { $.innerHTML = `<section class="card"><h1>${r.status === 410 ? "Diese Fahrt ist vorbei" : "Link nicht gefunden"}</h1><p class="muted">${esc(d.error || "")}</p><a class="btn sec" href="/">Zu Umstiegsheld</a></section>`; clearInterval(timer); return; } }
+    if (!r.ok) { $.innerHTML = `<section class="card"><h1>${r.status === 410 ? "Diese Fahrt ist vorbei" : r.status === 404 && /gelöscht/.test(d.error || "") ? "Fahrt gelöscht" : "Link nicht gefunden"}</h1><p class="muted">${esc(d.error || "")}</p><a class="btn sec" href="/">Zu Umstiegsheld</a></section>`; clearInterval(timer); return; } }
   catch { return; }   // kurz kein Netz: alten Stand stehen lassen, gleich wieder versuchen
   const L = d.legs, a = L[0], z = L[L.length - 1], dest = clean(z.arr.name), late = mins(z.arr.rt, z.arr.plan);
   const open = d.transfers.filter(t => t.status !== "DONE"), worst = open.reduce((w, t) => (["OK", "WATCH", "RISK", "LOST"].indexOf(t.status) > ["OK", "WATCH", "RISK", "LOST"].indexOf(w?.status) ? t : w), null);
@@ -53,7 +53,9 @@ async function load() {
   else if (d.status === "LOST") { k = d.missed != null ? "Zug verpasst" : "Anschluss klappt nicht"; title = "Neue Ankunft folgt"; sub = `Die Verbindung nach ${esc(dest)} wird gerade neu geplant. Diese Seite aktualisiert sich von selbst.`; }
   else {
     k = d.phase === "before" ? (planOnly ? "Geplant" : "Noch nicht losgefahren") : "Unterwegs";
-    title = `${hm(z.arr.rt)} <small>Ankunft ${esc(dest)}</small>`;
+    const arrDay = new Date(z.arr.rt).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+    const otherDay = arrDay !== new Date(a.dep.plan).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" }) || new Date(z.arr.rt).toDateString() !== new Date().toDateString();
+    title = `${hm(z.arr.rt)} <small>Ankunft ${esc(dest)}${otherDay ? ` · ${arrDay}` : ""}${z.arr.platform ? ` · Gleis ${esc(z.arr.platform)}` : ""}</small>`;
     sub = late >= 3 ? `<span class="late">ca. ${late} Min. später als geplant (${hm(z.arr.plan)})</span>` : late <= -3 ? `ca. ${-late} Min. früher` : planOnly ? "laut Fahrplan" : `<span class="ok">pünktlich</span>`;
     if (worst?.status === "RISK") sub += ` · Anschluss in ${esc(clean(worst.at))} gefährdet`;
     else if (worst?.status === "WATCH") sub += ` · Umstieg in ${esc(clean(worst.at))} knapp (${worst.gap} Min.)`;
@@ -61,7 +63,7 @@ async function load() {
   }
   const cur = d.phase === "enroute" ? d.current : -1;
   $.innerHTML = `<section class="card lv-hero s-${esc(cls)}"><p class="lv-k">${esc(k)}</p><p class="lv-big">${title}</p><p>${sub}</p>
-      ${d.changed ? `<p class="small" style="margin-top:8px">ℹ️ Die Verbindung wurde unterwegs geändert – unten steht die neue.</p>` : ""}</section>
+      ${d.changed ? `<p class="small" style="margin-top:8px">ℹ️ Die Verbindung wurde geändert – unten steht die neue.</p>` : ""}</section>
     <section class="card"><p class="lv-k" style="margin-bottom:6px">${esc(clean(a.dep.name))} → ${esc(dest)} · ${day(a.dep.plan)}</p><ul class="lv-legs">${L.map((l, i) => {
       const tr = d.transfers[i];
       return `<li class="${i === cur ? "now" : ""}"><span class="t">${time(l.dep, l.dep.cancelled)}</span><span><b>${esc(l.label)}</b> ab ${esc(clean(l.dep.name))}${l.dep.platform ? `, Gl. ${esc(l.dep.platform)}` : ""}${i === cur ? " · <b>gerade unterwegs</b>" : ""}</span>

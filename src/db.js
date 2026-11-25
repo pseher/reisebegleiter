@@ -109,6 +109,13 @@ export async function accountByRecover(env, hash) {
   return r || null;
 }
 
+// Konto, dessen früherer Code beim Verbinden ersetzt wurde
+export async function accountByOldRec(env, hash) {
+  if (mem(env)) return [...MEM.rb_accounts.values()].find(a => (a.prefs?.oldRec || []).includes(hash)) || null;
+  const [r] = await rest(env, `rb_accounts?select=id&prefs->oldRec=cs.${encodeURIComponent(JSON.stringify([hash]))}&limit=1`);
+  return r || null;
+}
+
 // Abfragezähler (stundenweise aufsummiert)
 export async function statsAdd(env, x) {
   if (mem(env)) { const o = MEM.rb_stats.get(x.hour) || { hour: x.hour, db: 0, db429: 0, vbb: 0, motis: 0, ai: 0, runs: 0, checks: 0, trips_max: 0, db_max_run: 0 };

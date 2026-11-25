@@ -458,12 +458,11 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .hint-card #installApp { width: auto; margin: 10px 0 0; }
 .rec-code { font: 700 21px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .02em; text-align: center; margin: 12px 0; padding: 10px; border-radius: 10px; background: var(--bg); white-space: nowrap; user-select: all; }
 .ok-t { color: var(--ok); }
-/* Reise ändern: feste Züge und Umstiegszeit kompakt, je eine wischbare Zeile */
+/* Fahrt ändern: Züge behalten und Umstiegszeit – kompakt, aber umbrechend (alles sichtbar, gut zu treffen) */
 .kp { margin: 0 0 10px; }
-.kp-row { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
-.kp-l { flex: 0 0 4.2em; font-size: 13px; color: var(--muted); }
-.kp-sc { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 1px 18px 1px 1px; -webkit-overflow-scrolling: touch; -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); mask-image: linear-gradient(to right, #000 88%, transparent); }
-.kp-sc::-webkit-scrollbar { display: none; }
-.kp-c { flex: 0 0 auto; font: inherit; font-size: 13.5px; line-height: 1; padding: 7px 11px; border-radius: 99px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); white-space: nowrap; cursor: pointer; }
+.kp-row { margin: 0 0 8px; }
+.kp-l { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+.kp-sc { display: flex; flex-wrap: wrap; gap: 6px; }
+.kp-c { font: inherit; font-size: 14px; line-height: 1; min-height: 36px; padding: 8px 12px; border-radius: 99px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); white-space: nowrap; cursor: pointer; }
 .kp-c[aria-pressed=true] { border-color: var(--accent); color: var(--accent); font-weight: 700; background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
 .kp-t { font-size: 13px; color: var(--muted); margin: 2px 0 0; }

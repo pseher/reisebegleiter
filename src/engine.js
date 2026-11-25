@@ -182,7 +182,7 @@ export function headline(v, trip, now = Date.now()) {
   // Die Überschrift erklärt immer die Farbe: zählt der schlimmste offene Umstieg, nicht nur der nächste
   const next = open.reduce((w, t) => (SEV[t.status] > SEV[w.status] ? t : w), first);
   const later = !!next && next !== first;   // das Problem liegt erst bei einem späteren Umstieg
-  const arrive = v.finalDelay == null ? "" : `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)}${v.finalDelay >= 3 ? ` (+${v.finalDelay})` : ""}.`;
+  const arrive = v.finalDelay == null ? "" : `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)}${v.finalDelay >= 3 ? ` (${v.finalDelay} Min. später)` : ""}.`;
   if (v.missed != null) { const l = legs[v.missed]; return { title: `${l.label} verpasst`, sub: `Ab ${cleanName(l.dep.name)}. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.` }; }
   if (phase === "done") return { title: "Angekommen", sub: `${last.arr.name} um ${hm(last.arr.rt)}.` };
   if (v.legCancel != null) { const l = legs[v.legCancel]; return { title: `${l.label} fällt aus`, sub: `Zwischen ${l.dep.name} und ${l.arr.name}. Deine Möglichkeiten stehen gleich darunter – die empfohlene ist markiert.` }; }
@@ -205,7 +205,7 @@ export function headline(v, trip, now = Date.now()) {
   const d = v.finalDelay ?? 0;
   // Vor der Abfahrt zählt zuerst, wann es losgeht: „Abfahrt 22 Min. später“ – nie „nach Plan“, wenn der erste Zug spät ist
   const f0 = legs[0].dep, depLate = phase === "before" && f0.delay >= 3 ? f0.delay : 0;
-  const title = depLate && depLate >= d ? `Abfahrt ${depLate} Min. später` : d >= 10 ? `Ca. ${d} Min. später am Ziel` : d >= 3 ? `Läuft – ca. ${d} Min. später` : d <= -3 ? `Läuft – ca. ${-d} Min. früher am Ziel` : "Alles läuft nach Plan";
+  const title = depLate && depLate >= d ? `Abfahrt ${depLate} Min. später` : d >= 10 ? `Ca. ${d} Min. später am Ziel` : d >= 3 ? (phase === "before" ? `Ankunft ca. ${d} Min. später` : `Läuft – ca. ${d} Min. später`) : d <= -3 ? (phase === "before" ? `Ankunft ca. ${-d} Min. früher` : `Läuft – ca. ${-d} Min. früher am Ziel`) : "Alles läuft nach Plan";
   const late = d >= 3 || d <= -3 ? `Ankunft ${last.arr.name} ca. ${hm(last.arr.rt)} statt ${hm(v.bookedArr)}.` : "";
   if (phase === "before") { const f = legs[0].dep; return { title, sub: `Abfahrt ${f.name} ${at(f, f.rt, legs[0])}${f.delay >= 3 ? ` statt ${hm(f.plan)}` : ""}. ${next ? `Umstieg in ${next.at} mit ${mins(next.gap)} Zeit.` : ""} ${late || (depLate ? `Am Ziel ca. ${hm(last.arr.rt)}${d >= 3 ? ` (${d} Min. später als geplant)` : " – wie geplant"}.` : "")}`.replace(/\s+/g, " ").trim() }; }
   if (next) return { title, sub: `${late} Dein Umstieg in ${next.at} klappt, ${mins(next.gap)} Zeit.`.trim() };
@@ -271,7 +271,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     const d = f.delay, last = st.start ?? 0;
     if ((d >= 10 && Math.abs(d - last) >= 10) || (last >= 10 && d < 5)) {
       msgs.push(d >= 10
-        ? { title: `🚆 ${v.legs[0].label} startet später`, body: `Abfahrt ${f.name} ca. ${hm(f.rt)} statt ${hm(f.plan)} (+${d})${f.platform ? `, ${platWord(v.legs[0], f.platform)}` : ""}.`, tag: tag("start") }
+        ? { title: `🚆 ${v.legs[0].label} startet später`, body: `Abfahrt ${f.name} ca. ${hm(f.rt)} statt ${hm(f.plan)} (${d} Min. später)${f.platform ? `, ${platWord(v.legs[0], f.platform)}` : ""}.`, tag: tag("start") }
         : { title: `🚆 ${v.legs[0].label} wieder fast pünktlich`, body: `Abfahrt ${f.name} ca. ${hm(f.rt)}.`, tag: tag("start") });
       st.start = d;
     }
@@ -295,7 +295,7 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
   if (v.zbLifted && !st.zb && lostK < 0 && v.legCancel == null) {
     st.zb = true;
     const late = v.transfers.find(t => t.status !== "DONE" && t.gap < 0), d = v.finalDelay ?? 0;
-    const why = late ? `Dein Anschluss in ${late.at} klappt voraussichtlich nicht.` : d >= 20 ? `Du kommst voraussichtlich ${d} Min. später an.` : "";
+    const why = late ? `Dein Anschluss in ${late.at} klappt voraussichtlich nicht.` : d >= 20 ? `Du kommst ca. ${d} Min. später an.` : "";
     if (why) msgs.push({ title: "🎫 Zugbindung voraussichtlich aufgehoben", body: `${why} Nach den DB-Regeln darfst du dann auch einen anderen Zug nehmen. Angaben ohne Gewähr.`, tag: tag("zb") });
   }
   return { state: st, msgs: msgs.map(m => ({ ...m, body: m.body.replace(/\.\./g, ".") })) };

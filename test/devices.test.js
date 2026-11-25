@@ -281,7 +281,12 @@ test("Verbinden: Wiederherstellungscodes gelten danach nicht mehr", async () => 
   assert.equal(j.data.recReset, true);
   assert.equal((await call("/api/recovery", { auth: A })).data.has, false);
   const N = (await call("/api/register", { method: "POST", body: {} })).data;
-  assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: cA } })).status, 400);
+  const old = await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: cA } });
+  assert.equal(old.status, 400);
+  assert.match(old.data.error, /ersetzt/);
+  assert.equal((await call("/api/recovery", { auth: A })).data.lost, true);
+  await call("/api/recovery", { auth: A, method: "POST" });
+  assert.equal((await call("/api/recovery", { auth: A })).data.lost, false);
 });
 
 test("Reise nach London: Zug mit Ziel im Ausland (ohne DB-Nummer) und U-Bahn ohne Kennung werden angenommen", async () => {

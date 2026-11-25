@@ -403,7 +403,18 @@ export async function runMonitor(env, now = Date.now()) {
     if (!t.active) { await saveTrip(env, t).catch(() => {}); continue; }
     const { msgs } = await assess(env, t, now, cache);
     if (fMsgs.has(t.id)) msgs.unshift(fMsgs.get(t.id));
-    if (t.state?.follow?.trip) for (const m of msgs) if (!m.tag?.endsWith("-follow")) m.title += " · mitverfolgt";   // klar: nicht die eigene Fahrt
+    // Mitverfolgende (z. B. wer abholt): nur Ausfälle, verpasste/gefährdete Anschlüsse, Entwarnung und eine geänderte Ankunft – keine Umsteige-Hinweise
+    if (t.state?.follow?.trip) {
+      const keep = msgs.filter(m => m.tag?.endsWith("-follow") || ["ausfall", "verpasst", "gefaehrdet", "entwarnung"].includes(pushKind(m)));
+      for (const m of keep) if (!m.tag?.endsWith("-follow")) m.title += " · mitverfolgt";
+      const last = t.legs[t.legs.length - 1], arrRt = Date.parse(t.obs?.[t.legs.length - 1]?.arr?.rt || "") || Date.parse(last.to.plan);
+      const told = t.state.fArr ?? Date.parse(last.to.plan);
+      if (Number.isFinite(arrRt) && Math.abs(arrRt - told) >= 5 * MIN && arrRt > now) {
+        keep.push({ title: `🕒 Neue Ankunft in ${last.to.name}: ca. ${hmB(new Date(arrRt).toISOString())}`, body: `Bisher ${hmB(new Date(told).toISOString())}${last.to.platform ? `, Gleis ${last.to.platform}` : ""}. Ich sage Bescheid, wenn sich wieder etwas ändert.`, tag: `${t.id}-arr` });
+        t.state = { ...t.state, fArr: arrRt }; t._dirty = true;
+      }
+      msgs.length = 0; msgs.push(...keep);
+    }
     // Nur speichern, wenn sich etwas geändert hat oder die Fahrt gerade geprüft wurde – nicht jede Minute alle (Abfrage-Limit je Lauf)
     if (t._dirty || t._legsDirty || !t.active || noAt(t.state) !== before || checked.has(t.id)) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
@@ -439,7 +450,7 @@ async function followSync(env, f, trips) {
   if (legSig(src.legs) !== legSig(f.legs)) {
     const z = src.legs[src.legs.length - 1], from = src.legs.findIndex(l => Date.parse(l.to.plan) > Date.now());
     f.legs = src.legs.map(l => ({ ...l, minT: f.legs[0]?.minT ?? l.minT })); f._legsDirty = true; f.ends_at = src.ends_at;
-    f.state = { follow: f.state.follow, rem: {}, start: null, pl: {}, zb: false, rname: f.state.rname || null };
+    f.state = { follow: f.state.follow, rem: {}, start: null, pl: {}, zb: false, rname: f.state.rname || null, fArr: Date.parse(z.to.plan) };
     const next = src.legs.slice(Math.max(0, from)).map(l => `${l.label} ab ${l.from.name} ${hmB(l.from.plan)}`).join(", dann ");
     f.obs = JSON.parse(JSON.stringify(src.obs || [])); if (src.state?.at) f.state.at = src.state.at;
     return { title: "🔄 Verbindung geändert", body: `Die mitverfolgte Fahrt nach ${z.to.name} wurde geändert: jetzt ${next}. Ankunft ${hmB(z.to.plan)} (Fahrplan).`, tag: `${f.id}-follow` };

@@ -104,6 +104,14 @@ function tidyLegs(legs) {
     if (l.jid == null) l.jid = ""; l.jid = String(l.jid); if (l.label != null) l.label = String(l.label);
     const bad = s => !/^\d{6,9}$/.test(String(s?.eva || ""));
     if (l.jid && (bad(l.from) || (bad(l.to) && !l.to?.abroad))) l.jid = ""; }
+  // Derselbe Zug zweimal hintereinander (z. B. an der nächsten Station „wieder eingestiegen“) = sitzen bleiben, kein Umstieg
+  const num = x => (/^[A-Za-zÄÖÜ]{1,5}\s?\d{2,6}$/.test(String(x || "").trim()) ? String(x).replace(/\s/g, "").toUpperCase() : "");
+  for (let i = legs.length - 2; i >= 0; i--) {
+    const a = legs[i], b = legs[i + 1]; if (!a?.to || !b?.from) continue;
+    const gap = Date.parse(b.from.plan) - Date.parse(a.to.plan);
+    const sameTrip = (a.jid && a.jid === b.jid) || (a.tid && a.tid === b.tid) || (num(a.label) && num(a.label) === num(b.label) && gap >= -MIN && gap <= 20 * MIN);
+    if (sameTrip) legs.splice(i, 2, { ...a, to: b.to });
+  }
   return legs;
 }
 function checkLegs(legs) {
@@ -249,12 +257,13 @@ async function api(req, env, url) {
     const sh = await db.get(env, "rb_shares", ml[1]).catch(() => null);
     if (!sh?.trip_id) return fail(404, "Diesen Link gibt es nicht (mehr).");
     const t = await db.get(env, "rb_trips", sh.trip_id).catch(() => null);
-    if (!t || Date.parse(t.ends_at) < Date.now() - 6 * 3600e3) return fail(410, "Diese Fahrt ist vorbei.");
+    if (!t) return fail(404, "Die Fahrt wurde gelöscht – es gibt dazu nichts mehr zu sehen.");
+    if (Date.parse(t.ends_at) < Date.now() - 6 * 3600e3) return fail(410, "Der Live-Link zeigt nur bis ein paar Stunden nach der Ankunft etwas an.");
     const v = view(t, Date.now()), L = v.legs, st = t.state || {};
     count("lv_open");
     return json({ phase: v.phase, status: v.status, finalDelay: v.finalDelay, current: v.current, missed: v.missed, ended: !t.active,
       changed: !!st.origArr, planArr: v.planArr, checkedAt: v.checkedAt,
-      legs: L.map(l => ({ label: l.label, mode: l.mode, live: l.live, dep: { name: l.dep.name, plan: l.dep.plan, rt: l.dep.rt, platform: l.dep.platform, cancelled: l.dep.cancelled },
+      legs: L.map(l => ({ label: l.label, mode: l.mode, live: !!(l.dep.live || l.arr.live), dep: { name: l.dep.name, plan: l.dep.plan, rt: l.dep.rt, platform: l.dep.platform, cancelled: l.dep.cancelled },
         arr: { name: l.arr.name, plan: l.arr.plan, rt: l.arr.rt, platform: l.arr.platform, cancelled: l.arr.cancelled } })),
       transfers: v.transfers.map(x => ({ at: x.at, gap: x.gap, status: x.status })) });
   }
@@ -495,8 +504,8 @@ async function api(req, env, url) {
     if (!t) return fail(404, "Reise nicht gefunden");
     const b = await req.json().catch(() => ({})), lat = +b.lat, lon = +b.lon, mode = b.mode === "CAR" ? "CAR" : "WALK";
     if (!(lat > 35 && lat < 72 && lon > -12 && lon < 35)) return fail(400, "Standort unbekannt");
-    const to = withCoords(t.legs[0].from);
-    if (to.lat == null) return fail(400, "Für den Start kenne ich keine Lage.");
+    const to = withCoords(b.to === "arr" ? t.legs[t.legs.length - 1].to : t.legs[0].from);   // „arr“: Weg zum Ziel (Abholen)
+    if (to.lat == null) return fail(400, b.to === "arr" ? "Für das Ziel kenne ich keine Lage." : "Für den Start kenne ich keine Lage.");
     return json({ ...(await accessTime(env, { lat, lon }, { lat: +to.lat, lon: +to.lon }, mode)), mode, to: to.name });
   }
 
@@ -793,18 +802,19 @@ async function api(req, env, url) {
     const places = [...(theirs?.prefs?.places || []), ...(mine?.prefs?.places || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id || x.name === f.name) === i).slice(0, 20);
     // Wiederherstellungscodes werden nicht übernommen: nach dem Verbinden gilt keiner mehr – neuen erstellen (Hinweis in der App)
     const hadRec = !!(theirs?.recover_hash || mine?.recover_hash);
-    await db.update(env, "rb_accounts", src.account_id, { favs, prefs: { ...(theirs?.prefs || {}), places, recAt: null }, recover_hash: null });
+    const oldRec = [theirs?.recover_hash, mine?.recover_hash, ...(theirs?.prefs?.oldRec || []), ...(mine?.prefs?.oldRec || [])].filter(Boolean).slice(0, 6);   // alte Codes erkennen → klare Meldung
+    await db.update(env, "rb_accounts", src.account_id, { favs, prefs: { ...(theirs?.prefs || {}), places, recAt: null, recLost: hadRec || !!theirs?.prefs?.recLost, oldRec }, recover_hash: null });
     await db.mergeAccount(env, dev.account_id, src.account_id);
     await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
     await db.update(env, "rb_devices", dev.id, { link_tries: null });
     return json({ ok: true, recReset: hadRec });
   }
   // Wiederherstellungscode: einmal anzeigen, nur der Prüfwert wird gespeichert; ein neuer Code macht den alten ungültig
-  if (p === "/api/recovery" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json({ has: !!a?.recover_hash, at: a?.prefs?.recAt || null }); }
+  if (p === "/api/recovery" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json({ has: !!a?.recover_hash, at: a?.prefs?.recAt || null, lost: !a?.recover_hash && !!a?.prefs?.recLost }); }
   if (p === "/api/recovery" && method === "POST") {
     const ABC = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", raw = [...crypto.getRandomValues(new Uint8Array(16))].map(x => ABC[x % ABC.length]).join("");
     const a = await db.get(env, "rb_accounts", dev.account_id);
-    await db.update(env, "rb_accounts", dev.account_id, { recover_hash: await sha(`rb-rec|${raw}`), prefs: { ...(a?.prefs || {}), recAt: new Date().toISOString() } });
+    await db.update(env, "rb_accounts", dev.account_id, { recover_hash: await sha(`rb-rec|${raw}`), prefs: { ...(a?.prefs || {}), recAt: new Date().toISOString(), recLost: false } });
     count("rec_new");
     return json({ code: raw.match(/.{4}/g).join("-") });
   }
@@ -813,7 +823,10 @@ async function api(req, env, url) {
     const ip = (await sha(`rb-ip|${req.headers.get("CF-Connecting-IP") || "?"}`)).slice(0, 12);
     if (!(await db.guard(env, `rec-ip:${ip}`, 900, 10)) || !(await db.guard(env, "rec-all", 900, 200))) return fail(429, "Gerade zu viele Versuche. Bitte in einigen Minuten noch einmal.");
     const acc = raw.length === 16 ? await db.accountByRecover(env, await sha(`rb-rec|${raw}`)) : null;
-    if (!acc) { count("rec_fail"); return fail(400, "Der Code stimmt nicht. Bitte genau so eingeben, wie er gespeichert ist (Groß-/Kleinschreibung egal)."); }
+    if (!acc) { count("rec_fail");
+      const replaced = raw.length === 16 && await db.accountByOldRec(env, await sha(`rb-rec|${raw}`)).catch(() => null);
+      return fail(400, replaced ? "Dieser Code wurde ersetzt, als Geräte verbunden wurden. Auf einem verbundenen Gerät unter Einstellungen → „Konto sichern“ einen neuen Code erstellen."
+        : "Der Code stimmt nicht. Bitte genau so eingeben, wie er gespeichert ist (Groß-/Kleinschreibung egal)."); }
     if (acc.id === dev.account_id) return fail(400, "Dieses Gerät gehört schon zu dem Konto.");
     // Was auf diesem Gerät schon angelegt ist, kommt mit ins zurückgeholte Konto
     const mine = await db.get(env, "rb_accounts", dev.account_id);
