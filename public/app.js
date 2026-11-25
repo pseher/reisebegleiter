@@ -1964,11 +1964,14 @@ const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l
   && (/RAIL|HIGHSPEED|LONG_DISTANCE|NIGHT/.test(l.mode || "") || /^(ICE|IC|EC|ECE|ICD|IRE|RE|RB|MEX|RJX?|NJ|EN|D|TGV|EST|FEX)\s?\d/i.test(String(l.label || "")));
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
 function bahnUrl(t) {
-  const a = t.legs[0].dep, z = t.legs[t.legs.length - 1].arr, nm = s => cleanStop(s.name);
-  const loc = s => (/^\d{6,9}$/.test(String(s.eva || "")) ? `A=1@O=${nm(s)}@L=${s.eva}@` : "");
+  // Format wie die Links, die bahn.de selbst erzeugt: soid/zoid = „A=1@O=Name@X=Länge·10⁶@Y=Breite·10⁶@U=80@L=Bahnhofsnummer@“
+  const L = t.legs, first = L.find(isTrainLeg) || L[0], last = [...L].reverse().find(isTrainLeg) || L[L.length - 1];
+  const a = first.dep, z = last.arr, nm = s => String(s.name || "").replace(/\s*\(Berlin\)$/, "");
+  const loc = s => { const ok = /^\d{6,9}$/.test(String(s.eva || ""));
+    return `A=1@O=${nm(s)}@${s.lat != null ? `X=${Math.round(s.lon * 1e6)}@Y=${Math.round(s.lat * 1e6)}@` : ""}${ok ? `U=80@L=${s.eva}@` : ""}`; };
   const hd = new Date(a.plan).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
-  const q = new URLSearchParams({ sts: "true", so: nm(a), zo: nm(z), ...(loc(a) ? { soid: loc(a) } : {}), ...(loc(z) ? { zoid: loc(z) } : {}), kl: "2", hd, hza: "D", ar: "false", s: "true", d: "false", fm: "false", bp: "false" });
-  return `https://www.bahn.de/buchung/fahrplan/suche#${q.toString()}`;
+  const q = new URLSearchParams({ sts: "true", so: nm(a), zo: nm(z), kl: "2", r: "13:16:KLASSENLOS:1", soid: loc(a), zoid: loc(z), sot: "ST", zot: "ST", hd, hza: "D" });
+  return `https://www.bahn.de/buchung/fahrplan/suche#${q.toString().replace(/\+/g, "%20")}`;
 }
 // Kurz-Nachricht zum aktuellen Stand – passt zu jeder Lage (vor der Fahrt, unterwegs, Plan B, angekommen)
 function statusText(t) {
