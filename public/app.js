@@ -876,8 +876,8 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
-  const justMade = /^(Reise angelegt|\d+ Reisen angelegt|Reise geändert|Alles klar)/.test(flash || ""), hint = hintCard();   // direkt nach dem Anlegen: Hinweis oben, sonst unten
-  $app.innerHTML = `${flashBox()}${justMade ? hint : ""}
+  const hint = hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster)
+  $app.innerHTML = `${flashBox()}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
       <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn buchen"><i>🎫</i>Ticket</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : hm(t.legs[t.legs.length - 1].arr.rt)}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
@@ -904,7 +904,7 @@ function renderTrip(t, many) {
       <div class="chips">${[["spar", "Sparpreis"], ["flex", "Flexpreis"], ["dticket", "Deutschlandticket"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-tk="${k}" aria-pressed="${t.ticket === k}">${l}</button>`).join("")}</div>
       ${routineForm(t)}
       <div class="danger-zone"><button class="btn danger" data-del="${t.id}">Fahrt löschen</button><p class="small muted" style="margin:4px 0 0">Wird nicht mehr überwacht und verschwindet aus der Liste.</p></div></section>` : ""}
-    ${justMade ? "" : hint}
+    ${hint}
     <button class="btn sec" data-go="add">Weitere Reise hinzufügen</button>`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
@@ -1089,19 +1089,23 @@ function unblockHow() {
   if (BROWSER === "Firefox") return "Auf das Schloss links in der Adresszeile tippen → „Berechtigungen“ → „Benachrichtigungen“ → erlauben.";
   return "Auf das Schloss bzw. Regler-Symbol links in der Adresszeile tippen → „Berechtigungen“ bzw. „Website-Einstellungen“ → „Benachrichtigungen“ → „Zulassen“. Danach die Seite neu laden.";
 }
+// Hinweise zu Mitteilungen erst, wenn es etwas zu überwachen gibt (Fahrt, regelmäßige Fahrt, übernommener Link)
+const hasSomething = () => trips.length > 0 || ROUTINES.length > 0;
+// Andere Browser als ordentliches Raster (Android: öffnet Umstiegsheld direkt dort)
+const browserGrid = () => (isAndroid ? `<div class="br-grid">${openerBtns("btn sec small-btn")}</div>` : `<p class="small" style="margin:6px 0 0">Zum Beispiel in Firefox, Edge oder Chrome.</p>`);
 function hintCard() {
-  const x = k => `<button class="link small hint-later" data-later-hint="${k}">Später</button>`, more = `<button class="link small" data-go="settings">Hilfe</button>`;
-  // Browser ohne Mitteilungen (z. B. DuckDuckGo): ehrlich sagen und Chrome anbieten
-  if (weakBrowser()) return later("weak") ? "" : `<div class="banner info hint"><b>In ${esc(BNAME())} kann ich dir keine Mitteilungen aufs Handy schicken.</b> Die App funktioniert trotzdem – Warnungen siehst du dann, wenn du sie öffnest.
-    Für Mitteilungen: Umstiegsheld in einem dieser Browser öffnen${isAndroid ? "" : " (z. B. Firefox, Edge oder Chrome)"}:
-    <div class="chips" style="margin-top:6px">${openerBtns("chip")}</div><div class="row" style="margin-top:4px;align-items:center">${x("weak")}${more}</div></div>`;
-  // 1. im Browser: zuerst als App installieren (danach dort die Mitteilungen)
-  if (!standalone && !later("install") && (INSTALL || isIOS || isAndroid)) return `<div class="banner info hint"><b>Erst als App installieren:</b> Dann liegt Umstiegsheld auf dem Startbildschirm${isIOS ? " – und nur so bekommst du auf dem iPhone Mitteilungen" : ""}. Danach öffnest du die App und schaltest dort die Mitteilungen ein.
-    <div class="row" style="margin-top:6px;align-items:center">${INSTALL ? `<button class="btn small-btn" id="installApp" style="width:auto;margin:0">Installieren</button>` : `<span class="small" style="flex:1">${installHow()}</span>`}${x("install")}</div></div>`;
-  // 2. in der App (oder im Browser, wenn Installieren nicht geht/später): Mitteilungen
+  if (!hasSomething() || pushState() === "on") return "";
+  const foot = k => `<div class="hint-foot"><button class="link small" data-later-hint="${k}">Später</button></div>`;
+  // Browser ohne Mitteilungen (z. B. DuckDuckGo): klar sagen, was geht, und andere Browser anbieten
+  if (weakBrowser()) return later("weak") ? "" : `<section class="card hint-card"><div class="k">Mitteilungen</div>
+    <p><b>${esc(BNAME() === "diesem Browser" ? "Dieser Browser" : BNAME())} kann keine Mitteilungen anzeigen.</b> Warnungen siehst du hier, sobald du Umstiegsheld öffnest.</p>
+    <p class="small muted" style="margin:8px 0 6px">Für Mitteilungen aufs Handy Umstiegsheld in einem dieser Browser öffnen:</p>${browserGrid()}${foot("weak")}</section>`;
+  // im Browser: zuerst als App installieren (danach dort die Mitteilungen)
+  if (!standalone && !later("install") && (INSTALL || isIOS || isAndroid)) return `<section class="card hint-card"><div class="k">Als App installieren</div>
+    <p>Dann liegt Umstiegsheld auf dem Startbildschirm${isIOS ? " – und nur so bekommst du auf dem iPhone Mitteilungen" : ""}. Danach dort die Mitteilungen einschalten.</p>
+    ${INSTALL ? `<button class="btn small-btn" id="installApp">Installieren</button>` : `<p class="small muted" style="margin:6px 0 0">${installHow()}</p>`}${foot("install")}</section>`;
   const push = pushCard();
-  if (push && !later("push")) return push.replace(/<\/div>$/, `${x("push")}</div>`);
-  return "";
+  return push && !later("push") ? push.replace(/<\/div>$/, `${foot("push")}</div>`) : "";
 }
 // iPhone in Safari, noch nichts angelegt: zuerst installieren – sonst landen die Fahrten in Safari statt in der App
 const iosFirst = () => (isIOS && !standalone && !later("iosfirst") ? `<div class="banner info hint row" style="align-items:center"><span><b>Tipp fürs iPhone:</b> Erst auf den Home-Bildschirm legen – Safari „Teilen“ <span aria-hidden="true">⬆︎</span> → „Zum Home-Bildschirm“ – und Umstiegsheld von dort öffnen.
@@ -1915,7 +1919,7 @@ async function saveTrip(ticket) {
         ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win ? `${r.win[0]}–${r.win[1]}` : r.dep}. Die Fahrt erscheint jeweils ein paar Stunden vorher hier.`;
         if (W.pushAsk) W.pushAsk.then(x => (x === "granted" ? enablePush() : null)).catch(() => {});
-        const fromReg = W.regIntent; W = null; await loadTrips(); openId = null; return go(fromReg ? "routines" : "home");
+        const fromReg = W.regIntent, optOut = W.pushNo; W = null; await loadTrips(); openId = null; go(fromReg ? "routines" : "home"); if (!optOut) askPushSoon(); return;
       }
     }
     if (W.mode === "import" && !W.multi && W.imported?.length > 1 && W.pickedIdx != null) {
@@ -1928,13 +1932,52 @@ async function saveTrip(ticket) {
     if (W.pushAsk) { const ask0 = W.pushAsk; ask0.then(r => (r === "granted" ? enablePush().then(() => render()) : null)).catch(() => {}); }
     const n = (W.multi || [W.legs]).length;
     flash = n > 1 ? `${n} Reisen angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Reise angelegt. Ich melde mich, wenn du etwas tun solltest.";
-    W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home");
+    const optOut = W.pushNo; W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home"); if (!optOut) askPushSoon();
   } catch (e) { if (!W) return; W.busy = null; W.saving = false; W.error = e.message; render(); }
 }
 
 // ---------- Mitteilungen ----------
+// Beim Öffnen und Zurückkehren prüfen, ob Mitteilungen wirklich an sind (z. B. Abo verloren, in den Einstellungen erlaubt) – ohne Rückfrage
+async function checkPush() {
+  if (!AUTH || !pushHere()) return;
+  const was = localStorage.getItem("rb_push") === "1";
+  try {
+    if (Notification.permission === "granted") { const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription(); if (!sub || !was) await enablePush(true); }
+    else if (was) localStorage.removeItem("rb_push");
+  } catch {}
+  if (was !== (localStorage.getItem("rb_push") === "1") && !W) render();
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkPush(); });
+// Nach dem Anlegen (Fahrt, regelmäßige Fahrt, übernommener Link): sind Mitteilungen aus, einmal höflich fragen – „Jetzt nicht“ gilt einen Tag
+async function askPush() {
+  const ps = pushState();
+  if (ps === "on" || later("pushask") || (ps === "off" && Notification.permission === "granted")) return;
+  const notNow = () => { try { localStorage.setItem("rb_later_pushask", String(Date.now() + 864e5)); } catch {} };
+  if (ps === "off") {
+    const ok = await ask("Soll ich dir Bescheid geben?\n\nFällt etwas aus, verspätet sich oder wird ein Umstieg knapp, schicke ich dir eine Mitteilung aufs Handy. Du kannst das jederzeit wieder ausschalten.", { ok: "Ja, gern", cancel: "Jetzt nicht" });
+    if (!ok) return notNow();
+    try { await enablePush(); flash = "Mitteilungen sind an – ich melde mich, wenn etwas nicht klappt."; } catch (e) { notNow(); alert(`Mitteilungen gehen gerade nicht\n\n${e.message}`); }
+    return render();
+  }
+  notNow();
+  if (ps === "blocked") return alert(`Mitteilungen sind blockiert\n\nDamit ich dir Bescheid geben kann: ${unblockHow()}`);
+  if (isIOS) return alert(`Mitteilungen auf dem iPhone\n\nDie gibt es nur in der installierten App: ${installHow()}`);
+  return infoDlg("Mitteilungen in diesem Browser nicht möglich", `<p>${esc(BNAME() === "diesem Browser" ? "Dieser Browser" : BNAME())} kann keine Mitteilungen anzeigen. Warnungen siehst du, sobald du Umstiegsheld öffnest.</p>
+    <p class="small muted" style="margin:8px 0 6px">Für Mitteilungen aufs Handy hier öffnen – deine Fahrten nimmst du über „Gerät hinzufügen“ mit:</p>${browserGrid()}`);
+}
+// Schlichtes Fenster mit eigenem Inhalt (z. B. Browser-Knöpfe)
+function infoDlg(title, html) {
+  return new Promise(res => {
+    const w = document.createElement("div"); w.className = "dlg-wrap";
+    w.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(title)}"><h2>${esc(title)}</h2>${html}<div class="dlg-btns" style="margin-top:12px"><button class="btn sec" data-no>Schließen</button></div></div>`;
+    const done = () => { w.remove(); res(); };
+    w.addEventListener("click", e => { if (e.target === w || e.target.closest("[data-no]")) done(); });
+    document.body.appendChild(w); w.querySelector("[data-no]").focus();
+  });
+}
+const askPushSoon = () => setTimeout(() => askPush().catch(() => {}), 700);
 const unb64u = s => { s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
-async function enablePush() {
+async function enablePush(quiet = false) {
   const cfg = await api("/api/config");
   if (!cfg.vapid) throw new Error("Mitteilungen sind auf dem Server noch nicht eingerichtet.");
   if (await Notification.requestPermission() !== "granted") throw new Error("Ohne Erlaubnis kann ich dich unterwegs nicht benachrichtigen.");
@@ -1943,7 +1986,7 @@ async function enablePush() {
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(cfg.vapid) });
   await api("/api/push", { method: "POST", body: sub.toJSON() });
   localStorage.setItem("rb_push", "1");
-  await api("/api/push/test", { method: "POST" }).catch(() => {});
+  if (!quiet) await api("/api/push/test", { method: "POST" }).catch(() => {});
 }
 
 // ---------- Start ----------
@@ -2041,7 +2084,7 @@ async function takeSharedRoutine(code, sh) {
     const r = await api("/api/routines", { method: "POST", body: { share: code, days: R.days } });
     ROUTINES = await api("/api/routines").catch(() => ROUTINES); R_OPEN = r.id;
     flash = `Übernommen: „${r.name}“. Du kannst sie unter „Umbenennen“ anders nennen.`;
-    await loadTrips().catch(() => {}); go("routines");
+    await loadTrips().catch(() => {}); go("routines"); askPushSoon();
   } catch (e) { alert(`Übernehmen ging nicht\n\n${e.message}`); }
 }
 // Vom Live-Link: Fahrt mitverfolgen – erscheint wie eine eigene, gleicht sich aber mit dem Original ab
@@ -2049,7 +2092,7 @@ async function followTrip(code) {
   try {
     const r = await api("/api/follow", { method: "POST", body: { id: code } });
     flash = r.own ? "Das ist deine eigene Fahrt." : r.existed ? "Diese Fahrt verfolgst du schon mit." : "Du verfolgst diese Fahrt jetzt mit. Erlaube Mitteilungen, dann melde ich mich, wenn sie sich verspätet oder geändert wird.";
-    await loadTrips(); openId = r.id; sheetId = null; go("home");
+    await loadTrips(); openId = r.id; sheetId = null; go("home"); askPushSoon();
   } catch (e) { alert(`Mitverfolgen ging nicht\n\n${e.message}`); }
 }
 // Link „/?v=…“ geöffnet: Verbindung zeigen und auf Wunsch bei sich überwachen
@@ -2064,7 +2107,7 @@ async function takeSharedTrip(code) {
   try {
     const r = await api("/api/trips", { method: "POST", body: { legs: sh.legs.map(l => ({ ...l, minT: MINT })), ticket: "flex", src: "share" } });
     flash = r.existed ? "Diese Verbindung überwachst du schon." : "Übernommen – ich überwache die Verbindung jetzt für dich.";
-    await loadTrips(); openId = r.id; sheetId = null; go("home");
+    await loadTrips(); openId = r.id; sheetId = null; go("home"); askPushSoon();
   } catch (e) { alert(`Übernehmen ging nicht\n\n${e.message}`); }
 }
 async function takeShared() {
@@ -2103,7 +2146,7 @@ const linkCode = new URLSearchParams(location.search).get("link");
 if (linkCode) { history.replaceState(null, "", "/"); view = "settings"; DEV.join = true; DEV.input = linkCode; }
 // Sofort den letzten Stand zeigen (aus dem Gerät), dann im Hintergrund frisch laden
 try { const c = JSON.parse(localStorage.getItem("rb_trips_cache") || "null"); if (c?.trips?.length && Date.now() - c.at < 12 * 3600e3) { trips = c.trips; render(); } } catch {}
-loadTrips().then(() => { render(); schedule(); takeShared(); syncFavs().then(() => { if (view === "add") render(); }); syncPrefs().then(ch => { if (ch) render(); });
+loadTrips().then(() => { render(); schedule(); takeShared(); checkPush(); syncFavs().then(() => { if (view === "add") render(); }); syncPrefs().then(ch => { if (ch) render(); });
   if (linkCode) setTimeout(() => joinDevice(linkCode), 300);
   if (shareCode) setTimeout(() => takeSharedTrip(shareCode), 300);
   if (followCode) setTimeout(() => followTrip(followCode), 100); },

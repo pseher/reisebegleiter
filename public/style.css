@@ -448,3 +448,11 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 /* Einstellungen: App & Mitteilungen */
 #appcard .kv { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 #appcard .kv span { color: var(--muted); } #appcard .kv b { text-align: right; font-weight: 600; }
+
+/* Hinweis-Karten (Mitteilungen, Installieren): klar gegliedert */
+.hint-card .k { margin-bottom: 4px; }
+.hint-card p { margin: 0; }
+.br-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.br-grid .btn { margin: 0; min-height: 44px; font-size: 15px; }
+.hint-foot { display: flex; justify-content: flex-end; margin-top: 6px; }
+.hint-card #installApp { width: auto; margin: 10px 0 0; }
