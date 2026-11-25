@@ -1947,7 +1947,7 @@ if ("serviceWorker" in navigator) {
 document.addEventListener("click", e => { if (e.target.closest('[data-go="add"]')) { startWizard(); } }, true);
 $app.innerHTML = `<div class="spinner"></div>`;
 // ---------- Verbindung teilen: kurzer Link, andere übernehmen sie mit einem Tipp in ihr Umstiegsheld ----------
-const legLine = l => `${hm(l.from.plan || l.dep?.plan)} ${l.label} ${cleanStop(l.from.name || l.dep?.name || "")} → ${cleanStop(l.to.name || l.arr?.name || "")}`;
+const legLine = l => { const f = l.from || l.dep, e = l.to || l.arr; return `${hm(f.plan)} ${l.label} ${cleanStop(f.name || "")} → ${cleanStop(e.name || "")}`; };   // gespeicherte (from/to) und angezeigte (dep/arr) Teilstrecken
 const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l => l.from || l.dep, e = l => l.to || l.arr;
   return { head: `${cleanStop(f(a).name)} → ${cleanStop(e(z).name)}`, when: `${day(f(a).plan)} · ${hm(f(a).plan)} – ${hm(e(z).plan)}${legs.length > 1 ? ` · ${legs.length - 1} Umstieg${legs.length > 2 ? "e" : ""}` : ""}` }; };
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
