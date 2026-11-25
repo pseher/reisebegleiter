@@ -167,3 +167,15 @@ test("Regelmäßige Fahrt: Zeitraum aussetzen und ganze Serie ersetzen", async (
   const all = (await call("/api/routines", A)).j;
   assert.deepEqual(all.map(x => x.name), ["Arbeit neu"]); assert.deepEqual(n.win, ["07:00", "08:30"]);
 });
+
+test("Meine Orte: speichern, säubern, nur fürs eigene Konto", async () => {
+  const worker = (await import("../src/worker.js")).default, env = { MOCK: "1" };
+  const call = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.13", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call("/api/register", null, "POST", {})).j, B = (await call("/api/register", null, "POST", {})).j;
+  const hit = (await call("/api/places/search?q=Musterweg", A)).j[0];
+  assert.ok(hit.lat && hit.addr);
+  const saved = (await call("/api/places", A, "PUT", [{ id: "p1", icon: "🏠", name: "Zuhause", place: hit, evil: "<x>" }, { id: "p2", name: "ohne Ort" }])).j;
+  assert.equal(saved.length, 1); assert.equal(saved[0].evil, undefined);
+  assert.equal((await call("/api/places", A)).j[0].name, "Zuhause");
+  assert.deepEqual((await call("/api/places", B)).j, []);
+});

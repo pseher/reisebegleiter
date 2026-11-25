@@ -2,7 +2,7 @@ import { flush } from "./stats.js";
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
-import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime } from "./routing.js";
+import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime, searchPlaces } from "./routing.js";
 import { importTrip, onlyBahnLink } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
@@ -653,7 +653,8 @@ async function api(req, env, url) {
     // Favoriten zusammenführen, dann Reisen und Geräte dieses Kontos ins andere übernehmen
     const [mine, theirs] = await Promise.all([db.get(env, "rb_accounts", dev.account_id), db.get(env, "rb_accounts", src.account_id)]);
     const favs = [...(theirs?.favs || []), ...(mine?.favs || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id) === i).slice(0, 24);
-    await db.update(env, "rb_accounts", src.account_id, { favs });
+    const places = [...(theirs?.prefs?.places || []), ...(mine?.prefs?.places || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id || x.name === f.name) === i).slice(0, 20);
+    await db.update(env, "rb_accounts", src.account_id, { favs, prefs: { ...(theirs?.prefs || {}), places } });
     await db.mergeAccount(env, dev.account_id, src.account_id);
     await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
     await db.update(env, "rb_devices", dev.id, { link_tries: null });
@@ -666,6 +667,19 @@ async function api(req, env, url) {
     if (b.minT != null) prefs.minT = Math.min(30, Math.max(0, Math.round(+b.minT) || 0));
     await db.update(env, "rb_accounts", dev.account_id, { prefs });
     return json(prefs);
+  }
+  // Meine Orte (Zuhause, Arbeit …) – wie Favoriten am Konto, also auf allen verbundenen Geräten gleich
+  if (p === "/api/places/search") return json(await searchPlaces(env, url.searchParams.get("q") || "").catch(() => []));
+  if (p === "/api/places" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json(a?.prefs?.places || []); }
+  if (p === "/api/places" && method === "PUT") {
+    const b = await req.json().catch(() => null);
+    if (!Array.isArray(b) || b.length > 20) return fail(400, "Orte ungültig");
+    const places = b.map(x => ({ id: String(x.id || "").slice(0, 40), icon: String(x.icon || "📍").slice(0, 4), name: String(x.name || "").trim().slice(0, 30),
+      place: { name: String(x.place?.name || "").slice(0, 80), area: String(x.place?.area || "").slice(0, 60), eva: /^\d{6,9}$/.test(String(x.place?.eva || "")) ? String(x.place.eva) : "", ...coord(x.place || {}), ...(x.place?.stop ? { stop: true } : {}) } }))
+      .filter(x => x.id && x.name && (x.place.eva || x.place.lat != null));
+    const a = await db.get(env, "rb_accounts", dev.account_id);
+    await db.update(env, "rb_accounts", dev.account_id, { prefs: { ...(a?.prefs || {}), places } });
+    return json(places);
   }
   // Favoriten gehören zum Konto, damit sie auf allen Geräten gleich sind
   if (p === "/api/favs" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json(a?.favs || []); }

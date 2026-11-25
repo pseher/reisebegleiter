@@ -80,7 +80,9 @@ const MINT_OPTS = [[0, "wie geplant"], [5, "5 Min."], [8, "8 Min."], [10, "10 Mi
 let MINT = 5; try { const v = localStorage.getItem("rb_mint"); if (v != null) MINT = +v; } catch {}
 const setMinT = (m, sync = true) => { MINT = m; try { localStorage.setItem("rb_mint", String(m)); } catch {} if (sync) api("/api/prefs", { method: "PUT", body: { minT: m } }).catch(() => {}); };
 // Einstellungen des Kontos (gleich auf allen verbundenen Geräten)
-async function syncPrefs() { try { const p = await api("/api/prefs"); if (p && Number.isFinite(p.minT) && p.minT !== MINT) { setMinT(p.minT, false); return true; }
+async function syncPrefs() { try { const p = await api("/api/prefs");
+  if (p && Array.isArray(p.places) && JSON.stringify(p.places) !== JSON.stringify(PLACES)) { PLACES = p.places; try { localStorage.setItem("rb_places", JSON.stringify(PLACES)); } catch {} if (view === "add" && W?.step === "route") render(); }
+  if (p && Number.isFinite(p.minT) && p.minT !== MINT) { setMinT(p.minT, false); return true; }
   if (p && p.minT == null) api("/api/prefs", { method: "PUT", body: { minT: MINT } }).catch(() => {}); } catch {} return false; }
 const minTChips = (attr = "data-mt") => `<div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" ${attr}="${m}" aria-pressed="${MINT === m}">${l}</button>`).join("")}</div>`;
 
@@ -1198,11 +1200,26 @@ const localInput = ms => { const d = new Date(ms - new Date(ms).getTimezoneOffse
 const placeParam = s => (s.eva ? s.eva : `@${(+s.lat).toFixed(5)},${(+s.lon).toFixed(5)}`);
 function stationField(id, label, val) {
   return val
-    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}${val.here ? ` <span class="small muted" style="font-weight:400">genau hier</span>` : val.stop ? ` <span class="small muted" style="font-weight:400">Haltestelle${val.area ? ` · ${esc(val.area)}` : ""}</span>` : ""}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
+    ? `<p class="small muted" style="margin:14px 0 4px">${label}</p><div class="row" style="align-items:center"><b style="flex:4">${esc(val.name)}${val.myPlace ? ` <span class="small muted" style="font-weight:400">${esc(val.area)}</span>` : val.here ? ` <span class="small muted" style="font-weight:400">genau hier</span>` : val.stop ? ` <span class="small muted" style="font-weight:400">Haltestelle${val.area ? ` · ${esc(val.area)}` : ""}</span>` : ""}</b><button class="chip" data-clear="${id}" style="flex:0 0 auto">ändern</button></div>`
     : `<p class="small muted" style="margin:14px 0 4px">${label}</p><input type="search" id="${id}" placeholder="Bahnhof oder Haltestelle" autocomplete="off" enterkeyhint="search" value="${esc(W?.typed?.[id] || "")}">
-      ${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}<ul class="list" id="${id}Res"></ul>`;
+      ${id === "rf" || (PLACES.length && !W?.quick) ? `<div class="rchips" style="margin-top:6px">${id === "rf" ? `<button class="chip here-chip" data-near="${id}">${PIN} Mein Standort</button>` : ""}${(W?.quick ? [] : PLACES).map((pl, i) => `<button class="rchip pl" data-plf="${id}|${i}">${esc(pl.icon)} ${esc(pl.name)}</button>`).join("")}</div>` : ""}<ul class="list" id="${id}Res"></ul>`;
 }
 
+// ---------- Meine Orte: Zuhause, Arbeit, Arzt … (am Konto gespeichert, wie Favoriten) ----------
+let PLACES = []; try { PLACES = JSON.parse(localStorage.getItem("rb_places") || "[]"); } catch {}
+const PL_PRESETS = [["🏠", "Zuhause"], ["💼", "Arbeit"], ["🩺", "Arzt"], ["🏃", "Sport"], ["🛒", "Einkaufen"], ["👪", "Familie"], ["🎓", "Schule/Uni"]];
+async function savePlaces(list) {
+  PLACES = list; try { localStorage.setItem("rb_places", JSON.stringify(PLACES)); } catch {}
+  try { PLACES = await api("/api/places", { method: "PUT", body: list }); localStorage.setItem("rb_places", JSON.stringify(PLACES)); } catch (e) { alert(`Konnte nicht gespeichert werden: ${e.message}`); }
+}
+// als Start/Ziel: Anzeige mit Symbol, darunter die Adresse
+const placeObj = pl => ({ ...pl.place, name: `${pl.icon} ${pl.name}`, area: pl.place.name + (pl.place.area ? `, ${pl.place.area}` : ""), myPlace: true });
+const placeChips = attr => PLACES.map((pl, i) => `<button class="rchip pl" ${attr}="${i}">${esc(pl.icon)} ${esc(pl.name)}</button>`).join("");
+function startPlace(i = null) {
+  const pl = i != null ? PLACES[i] : null;
+  W.plBack = W.step; W.pl = pl ? { ...pl, place: { ...pl.place } } : { id: `p${Date.now().toString(36)}`, icon: "🏠", name: PLACES.some(x => x.name === "Zuhause") ? "" : "Zuhause", place: null };
+  W.plIdx = i; W.step = "place"; render(); scrollTo(0, 0);
+}
 // ---------- Favoriten: häufige Verbindungen (auf diesem Gerät gespeichert, ohne Anmeldung) ----------
 let FAVS = []; try { FAVS = JSON.parse(localStorage.getItem("rb_favs") || "[]"); } catch {}
 let FAV_OPEN = false; try { FAV_OPEN = localStorage.getItem("rb_favs_open") === "1"; } catch {}   // eingeklappt, bis man sie öffnet (wird gemerkt)
@@ -1344,12 +1361,53 @@ function renderWizard() {
       W.regPreset = true; W.error = ""; W.step = "route"; render(); };
   }
 
+  else if (W.step === "place") {
+    const P = W.pl, edit = W.plIdx != null;
+    $app.innerHTML = `<p class="steps">Meine Orte</p><h1>${edit ? "Ort bearbeiten" : "Ort speichern"}</h1>
+      <p class="small muted" style="margin:0 0 4px">Name</p>
+      <div class="rchips">${PL_PRESETS.map(([ic, nm]) => `<button class="rchip" data-plp="${ic}|${nm}" aria-pressed="${P.name === nm}">${ic} ${nm}</button>`).join("")}</div>
+      <div class="row" style="margin-top:8px;align-items:center"><input class="txt" id="plIcon" maxlength="4" value="${esc(P.icon)}" style="flex:0 0 3.2em;text-align:center" aria-label="Symbol"><input class="txt" id="plName" maxlength="30" placeholder="eigener Name, z. B. Oma" value="${esc(P.name)}" style="flex:1"></div>
+      <p class="small muted" style="margin:16px 0 4px">Wo?</p>
+      ${P.place ? `<div class="row" style="align-items:center"><b style="flex:4">${esc(P.place.name)}${P.place.area ? ` <span class="small muted" style="font-weight:400">${esc(P.place.area)}</span>` : ""}</b><button class="chip" data-plclear style="flex:0 0 auto">ändern</button></div>`
+        : `<input type="search" id="plq" placeholder="Adresse, Haltestelle oder Ort" autocomplete="off" value="${esc(W.plq || "")}">
+      <div class="rchips" style="margin-top:6px"><button class="chip here-chip" data-plhere>${PIN} Hier, wo ich gerade bin</button></div><ul class="list" id="plRes"></ul>`}
+      <p class="small muted" style="margin:14px 0 0">Deine Orte werden wie die Favoriten mit deinem Konto gespeichert, damit sie auf all deinen verbundenen Geräten da sind. Löschen kannst du sie jederzeit.</p>
+      ${err}<button class="btn big-btn" id="plSave">${edit ? "Speichern" : "Ort speichern"}</button>
+      ${edit ? `<button class="btn danger" id="plDel">Ort löschen</button>` : ""}${back}`;
+    const keep = () => { P.icon = document.getElementById("plIcon").value.trim() || "📍"; P.name = document.getElementById("plName").value.trim(); };
+    $app.querySelectorAll("[data-plp]").forEach(b => b.onclick = () => { keep(); [P.icon, P.name] = b.dataset.plp.split("|"); render(); });
+    $app.querySelector("[data-plclear]")?.addEventListener("click", () => { keep(); P.place = null; render(); });
+    const q = document.getElementById("plq");
+    if (q) { let tm; const find = async () => { const ul = document.getElementById("plRes"); if (!ul) return; if (q.value.trim().length < 3) { ul.innerHTML = ""; return; }
+        try { const res = await api(`/api/places/search?q=${encodeURIComponent(q.value)}`);
+          ul.innerHTML = res.length ? res.map((x, i) => `<li><button data-plr="${i}"><b>${esc(x.name)}</b><br><span class="small muted">${x.stop ? "Haltestelle" : "Adresse/Ort"}${x.area ? ` · ${esc(x.area)}` : ""}</span></button></li>`).join("") : `<li class="muted small">Nichts gefunden – mit Hausnummer und Ort versuchen.</li>`;
+          ul.querySelectorAll("[data-plr]").forEach(b => b.onclick = () => { keep(); P.place = res[+b.dataset.plr]; W.plq = ""; render(); });
+        } catch (e) { ul.innerHTML = `<li class="err">${esc(e.message)}</li>`; } };
+      q.oninput = () => { W.plq = q.value; clearTimeout(tm); tm = setTimeout(find, 300); }; if (q.value.trim().length >= 3) find(); }
+    $app.querySelector("[data-plhere]")?.addEventListener("click", () => { keep();
+      if (!navigator.geolocation) return alert("Dein Gerät gibt keinen Standort heraus.");
+      navigator.geolocation.getCurrentPosition(pos => { P.place = { eva: "", name: "Gespeicherter Standort", area: `vom ${day(new Date().toISOString())}`, lat: +pos.coords.latitude.toFixed(5), lon: +pos.coords.longitude.toFixed(5) }; render(); },
+        err => alert(err.code === 1 ? "Ohne Erlaubnis für den Standort geht das nicht." : "Standort gerade nicht verfügbar."), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }); });
+    document.getElementById("plSave").onclick = async () => { keep();
+      if (!P.name) { W.error = "Bitte einen Namen wählen."; return render(); }
+      if (!P.place) { W.error = "Bitte eine Adresse, Haltestelle oder „Hier“ wählen."; return render(); }
+      if (PLACES.some((x, i) => i !== W.plIdx && x.name.toLowerCase() === P.name.toLowerCase())) { W.error = `„${P.name}“ gibt es schon.`; return render(); }
+      const list = edit ? PLACES.map((x, i) => (i === W.plIdx ? P : x)) : [...PLACES, P];
+      W.error = ""; await savePlaces(list); W.step = W.plBack || "route"; W.pl = null; W.plEdit = false; render(); };
+    document.getElementById("plDel")?.addEventListener("click", async () => {
+      if (!(await ask(`„${P.name}“ löschen?`, { ok: "Löschen", danger: true }))) return;
+      await savePlaces(PLACES.filter((_, i) => i !== W.plIdx)); W.step = W.plBack || "route"; W.pl = null; render(); });
+  }
+
   else if (W.step === "route") {
     // Schnell weg: Ziele, die du schon kennst, zum Antippen
     const dests = []; if (W.quick) for (const d of [...trips.filter(t => t.active !== false).map(t => t.legs[t.legs.length - 1].arr), ...FAVS.map(f => f.to)])
       if (d && (d.eva || d.lat != null) && !dests.some(x => plainStop(x.name) === plainStop(d.name)) && dests.length < 6) dests.push({ eva: d.eva || "", name: d.name, lat: d.lat, lon: d.lon });
     $app.innerHTML = `<p class="steps">${W.editId ? "Reise ändern" : W.quick ? "Schnell weg von hier" : W.regIntent ? "Neue regelmäßige Fahrt" : "Neue Fahrt"}</p>
-      ${W.quick ? `<h1>Wohin?</h1>${dests.length ? `<div class="rchips">${dests.map((d, i) => `<button class="rchip" data-qd="${i}">${esc(cleanStop(d.name))}</button>`).join("")}</div>` : ""}` : ""}
+      ${W.quick ? `<h1>Wohin?</h1>
+        <div class="pl-head"><span class="small muted">Meine Orte</span>${PLACES.length ? `<button class="link small" data-pledit>${W.plEdit ? "Fertig" : "Bearbeiten"}</button>` : ""}</div>
+        <div class="rchips">${PLACES.map((pl, i) => `<button class="rchip pl" ${W.plEdit ? "data-plmod" : "data-pl"}="${i}">${esc(pl.icon)} ${esc(pl.name)}${W.plEdit ? " ✎" : ""}</button>`).join("")}<button class="rchip add" data-pladd>＋ ${PLACES.length ? "Ort" : "Zuhause, Arbeit … speichern"}</button></div>
+        ${dests.length ? `<p class="small muted" style="margin:10px 0 4px">Zuletzt</p><div class="rchips">${dests.map((d, i) => `<button class="rchip" data-qd="${i}">${esc(cleanStop(d.name))}</button>`).join("")}</div>` : ""}` : ""}
       ${!W.editId && !W.quick && FAVS.length ? `<section class="card favs"><button class="fav-head" data-favtoggle aria-expanded="${FAV_OPEN}"><span class="k" style="margin:0">★ Favoriten · ${FAVS.length}</span><span class="chev">${FAV_OPEN ? "▴" : "▾"}</span></button>${!FAV_OPEN ? "" : `<ul class="fav-list">${FAVS.map((f, i) => (i >= 3 && !W.favAll && W.favOpen !== i) ? "" : `<li class="fav-row ${W.favOpen === i ? "open" : ""}"><button data-fav="${i}" aria-expanded="${W.favOpen === i}">
         <span class="fav-time">${esc(f.time)}</span><span class="fav-main"><b>${esc(cleanStop(f.from.name))} → ${esc(cleanStop(f.to.name))}</b><span class="fav-sub">${esc(f.trains.join(" → "))}</span></span></button><button class="fav-del" data-favdel="${i}" aria-label="Favorit entfernen">✕</button></li>${W.favOpen === i ? `<li class="fav-days-li">${favDays(f)}</li>` : ""}`).join("")}</ul>
         ${FAVS.length > 3 && !W.favAll ? `<button class="link small" data-favall>Alle ${FAVS.length} Favoriten zeigen</button>` : ""}`}
@@ -1375,6 +1433,11 @@ function renderWizard() {
       ${W.editId || W.impOpen || W.regIntent || W.quick ? "" : `<button class="btn quiet" id="impOpen">Ticket schon gebucht? Foto oder Text einfügen …</button>`}${back}`;
     document.getElementById("impOpen")?.addEventListener("click", () => { W.impOpen = true; render(); scrollTo(0, 0); });
     $app.querySelectorAll("[data-qd]").forEach(b => b.onclick = () => { W.rTo = dests[+b.dataset.qd]; W.when = Date.now(); if (W.rFrom) { W.conns = null; W.step = "conns"; } render(); });
+    $app.querySelectorAll("[data-pl]").forEach(b => b.onclick = () => { W.rTo = placeObj(PLACES[+b.dataset.pl]); W.when = Date.now(); if (W.rFrom) { W.conns = null; W.step = "conns"; } render(); });
+    $app.querySelectorAll("[data-plf]").forEach(b => b.onclick = () => { const [f, i] = b.dataset.plf.split("|"); W[f === "rf" ? "rFrom" : "rTo"] = placeObj(PLACES[+i]); if (W.typed) delete W.typed[f]; render(); });
+    $app.querySelector("[data-pladd]")?.addEventListener("click", () => startPlace());
+    $app.querySelector("[data-pledit]")?.addEventListener("click", () => { W.plEdit = !W.plEdit; render(); });
+    $app.querySelectorAll("[data-plmod]").forEach(b => b.onclick = () => startPlace(+b.dataset.plmod));
     for (const [id, k] of [["rf", "rFrom"], ["rt", "rTo"]]) {
       const inp = document.getElementById(id); if (!inp) continue; let t;
       const find = () => searchInto(inp.value, `${id}Res`, st => { W[k] = st; if (W.typed) delete W.typed[id]; render(); }, true);
@@ -1639,6 +1702,7 @@ function renderWizard() {
   if (bk) bk.onclick = () => {
     W.error = "";
     if (W.step === "regsetup") { W = null; return go("routines"); }
+    if (W.step === "place") { W.step = W.plBack || "route"; W.pl = null; return render(); }
     if (W.step === "route") { if (W.regIntent && W.reg) { W.step = "regsetup"; return render(); } W = null; return go("home"); }
     if (W.step === "station") { if (W.mode === "train" && !W.legs.length) W.step = "route"; else { W = null; return go("home"); } }
     else if (W.step === "conns") W.step = "route";

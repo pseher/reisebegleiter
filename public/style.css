@@ -425,3 +425,8 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .acc .chips { margin-top: 6px; gap: 6px; }
 .chip.sm { min-width: 44px; padding-left: 10px; padding-right: 10px; }
 .trips .day-sub { list-style: none; padding: 8px 16px 2px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+/* Meine Orte */
+.pl-head { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0; }
+.rchip.pl { background: var(--card); border: 1.5px solid var(--accent); color: var(--ink); font-weight: 600; }
+.rchip.add { background: none; border: 1.5px dashed var(--line); color: var(--accent); }
+.rchip[aria-pressed="true"] { background: var(--accent); color: #fff; }

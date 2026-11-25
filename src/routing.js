@@ -249,3 +249,19 @@ export async function accessTime(env, from, to, mode) {
   } catch (e) { console.log("Weg zur Haltestelle:", e.message); }
   return rough();
 }
+
+// Adressen und Orte (für „Meine Orte“: Zuhause, Arbeit, Arzt …) – Haltestellen inklusive
+export async function searchPlaces(env, q, limit = 8) {
+  if (!q || q.trim().length < 3) return [];
+  if (env.MOCK === "1") return [{ eva: "", name: `${q.trim()} 12`, area: "Berlin", lat: 52.4876, lon: 13.2851, addr: true }];
+  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+  const qs = new URLSearchParams({ text: q.trim(), numResults: String(limit + 4), language: "de" });
+  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+  if (!r || !r.ok) return [];
+  const list = await r.json().catch(() => []), seen = new Set();
+  return (Array.isArray(list) ? list : []).filter(m => m.lat != null && m.lon != null).map(m => {
+    const area = (m.areas || []).find(a => a.default)?.name || (m.areas || []).find(a => a.adminLevel <= 8)?.name || "";
+    const name = m.type === "ADDRESS" && m.street ? `${m.street}${m.houseNumber ? ` ${m.houseNumber}` : ""}` : m.name;
+    return { eva: "", name, area, lat: +(+m.lat).toFixed(5), lon: +(+m.lon).toFixed(5), ...(m.type === "STOP" ? { stop: true, id: m.id || "" } : { addr: true }) };
+  }).filter(x => { const k = `${x.name}|${x.area}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, limit);
+}
