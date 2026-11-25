@@ -218,3 +218,21 @@ test("Regelmäßige Fahrt teilen: ohne eigenen Namen, anderer übernimmt Tage un
   assert.equal(nb.data.name, "Nach Potsdam Hbf");
   assert.equal((await call("/api/routines", { auth: B, method: "POST", body: { share: s.data.id, days: g.routine.days } })).status, 409);
 });
+
+test("Live-Link: ohne Konto ansehen, ohne Namen, gleicher Link, fremde Reise nicht", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  const B = (await call("/api/register", { method: "POST", body: { label: "iPhone" } })).data;
+  const t = (await call("/api/trips", { auth: A, method: "POST", body: { legs: [leg(2), { ...leg(3.5), label: "RE 7" }], ticket: "flex" } })).data;
+  const l1 = await call(`/api/trips/${t.id}/live`, { auth: A, method: "POST" });
+  assert.equal(l1.status, 200, JSON.stringify(l1.data));
+  assert.match(l1.data.url, /\/live\?i=[A-Za-z0-9_-]{8,16}$/);
+  assert.equal((await call(`/api/trips/${t.id}/live`, { auth: A, method: "POST" })).data.id, l1.data.id);
+  assert.equal((await call(`/api/trips/${t.id}/live`, { auth: B, method: "POST" })).status, 404);
+  const g = await call(`/api/live/${l1.data.id}`);
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  assert.equal(g.data.legs.length, 2);
+  assert.equal(g.data.phase, "before");
+  for (const k of ["id", "rname", "routine", "account_id", "device_id"]) assert.equal(k in g.data, false, k);
+  // Live-Code taugt nicht als „Verbindung übernehmen“-Link
+  assert.equal((await call(`/api/shared/${l1.data.id}`)).status, 404);
+});

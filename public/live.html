@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Live – Umstiegsheld</title>
+  <meta name="description" content="Wo ist die Fahrt gerade, wann kommt sie an? Live-Stand aus Umstiegsheld.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0f2a3d">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .lv-hero { border-left: 5px solid var(--ok); }
+    .lv-hero.s-WATCH { border-color: var(--watch); } .lv-hero.s-RISK { border-color: var(--risk); } .lv-hero.s-LOST { border-color: var(--lost); } .lv-hero.s-PLAN { border-color: var(--accent); }
+    .lv-k { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0; }
+    .lv-big { font-size: 40px; font-weight: 700; line-height: 1.1; margin: 4px 0; }
+    .lv-big small { font-size: 18px; font-weight: 600; }
+    .late { color: var(--lost); } .ok { color: var(--ok); }
+    .lv-legs { list-style: none; padding: 0; margin: 0; }
+    .lv-legs li { padding: 10px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 58px 1fr; gap: 2px 10px; }
+    .lv-legs li:first-child { border-top: 0; }
+    .lv-legs .t { font-weight: 700; } .lv-legs .t s { color: var(--muted); font-weight: 400; display: block; font-size: 13px; }
+    .lv-legs li.now { background: var(--watch-bg); margin: 0 -16px; padding: 10px 16px; }
+    .lv-x { font-size: 14px; color: var(--muted); grid-column: 2; }
+    .lv-x.bad { color: var(--risk); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header class="top"><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Umstiegsheld · Live</span></a></header>
+  <main id="lv" aria-live="polite"><div class="spinner"></div></main>
+  <footer class="foot-legal"><nav aria-label="Rechtliches"><a href="/ueber.html">Über Umstiegsheld</a><a href="/impressum.html">Impressum</a><a href="/datenschutz.html">Datenschutz</a></nav>
+    <p>Fahrplan- und Echtzeitdaten ohne Gewähr.</p></footer>
+<script>
+const $ = document.getElementById("lv"), id = new URLSearchParams(location.search).get("i") || "";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const hm = iso => iso ? new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }) : "–";
+const day = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+const clean = n => String(n || "").replace(/^(S\+U|S|U)\s+/, "").replace(/\s+Bhf\b/, "").trim();
+const mins = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 60000);
+const time = (s, cancelled) => { const d = mins(s.rt, s.plan);
+  return cancelled ? `<span class="late">fällt aus</span><s>${hm(s.plan)}</s>` : Math.abs(d) >= 2 ? `<span class="${d > 0 ? "late" : "ok"}">${hm(s.rt)}</span><s>${hm(s.plan)}</s>` : hm(s.plan); };
+let timer = null;
+async function load() {
+  let d;
+  try { const r = await fetch(`/api/live/${encodeURIComponent(id)}`, { cache: "no-store" }); d = await r.json().catch(() => ({}));
+    if (!r.ok) { $.innerHTML = `<section class="card"><h1>${r.status === 410 ? "Diese Fahrt ist vorbei" : "Link nicht gefunden"}</h1><p class="muted">${esc(d.error || "")}</p><a class="btn sec" href="/">Zu Umstiegsheld</a></section>`; clearInterval(timer); return; } }
+  catch { return; }   // kurz kein Netz: alten Stand stehen lassen, gleich wieder versuchen
+  const L = d.legs, a = L[0], z = L[L.length - 1], dest = clean(z.arr.name), late = mins(z.arr.rt, z.arr.plan);
+  const open = d.transfers.filter(t => t.status !== "DONE"), worst = open.reduce((w, t) => (["OK", "WATCH", "RISK", "LOST"].indexOf(t.status) > ["OK", "WATCH", "RISK", "LOST"].indexOf(w?.status) ? t : w), null);
+  const planOnly = d.phase === "before" && !L.some(l => l.live);
+  let k, title, sub = "", cls = d.status;
+  if (d.phase === "done") { k = "Angekommen"; title = `${hm(z.arr.rt)}`; sub = `in ${esc(dest)}`; cls = "OK"; }
+  else if (d.status === "LOST") { k = d.missed != null ? "Zug verpasst" : "Anschluss klappt nicht"; title = "Neue Ankunft folgt"; sub = `Die Verbindung nach ${esc(dest)} wird gerade neu geplant. Diese Seite aktualisiert sich von selbst.`; }
+  else {
+    k = d.phase === "before" ? (planOnly ? "Geplant" : "Noch nicht losgefahren") : "Unterwegs";
+    title = `${hm(z.arr.rt)} <small>Ankunft ${esc(dest)}</small>`;
+    sub = late >= 3 ? `<span class="late">ca. ${late} Min. später als geplant (${hm(z.arr.plan)})</span>` : late <= -3 ? `ca. ${-late} Min. früher` : planOnly ? "laut Fahrplan" : `<span class="ok">pünktlich</span>`;
+    if (worst?.status === "RISK") sub += ` · Anschluss in ${esc(clean(worst.at))} gefährdet`;
+    else if (worst?.status === "WATCH") sub += ` · Umstieg in ${esc(clean(worst.at))} knapp (${worst.gap} Min.)`;
+    if (planOnly) cls = "PLAN";
+  }
+  const cur = d.phase === "enroute" ? d.current : -1;
+  $.innerHTML = `<section class="card lv-hero s-${esc(cls)}"><p class="lv-k">${esc(k)}</p><p class="lv-big">${title}</p><p>${sub}</p>
+      ${d.changed ? `<p class="small" style="margin-top:8px">ℹ️ Die Verbindung wurde unterwegs geändert – unten steht die neue.</p>` : ""}</section>
+    <section class="card"><p class="lv-k" style="margin-bottom:6px">${esc(clean(a.dep.name))} → ${esc(dest)} · ${day(a.dep.plan)}</p><ul class="lv-legs">${L.map((l, i) => {
+      const tr = d.transfers[i];
+      return `<li class="${i === cur ? "now" : ""}"><span class="t">${time(l.dep, l.dep.cancelled)}</span><span><b>${esc(l.label)}</b> ab ${esc(clean(l.dep.name))}${l.dep.platform ? `, Gl. ${esc(l.dep.platform)}` : ""}${i === cur ? " · <b>gerade unterwegs</b>" : ""}</span>
+        <span class="t">${time(l.arr, l.arr.cancelled)}</span><span>an ${esc(clean(l.arr.name))}</span>
+        ${tr ? `<span class="lv-x ${tr.status === "RISK" || tr.status === "LOST" ? "bad" : ""}">Umstieg ${tr.status === "LOST" ? "klappt nicht" : `${tr.gap} Min.`}</span>` : ""}</li>`; }).join("")}</ul></section>
+    <p class="small muted" style="text-align:center">Stand ${hm(d.checkedAt || new Date().toISOString())} · aktualisiert sich jede Minute von selbst</p>
+    <p class="small muted" style="text-align:center">Selbst mit Bus oder Bahn unterwegs? <a href="/">Umstiegsheld</a> warnt dich, wenn ein Umstieg knapp wird.</p>`;
+  if (d.phase === "done") clearInterval(timer);
+}
+load(); timer = setInterval(load, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
+</script>
+</body>
+</html>

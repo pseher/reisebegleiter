@@ -139,7 +139,7 @@ async function replaceLegs(env, t, legs, ticket) {
   const minT = +t.legs[0]?.minT || 0;
   t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
   // Zugehörigkeit zu einer regelmäßigen Fahrt bleibt beim Ändern erhalten (das Zeitfenster ist nach einer festen Wahl erledigt)
-  const st0 = t.state || {}, keepSt = Object.fromEntries(["routine", "rname"].filter(k => st0[k]).map(k => [k, st0[k]]));
+  const st0 = t.state || {}, keepSt = Object.fromEntries(["routine", "rname", "live"].filter(k => st0[k]).map(k => [k, st0[k]]));
   if (st0.win) keepSt.win = { ...st0.win, picked: true, list: [] };
   t.obs = []; t.state = keepSt; t.active = true; t.ends_at = t.legs[t.legs.length - 1].to.plan;
   if (["spar", "flex", "dticket", "bc100"].includes(ticket)) t.ticket = ticket;
@@ -231,11 +231,27 @@ async function api(req, env, url) {
   // plus=N verschiebt auch die Testdaten (Verspätungen/Ausfälle gelten dann für diese Uhrzeit)
   if (p === "/api/mock/tick" && env.MOCK === "1") { const sh = (+url.searchParams.get("plus") || 0) * MIN; globalThis.RB_MOCK_SHIFT = sh; return json(await runMonitor(env, Date.now() + sh)); }
 
+  // Live-Link für Abholer: aktueller Stand einer Reise zum Ansehen – ohne Konto, ohne Namen, nur Fahrtdaten
+  const ml = /^\/api\/live\/([A-Za-z0-9_-]{8,16})$/.exec(p);
+  if (ml && method === "GET") {
+    const sh = await db.get(env, "rb_shares", ml[1]).catch(() => null);
+    if (!sh?.trip_id) return fail(404, "Diesen Link gibt es nicht (mehr).");
+    const t = await db.get(env, "rb_trips", sh.trip_id).catch(() => null);
+    if (!t || Date.parse(t.ends_at) < Date.now() - 6 * 3600e3) return fail(410, "Diese Fahrt ist vorbei.");
+    const v = view(t, Date.now()), L = v.legs, st = t.state || {};
+    count("lv_open");
+    return json({ phase: v.phase, status: v.status, finalDelay: v.finalDelay, current: v.current, missed: v.missed, ended: !t.active,
+      changed: !!st.origArr, planArr: v.planArr, checkedAt: v.checkedAt,
+      legs: L.map(l => ({ label: l.label, mode: l.mode, live: l.live, dep: { name: l.dep.name, plan: l.dep.plan, rt: l.dep.rt, platform: l.dep.platform, cancelled: l.dep.cancelled },
+        arr: { name: l.arr.name, plan: l.arr.plan, rt: l.arr.rt, platform: l.arr.platform, cancelled: l.arr.cancelled } })),
+      transfers: v.transfers.map(x => ({ at: x.at, gap: x.gap, status: x.status })) });
+  }
+
   // Geteilte Verbindung abrufen – ohne Konto, damit auch neue Nutzer sie sehen können
   const mg = /^\/api\/shared\/([A-Za-z0-9_-]{8,16})$/.exec(p);
   if (mg && method === "GET") {
     const sh = await db.get(env, "rb_shares", mg[1]).catch(() => null);
-    if (!sh) return fail(404, "Diesen Link gibt es nicht (mehr).");
+    if (!sh || sh.trip_id) return fail(404, "Diesen Link gibt es nicht (mehr).");
     if (Date.parse(sh.ends_at) < Date.now() - 30 * MIN) return fail(410, "Diese Verbindung ist schon vorbei.");
     count("sh_open");
     return json(sh.routine ? { kind: "routine", legs: sh.legs, routine: sh.routine } : { kind: "trip", legs: sh.legs, ends_at: sh.ends_at });
@@ -393,6 +409,22 @@ async function api(req, env, url) {
       count("sh_new");
     }
     return json({ id, url: `${url.origin}/?v=${id}` });
+  }
+
+  // Live-Link anlegen (einer pro Reise; zeigt auch eine später geänderte Verbindung)
+  const mlv = /^\/api\/trips\/([0-9a-f-]{36})\/live$/i.exec(p);
+  if (mlv && method === "POST") {
+    const t = await ownTrip(env, dev, mlv[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    let id = t.state?.live || null;
+    if (!id || !(await db.get(env, "rb_shares", id).catch(() => null))) {
+      id = b64u(crypto.getRandomValues(new Uint8Array(8)));
+      await db.insert(env, "rb_shares", { id, trip_id: t.id, legs: [], ends_at: new Date(Date.parse(t.ends_at) + 864e5).toISOString() });
+      t.state = { ...(t.state || {}), live: id };
+      await db.update(env, "rb_trips", t.id, { state: t.state });
+      count("lv_new");
+    }
+    return json({ id, url: `${url.origin}/live?i=${id}` });
   }
 
   // SOS: Zug zuordnen (Standort optional), Ausstiege vor dir, Verbindungen zum Ziel – alles sofort

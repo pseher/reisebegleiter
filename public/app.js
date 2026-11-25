@@ -886,6 +886,8 @@ function renderTrip(t, many) {
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.phase === "enroute" && t.status !== "OK" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise · ${t.legs.length} ${t.legs.length === 1 ? "Fahrt" : "Fahrten"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
       : `${t.phase === "enroute" && t.status !== "OK" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Reise <span class="chev">▴</span></button>` : `<h3 class="sec-h">${t.phase === "enroute" ? "Ganze Reise" : "Verlauf"}</h3>`}<div class="card flat">${timeline(t)}</div>`}
+    ${t.phase === "before" && t.ticket !== "dticket" ? `<a class="btn sec" href="${esc(bahnUrl(t))}" target="_blank" rel="noopener" data-bahn>🎫 Ticket bei der Bahn buchen</a>
+      <p class="small muted" style="margin:-2px 0 8px">Öffnet die Suche auf bahn.de bzw. im DB Navigator mit Start, Ziel und Abfahrtszeit – deine Verbindung steht dort oben. Umstiegsheld verkauft selbst keine Tickets.</p>` : ""}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Reise"}</button>
     ${sheet ? `<section class="card" id="sheet">
@@ -1948,13 +1950,49 @@ $app.innerHTML = `<div class="spinner"></div>`;
 const legLine = l => `${hm(l.from.plan || l.dep?.plan)} ${l.label} ${cleanStop(l.from.name || l.dep?.name || "")} → ${cleanStop(l.to.name || l.arr?.name || "")}`;
 const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l => l.from || l.dep, e = l => l.to || l.arr;
   return { head: `${cleanStop(f(a).name)} → ${cleanStop(e(z).name)}`, when: `${day(f(a).plan)} · ${hm(f(a).plan)} – ${hm(e(z).plan)}${legs.length > 1 ? ` · ${legs.length - 1} Umstieg${legs.length > 2 ? "e" : ""}` : ""}` }; };
+// Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
+function bahnUrl(t) {
+  const a = t.legs[0].dep, z = t.legs[t.legs.length - 1].arr, nm = s => cleanStop(s.name);
+  const loc = s => (/^\d{6,9}$/.test(String(s.eva || "")) ? `A=1@O=${nm(s)}@L=${s.eva}@` : "");
+  const hd = new Date(a.plan).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
+  const q = new URLSearchParams({ sts: "true", so: nm(a), zo: nm(z), ...(loc(a) ? { soid: loc(a) } : {}), ...(loc(z) ? { zoid: loc(z) } : {}), kl: "2", hd, hza: "D", ar: "false", s: "true", d: "false", fm: "false", bp: "false" });
+  return `https://www.bahn.de/buchung/fahrplan/suche#${q.toString()}`;
+}
+// Kurz-Nachricht zum aktuellen Stand – passt zu jeder Lage (vor der Fahrt, unterwegs, Plan B, angekommen)
+function statusText(t) {
+  const L = t.legs, a = L[0], z = L[L.length - 1], dest = cleanStop(z.arr.name), late = Math.round((Date.parse(z.arr.rt) - Date.parse(z.arr.plan)) / MIN);
+  const eta = `${hm(z.arr.rt)}${late >= 3 ? ` (ca. ${late} Min. später)` : ""}`;
+  if (t.phase === "done") return `Bin in ${dest} angekommen (${hm(z.arr.rt)}).`;
+  if (t.status === "LOST") return `Mein Anschluss klappt nicht – ich suche gerade eine neue Verbindung nach ${dest} und melde mich.`;
+  const tr = (t.transfers || []).find(x => x.status === "RISK" || x.status === "WATCH");
+  const warn = tr ? ` Der Umstieg in ${cleanStop(tr.at)} wird ${tr.status === "RISK" ? "eng" : "knapp"}.` : "";
+  const changed = t.canUndo ? " Neue Verbindung:" + L.filter((l, i) => i >= Math.max(0, t.current)).map(l => ` ${l.label} ${hm(l.dep.rt)}`).join(",") + "." : "";
+  if (t.phase === "before") return `Ich fahre um ${hm(a.dep.rt)} in ${cleanStop(a.dep.name)} los und bin ca. ${eta} in ${dest}.${warn}`;
+  return `Bin unterwegs nach ${dest}, Ankunft ca. ${eta}.${changed}${warn}`;
+}
 async function shareTrip(t, btn) {
+  const pick = await ask(`Was möchtest du schicken?\n\nAnkunft & Live-Link: Kurze Nachricht mit deiner Ankunftszeit. Über den Link sieht man jederzeit den aktuellen Stand – gut fürs Abholen.\n\nVerbindung: Andere können genau diese Fahrt in ihr Umstiegsheld übernehmen.`, { ok: "Ankunft & Live-Link", alt: "Verbindung zum Übernehmen", cancel: "Abbrechen" });
+  if (!pick) return;
+  return pick === true ? shareLive(t, btn) : shareConn(t, btn);
+}
+async function sendText(title, text, url) {
+  if (navigator.share) { try { await navigator.share({ title, text, url }); } catch (e) { if (e?.name !== "AbortError") throw e; } }
+  else { await navigator.clipboard.writeText(`${text}\n${url}`); flash = "Text kopiert – du kannst ihn jetzt z. B. in WhatsApp einfügen."; render(); }
+}
+async function shareLive(t, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const { url } = await api(`/api/trips/${t.id}/live`, { method: "POST" });
+    await sendText("Meine Fahrt – live", `${statusText(t)}\n\nLive verfolgen:`, url);
+  } catch (e) { alert(`Teilen ging nicht\n\n${e.message}`); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function shareConn(t, btn) {
   if (btn) btn.disabled = true;
   try {
     const { url } = await api(`/api/trips/${t.id}/share`, { method: "POST" });
     const L = tripLines(t.legs), text = `${L.head}\n${L.when}\n${t.legs.map(legLine).join("\n")}\n\nIn Umstiegsheld übernehmen und überwachen lassen:`;
-    if (navigator.share) { try { await navigator.share({ title: L.head, text, url }); } catch (e) { if (e?.name !== "AbortError") throw e; } }
-    else { await navigator.clipboard.writeText(`${text}\n${url}`); flash = "Link kopiert – du kannst ihn jetzt z. B. in WhatsApp einfügen."; render(); }
+    await sendText(L.head, text, url);
   } catch (e) { alert(`Teilen ging nicht\n\n${e.message}`); }
   finally { if (btn) btn.disabled = false; }
 }
