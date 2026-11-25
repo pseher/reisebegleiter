@@ -203,7 +203,7 @@ const heroKicker = t => (t.phase === "before" ? "Vor der Abfahrt" : t.phase === 
 const day = iso => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
 const inMin = iso => { const m = Math.round((Date.parse(iso) - Date.now()) / MIN);
   if (m >= 18 * 60) return sameDay(Date.parse(iso), Date.now() + 864e5) ? "morgen" : `am ${new Date(iso).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Berlin" })}`;
-  return m <= 0 ? "jetzt" : m < 60 ? `in ${m} Min.` : `in ${Math.floor(m / 60)} Std. ${m % 60} Min.`; };
+  return m <= 0 ? "jetzt" : m < 60 ? `in ${m} Min.` : `in ${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 60} Min.` : ""}`; };
 const lateTag = d => (d >= 1 ? ` <span class="late" title="${d} Min. später">+${d}</span>` : "");
 // Im großen „nächster Schritt“: neue Zeit groß, darunter in Worten „13 Min. später, geplant 22:10“
 const lateLine = (d, plan) => (d >= 1 ? `<div class="small"><span class="late">${d} Min. später</span> <span class="muted">· geplant ${hm(plan)}</span></div>` : "");
@@ -286,10 +286,11 @@ function renderList(active) {
 function renderRoutines() {
   $app.innerHTML = `${flashBox()}<h1>Regelmäßige Fahrten</h1>
     <p class="muted small" style="margin-top:0">Z. B. Schulweg oder Arbeitsweg: An jedem Fahrtag lege ich die Fahrt ein paar Stunden vorher an und sag dir Bescheid, wenn etwas nicht klappt.</p>
+    ${retCard(RET?.routine)}
     <button class="btn big-btn" data-regstart>＋ Neue regelmäßige Fahrt</button>
     ${ROUTINES.length ? `<div class="sec-row"><span>${ROUTINES.some(r => r.paused) ? `Deine regelmäßigen Fahrten · ${ROUTINES.length}${ROUTINES.filter(r => r.paused).length ? ` (${ROUTINES.filter(r => r.paused).length} pausiert)` : ""}` : `Werden überwacht · ${ROUTINES.length}`}</span></div><div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>`
       : `<p class="muted small">Noch keine – leg oben deine erste an.</p>`}`;
-  bindRoutines();
+  bindRoutines(); bindRet();
   bindCommon();
 }
 
@@ -433,6 +434,7 @@ async function saveWindowRoutine() {
     const r = await api("/api/routines", { method: "POST", body: { from: W.rFrom, to: W.rTo, name: R.name.trim(), days: R.days, winFrom: R.from, winTo: R.to, ticket: "flex", holidays: R.hol, minT: MINT, replace: W.replaceR || undefined } });
     ROUTINES = await api("/api/routines").catch(() => ROUTINES);
     flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win[0]}–${r.win[1]}. Die Fahrt erscheint jeweils ein paar Stunden vorher auf der Startseite.`;
+    if (!W.retNo) offerReturn({ routine: r.id, from: W.rFrom, to: W.rTo, reg: { name: r.name, days: r.days, hol: r.holidays, kind: "win", from: "16:00", to: "18:00" } });
     W = null; go("routines");
   } catch (e) { if (!W) return; W.busy = null; W.error = e.message; render(); }
 }
@@ -918,6 +920,7 @@ function renderTrip(t, many) {
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${t.follow === true ? "" : nextCard(t.next, t)}
+    ${t.phase === "before" ? retCard(RET?.tripId === t.id) : ""}
     ${t.follow === true ? "" : `${sosButton(t)}
     ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}`}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
@@ -959,7 +962,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => patch({ ticket: b.dataset.tk }));
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
-  bindAccess(t);
+  bindAccess(t); bindRet();
   bindHints();
   bindCommon();
 }
@@ -1648,7 +1651,8 @@ function renderWizard() {
       <h3 class="sec-h" style="margin-top:22px">Oder selbst suchen: von wo nach wo?</h3>`}
 
       ${W.regIntent && W.reg ? `<div class="reg-sum"><span>↻ <b>${esc(W.reg.name || "Neue regelmäßige Fahrt")}</b> · ${esc(daysText(W.reg.days))} · ${W.reg.kind === "win" ? `${esc(W.reg.from)}–${esc(W.reg.to)}` : `ab ${esc(W.reg.at)}`}</span><button class="link" id="regEdit">ändern</button></div>` : ""}
-      ${stationField("rf", "Von", W.rFrom)}${stationField("rt", "Nach", W.rTo)}
+      ${W.retNote ? `<p class="small warn-t" style="margin:6px 2px 0">${esc(W.retNote)}</p>` : ""}
+      ${stationField("rf", "Von", W.rFrom)}${W.rFrom && W.rTo ? `<button class="chip swap-chip" data-swap aria-label="Start und Ziel tauschen">⇅ Tauschen (Rückfahrt)</button>` : ""}${stationField("rt", "Nach", W.rTo)}
       ${(W.regIntent && W.reg) || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Abfahrt</p>${whenPicker("when")}`}
       ${W.editId || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>${W.regIntent && W.reg?.kind === "win" ? "Speichern" : W.regIntent ? "Verbindung wählen" : "Verbindungen suchen"}</button>
@@ -1683,6 +1687,7 @@ function renderWizard() {
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
     });
     $app.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { W[b.dataset.clear === "rf" ? "rFrom" : "rTo"] = null; render(); });
+    $app.querySelector("[data-swap]")?.addEventListener("click", () => { [W.rFrom, W.rTo] = [W.rTo, W.rFrom]; W.retNote = ""; render(); });
     bindWhen("when", () => {});
     $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
     document.getElementById("regEdit")?.addEventListener("click", () => { W.step = "regsetup"; render(); });
@@ -2084,7 +2089,9 @@ async function saveTrip(ticket) {
         ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win ? `${r.win[0]}–${r.win[1]}` : r.dep}. Die Fahrt erscheint jeweils ein paar Stunden vorher hier.`;
         if (W.pushAsk) W.pushAsk.then(x => (x === "granted" ? enablePush() : null)).catch(() => {});
-        const fromReg = W.regIntent, optOut = W.pushNo; W = null; await loadTrips(); openId = null; go(fromReg ? "routines" : "home"); if (!optOut) askPushSoon(); return;
+        const fromReg = W.regIntent, optOut = W.pushNo, lg = W.legs;
+        if (!W.retNo) offerReturn({ routine: r.id, from: W.rFrom || placeOfStop(lg[0].from), to: W.rTo || placeOfStop(lg[lg.length - 1].to), reg: { name: r.name, days: r.days, hol: r.holidays, kind: "fix", at: "17:00" } });
+        W = null; await loadTrips(); openId = null; go("routines"); if (!optOut) askPushSoon(); return;
       }
     }
     if (W.mode === "import" && !W.multi && W.imported?.length > 1 && W.pickedIdx != null) {
@@ -2097,7 +2104,9 @@ async function saveTrip(ticket) {
     if (W.pushAsk) { const ask0 = W.pushAsk; ask0.then(r => (r === "granted" ? enablePush().then(() => render()) : null)).catch(() => {}); }
     const n = (W.multi || [W.legs]).length;
     flash = n > 1 ? `${n} Fahrten angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Fahrt angelegt. Ich melde mich, wenn du etwas tun solltest.";
-    const optOut = W.pushNo; W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home"); if (!optOut) askPushSoon();
+    const optOut = W.pushNo, lg = W.legs || [];
+    if (n === 1 && lg.length && !W.retNo && !W.quick) offerReturn({ tripId: newId, from: W.rFrom || placeOfStop(lg[0].from), to: W.rTo || placeOfStop(lg[lg.length - 1].to), after: Date.parse(lg[lg.length - 1].to.plan) });
+    W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home"); if (!optOut) askPushSoon();
   } catch (e) { if (!W) return; W.busy = null; W.saving = false; W.error = e.message; render(); if (!$app.querySelector(".err")) alert(`Das hat nicht geklappt\n\n${e.message}`); }
 }
 
@@ -2167,6 +2176,20 @@ if ("serviceWorker" in navigator) {
 }
 document.addEventListener("click", e => { if (e.target.closest('[data-go="add"]')) { startWizard(); } }, true);
 $app.innerHTML = `<div class="spinner"></div>`;
+// ---------- Rückfahrt: nach dem Anlegen anbieten (Start und Ziel getauscht) ----------
+let RET = null;   // { tripId?, routine?, from, to, after, reg? }
+function offerReturn(o) { if (o.from && o.to && plainStop(o.from.name) !== plainStop(o.to.name)) RET = o; }
+const retCard = (match) => !RET || !match ? "" : `<section class="card ret-card"><div class="k">Rückfahrt</div>
+  <p style="margin:0 0 8px">${RET.reg ? "Auch den Rückweg regelmäßig überwachen?" : "Auch die Rückfahrt überwachen?"} <span class="muted">${esc(cleanStop(RET.to.name))} → ${esc(cleanStop(RET.from.name))}</span></p>
+  <div class="row"><button class="btn small-btn" data-retgo>${RET.reg ? "Rückweg anlegen" : "Rückfahrt suchen"}</button><button class="btn quiet small-btn" data-retno>Nein danke</button></div></section>`;
+function bindRet() {
+  $app.querySelector("[data-retno]")?.addEventListener("click", () => { RET = null; render(); });
+  $app.querySelector("[data-retgo]")?.addEventListener("click", () => {
+    const o = RET; RET = null; startWizard(); W.rFrom = o.to; W.rTo = o.from;
+    if (o.reg) { W.regIntent = true; W.reg = { name: o.reg.name ? `${o.reg.name} zurück` : "", days: o.reg.days, kind: o.reg.kind || "fix", at: o.reg.at || "17:00", from: o.reg.from || "16:00", to: o.reg.to || "18:00", hol: o.reg.hol !== false }; W.step = "regsetup"; }
+    else { W.when = Math.max(Date.now(), (o.after || Date.now()) + 2 * 3600e3); W.step = "route"; W.retNote = "Start und Ziel sind getauscht – wähle noch die Uhrzeit."; }
+    go("add"); });
+}
 // ---------- Verbindung teilen: kurzer Link, andere übernehmen sie mit einem Tipp in ihr Umstiegsheld ----------
 const legLine = l => { const f = l.from || l.dep, e = l.to || l.arr; return `${hm(f.plan)} ${l.label} ${cleanStop(f.name || "")} → ${cleanStop(e.name || "")}`; };   // gespeicherte (from/to) und angezeigte (dep/arr) Teilstrecken
 const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l => l.from || l.dep, e = l => l.to || l.arr;

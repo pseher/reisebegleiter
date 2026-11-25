@@ -466,3 +466,5 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .kp-c { font: inherit; font-size: 14px; line-height: 1; min-height: 36px; padding: 8px 12px; border-radius: 99px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); white-space: nowrap; cursor: pointer; }
 .kp-c[aria-pressed=true] { border-color: var(--accent); color: var(--accent); font-weight: 700; background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
 .kp-t { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+.swap-chip { margin: 8px 0 0; font-size: 14px; }
+.ret-card .row .btn { width: auto; margin: 0; }
