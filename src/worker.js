@@ -775,11 +775,13 @@ async function api(req, env, url) {
     const [mine, theirs] = await Promise.all([db.get(env, "rb_accounts", dev.account_id), db.get(env, "rb_accounts", src.account_id)]);
     const favs = [...(theirs?.favs || []), ...(mine?.favs || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id) === i).slice(0, 24);
     const places = [...(theirs?.prefs?.places || []), ...(mine?.prefs?.places || [])].filter((f, i, a) => f?.id && a.findIndex(x => x.id === f.id || x.name === f.name) === i).slice(0, 20);
-    await db.update(env, "rb_accounts", src.account_id, { favs, prefs: { ...(theirs?.prefs || {}), places } });
+    // Wiederherstellungscodes werden nicht übernommen: nach dem Verbinden gilt keiner mehr – neuen erstellen (Hinweis in der App)
+    const hadRec = !!(theirs?.recover_hash || mine?.recover_hash);
+    await db.update(env, "rb_accounts", src.account_id, { favs, prefs: { ...(theirs?.prefs || {}), places, recAt: null }, recover_hash: null });
     await db.mergeAccount(env, dev.account_id, src.account_id);
     await db.update(env, "rb_devices", src.id, { link_code: null, link_until: null });
     await db.update(env, "rb_devices", dev.id, { link_tries: null });
-    return json({ ok: true });
+    return json({ ok: true, recReset: hadRec });
   }
   // Wiederherstellungscode: einmal anzeigen, nur der Prüfwert wird gespeichert; ein neuer Code macht den alten ungültig
   if (p === "/api/recovery" && method === "GET") { const a = await db.get(env, "rb_accounts", dev.account_id); return json({ has: !!a?.recover_hash, at: a?.prefs?.recAt || null }); }

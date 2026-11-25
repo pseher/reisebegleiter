@@ -996,9 +996,16 @@ async function makeRecovery() {
   w.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-label="Dein Wiederherstellungscode"><h2>Dein Wiederherstellungscode</h2>
     <div class="rec-code">${esc(code)}</div>
     <p class="small">Gut aufheben – z. B. im Passwort-Manager oder als Foto. Ich zeige ihn nur jetzt. Wer ihn hat, sieht deine Fahrten: nicht weitergeben.</p>
-    <div class="dlg-btns"><button class="btn sec" data-copy>Kopieren</button>${pm ? `<button class="btn sec" data-pm>Im Passwort-Manager speichern</button>` : ""}</div>
+    <div class="dlg-btns"><button class="btn sec" data-copy>Kopieren</button><button class="btn sec" data-send>An mich senden</button></div>
+    ${pm ? `<div class="dlg-btns" style="margin-top:8px"><button class="btn sec" data-pm>Im Passwort-Manager speichern</button></div>` : ""}
     <div class="dlg-btns" style="margin-top:10px"><button class="btn" data-no>Ich habe ihn gesichert</button></div></div>`;
   w.querySelector("[data-copy]").onclick = async e => { try { await navigator.clipboard.writeText(code); e.target.textContent = "Kopiert ✓"; } catch { e.target.textContent = "Bitte abschreiben"; } };
+  // An eine Adresse deiner Wahl: Teilen-Menü (Mail, Notizen, Messenger an dich selbst) – sonst E-Mail ohne Empfänger
+  w.querySelector("[data-send]").onclick = async () => {
+    const text = `Mein Umstiegsheld-Wiederherstellungscode: ${code}\n\nZurückholen: umstiegsheld.de → Einstellungen → „Deine Geräte“ → „Code eingeben“. Nicht weitergeben.`;
+    try { if (navigator.share) return await navigator.share({ title: "Umstiegsheld – Wiederherstellungscode", text }); } catch (e) { if (e?.name === "AbortError") return; }
+    location.href = `mailto:?subject=${encodeURIComponent("Umstiegsheld – Wiederherstellungscode")}&body=${encodeURIComponent(text)}`;
+  };
   w.querySelector("[data-pm]")?.addEventListener("click", async e => { try { await navigator.credentials.store(new PasswordCredential({ id: "Umstiegsheld", name: "Umstiegsheld – Wiederherstellungscode", password: code })); e.target.textContent = "Gespeichert ✓"; } catch { e.target.textContent = "Ging nicht – bitte kopieren"; } });
   w.querySelector("[data-no]").onclick = () => { w.remove(); render(); };
   document.body.appendChild(w);
@@ -1078,10 +1085,11 @@ async function joinDevice(raw) {
   if (trips.length && !(await ask("Dieses Gerät verbinden?\n\nDeine Reisen und Favoriten von hier kommen dazu – danach siehst du auf beiden Geräten dasselbe.", { ok: "Verbinden" }))) return;
   DEV.busy = true; DEV.err = ""; render();
   try {
-    await api("/api/link/join", { method: "POST", body: { code } });
+    const jr = await api("/api/link/join", { method: "POST", body: { code } });
     Object.assign(DEV, { join: false, input: "", busy: false, list: null });
     await syncFavs(true); await loadTrips().catch(() => {});
-    flash = "Verbunden. Du siehst jetzt deine Reisen und Favoriten von allen Geräten.";
+    REC.has = false; REC.asked = true; try { localStorage.removeItem("rb_later_rec"); } catch {}
+    flash = `Verbunden. Du siehst jetzt deine Reisen und Favoriten von allen Geräten.${jr.recReset ? " Bisherige Wiederherstellungscodes gelten nicht mehr – bitte unter Einstellungen → „Konto sichern“ einen neuen erstellen." : ""}`;
     openId = null; go("home");
   } catch (e) { DEV.busy = false; DEV.err = e.message; render(); }
 }

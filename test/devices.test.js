@@ -271,3 +271,15 @@ test("Wiederherstellungscode: nach gelöschten Browserdaten alles zurückholen, 
   assert.equal((await call("/api/trips", { auth: N })).data.length, 1);
   assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: c2 } })).status, 400);   // schon im Konto
 });
+
+test("Verbinden: Wiederherstellungscodes gelten danach nicht mehr", async () => {
+  const A = (await call("/api/register", { method: "POST", body: { label: "Android-Handy" } })).data;
+  const B = (await call("/api/register", { method: "POST", body: { label: "Windows-PC" } })).data;
+  const cA = (await call("/api/recovery", { auth: A, method: "POST" })).data.code;
+  const { code } = (await call("/api/link/start", { auth: A, method: "POST" })).data;
+  const j = await call("/api/link/join", { auth: B, method: "POST", body: { code } });
+  assert.equal(j.data.recReset, true);
+  assert.equal((await call("/api/recovery", { auth: A })).data.has, false);
+  const N = (await call("/api/register", { method: "POST", body: {} })).data;
+  assert.equal((await call("/api/recovery/restore", { auth: N, method: "POST", body: { code: cA } })).status, 400);
+});
