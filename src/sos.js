@@ -24,6 +24,9 @@ export async function sos(env, trip, here, now = Date.now()) {
   // Teilstrecke, in der du laut Plan gerade sitzt (oder die als nächste losfährt)
   let ci = v.legs.findIndex(l => now >= l.dep.rt - MIN && now < l.arr.rt + MIN);
   if (ci < 0) ci = Math.max(0, v.legs.findIndex(l => now < l.dep.rt));
+  // Anschluss in diesen Zug verpasst: du sitzt nicht drin, sondern wartest am Umstieg – dafür gibt es „Ab …“
+  if (ci > 0 && v.transfers[ci - 1]?.status === "LOST" && now >= v.legs[ci - 1].arr.rt)
+    throw Object.assign(new Error(`Laut Plan wartest du gerade in ${clean(trip.legs[ci - 1].to.name)} – der ${trip.legs[ci].label} ist ohne dich weg. Such lieber „Ab ${clean(trip.legs[ci - 1].to.name)}“.`), { user: true });
   const leg = trip.legs[ci], lv = v.legs[ci];
   const info = { label: leg.label, onTrain: now >= lv.dep.rt - MIN, near: null, dist: null, located: !!here };
 

@@ -135,7 +135,7 @@ document.addEventListener("visibilitychange", async () => {
 // Solange man nicht auf der Startseite ist, liegt ein Eintrag im Verlauf. „Zurück“ macht dann einen Schritt in der App.
 let guard = false, skipPop = false;
 // Aufgeklappte Möglichkeiten/Einstellungen zählen als eigener Schritt: „Zurück“ klappt sie erst zu, statt die App zu verlassen
-const subOpen = () => !!(openCmp || sheetId || document.querySelector("[data-hide]"));
+const subOpen = () => !!(openCmp || sheetId || document.querySelector("[data-pbclose]"));
 const atRoot = () => view === "home" && !openId;
 function syncHistory() {
   if (!atRoot() && !guard) { history.pushState({ rb: 1 }, ""); guard = true; }
@@ -148,7 +148,7 @@ addEventListener("popstate", () => {
   guard = false;
   if (view === "add" && W) { const bk = document.getElementById("wBack"); if (bk) return bk.click(); W = null; return go("home"); }
   if (view !== "home") return go("home");
-  if (openId && subOpen()) { const hx = document.querySelector("[data-hide]"); if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
+  if (openId && subOpen()) { const hx = document.querySelector("[data-pbclose]"); if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
   if (openId) { openId = null; sheetId = null; }
   render();
 });
@@ -169,7 +169,17 @@ function headerBack() {
 }
 document.getElementById("hdrBack")?.addEventListener("click", () => { if (guard) history.back(); else { const bk = document.getElementById("wBack"); if (view === "add" && bk) bk.click(); else { openId = null; sheetId = null; go("home"); } } });
 const flashBox = () => offlineBox() + flashBox0();
-const flashBox0 = () => { if (!flash) return ""; const f = flash; flash = ""; return `<div class="banner ok small" role="status">${esc(f)}</div>`; };
+const flashBox0 = () => pushBox() + (() => { if (!flash) return ""; const f = flash; flash = ""; return `<div class="banner ok small" role="status">${esc(f)}</div>`; })();
+// Meldung, während die App offen ist: hier oben statt als Benachrichtigung (bleibt 2 Min. oder bis ✕)
+let PUSH_NOTE = null;
+const pushBox = () => { const n = PUSH_NOTE; if (!n || Date.now() - n.at > 120e3) return "";
+  return `<div class="banner push-note${n.urgent ? " urgent" : ""}" role="alert"><button class="pn-x" data-pushx aria-label="Meldung schließen">✕</button>
+    <button class="pn-main" data-pushopen><b>${esc(n.title)}</b>${n.body ? `<span>${esc(n.body)}</span>` : ""}</button></div>`; };
+document.addEventListener("click", e => {
+  if (e.target.closest("[data-pushx]")) { PUSH_NOTE = null; e.target.closest(".push-note")?.remove(); return; }
+  if (e.target.closest("[data-pushopen]")) { const id = PUSH_NOTE && tripFromUrl(PUSH_NOTE.url); PUSH_NOTE = null;
+    if (id && !(view === "add" && W)) { openId = id; sheetId = null; openLeg = null; go("home"); scrollTo(0, 0); } else render(); }
+});
 // Umstiegszeit für die Bewertung: in einer Reise deren eigene, sonst die übliche
 let CUR_OWN = null, CUR_ZB = false;
 const ownMin = () => (CUR_OWN != null ? CUR_OWN : MINT);
@@ -822,7 +832,7 @@ function optionsBlock(t) {
   const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? "Umstieg knapp – Möglichkeiten ansehen" : "Andere Verbindung suchen";
   if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${sub}${nAlt && tone !== "calm" ? ` · ${nAlt} Möglichkeit${nAlt > 1 ? "en" : ""}` : ""}</span></span><span class="chev">›</span></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
-  return `<section class="planb-box ${tone}"><button class="pb-head" data-optopen="${t.id}"><b>Plan B</b><span class="small muted">schließen ▴</span></button>${body}</section>`;
+  return `<section class="planb-box ${tone}"><div class="pb-head"><b>Plan B</b><button class="card-x" data-pbclose="${t.id}" aria-label="Plan B schließen">✕</button></div>${body}</section>`;
 }
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
@@ -832,6 +842,7 @@ function sosButton(t) {
 // In welcher Fahrt sitzt du gerade? (auch: Zug steht mit Verspätung noch am Startbahnhof) – sonst -1
 function ridingLeg(t) {
   const now = Date.now(), i = t.legs.findIndex(l => now >= Date.parse(l.dep.rt) - MIN && now < Date.parse(l.arr.rt));
+  if (i > 0 && t.transfers[i - 1]?.status === "LOST") return -1;   // Anschluss verpasst: du sitzt nicht in diesem Zug, sondern wartest am Umstieg
   if (i >= 0) return i;
   const f = t.legs[0];
   return t.phase === "before" && now >= Date.parse(f.dep.plan) && f.dep.delay >= 3 ? 0 : -1;
@@ -855,8 +866,8 @@ function sosCard(t) {
       ${takeBtn(`${t.id}|${a.from}|${k}|sos`, a, k === rec, a.stayOn ? `Im ${i.label} sitzen bleiben bis ${cleanStop(a.at)}, an ca. ${hm(a.exitAt)}` : `In ${cleanStop(a.at)} aussteigen (an ${hm(a.exitAt)}), dann ${a.label} – Ziel ca. ${hm(a.arr)}`)}
     </div></div>`).join("");
   const ok = !s.plan || s.plan.ok !== false;
-  return `<section class="card ${bad ? "sos" : "planb"}"><div class="card-h"><div class="k">Plan B</div><button class="card-x" data-sosx="${t.id}" aria-label="Plan B schließen">✕</button></div>
-      <p style="margin:0 0 4px">${where} <span class="small muted">(${i.located ? "per Standort" : "geschätzt nach Fahrplan"})</span>.</p>
+  return `<section class="card ${bad ? "sos" : "planb"}">
+      <p style="margin:0 0 4px">${where} <span class="small muted">(${i.located && i.near ? "per Standort" : "geschätzt nach Fahrplan"})</span>.</p>
       ${exits ? `<p class="small muted" style="margin:0">Nächste Halte: ${exits}</p>` : ""}
       ${rows ? `<div class="tiles" style="margin-top:8px">${plan}${rows}</div>` : `<p style="margin:8px 0 0"><b>${ok ? "Keine bessere Verbindung – dein Plan klappt." : "Gerade keine andere Verbindung gefunden."}</b> <span class="small muted">Ich behalte ${vehicleOf(t.legs[Math.max(0, t.current)]).dein} im Blick.</span></p>`}
       <div class="seg-info small"><span class="muted">Stand ${hm(new Date(s.at).toISOString())}</span><button class="link" data-sos="${t.id}">↻ Erneut suchen</button></div></section>`;
@@ -903,7 +914,7 @@ function hereCard(t) {
   if (isMissed) return `<h3 class="sec-h">So kommst du jetzt weiter</h3>
     <div class="seg-info small muted"><span>ab ${esc(cleanStop(t.legs[mode === "cancel" ? t.here.idx ?? 0 : t.missed ?? 0].dep.name))}${mode === "cancel" ? " · ich aktualisiere das laufend" : " · sofort"}</span>${mode === "cancel" ? "" : `<button class="link" data-missed="${t.id}|${t.missed ?? 0}">↻ Aktualisieren</button>`}</div>
     <div class="tiles">${rows.trim() || `<div class="cmp-row"><p class="small muted" style="margin:0">Gerade keine Verbindung gefunden.</p></div>`}</div>`;
-  return `<section class="card"><div class="card-h"><div class="k">Andere Verbindungen</div><button class="card-x" data-hide="${t.id}" aria-label="Schließen">✕</button></div>
+  return `<section class="card"><div class="k">Andere Verbindungen</div>
     ${searchSeg(t, mode)}
     <div class="seg-info small muted"><span>${mode === "now" ? "ab sofort" : mode === "next" ? `ab ${esc(cleanStop(ns.name))}, an ${hm(ns.at)}` : `geplante Zeit · ${day(t.legs[0].dep.plan)}`}</span>
       <button class="link" data-here="${t.id}" data-mode="${mode}">↻ Aktualisieren</button></div></section>
@@ -1365,6 +1376,12 @@ function bindCommon() {
     navigator.geolocation.getCurrentPosition(go, () => go(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
   });
   $app.querySelectorAll("[data-optx]").forEach(b => b.onclick = () => { OPT_OPEN = null; render(); });
+  $app.querySelectorAll("[data-pbclose]").forEach(b => b.onclick = async () => {   // ein ✕ schließt alles: Plan B, Suche ab Zug, eigene Suche
+    const id = b.dataset.pbclose, x = trips.find(y => y.id === id); OPT_OPEN = null;
+    trips = trips.map(y => (y.id === id ? { ...y, sos: null, here: null } : y)); render();
+    if (x?.sos) api(`/api/trips/${id}/sos`, { method: "DELETE" }).catch(() => {});
+    if (x?.here) api(`/api/trips/${id}/here`, { method: "DELETE" }).catch(() => {});
+  });
   $app.querySelectorAll("[data-sosx]").forEach(b => b.onclick = async () => {
     const id = b.dataset.sosx; OPT_OPEN = null;
     trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
@@ -2420,6 +2437,13 @@ const tripFromUrl = u => { try { return new URL(u, location.origin).searchParams
 const startTrip = tripFromUrl(location.href);
 if (startTrip) { openId = startTrip; sheetId = null; openLeg = null; if (view !== "add") view = "home"; history.replaceState(null, "", "/"); }
 navigator.serviceWorker?.addEventListener("message", async e => {
+  if (e.data?.push) {   // Meldung kam, während die App offen ist
+    PUSH_NOTE = { ...e.data.push, at: Date.now() };
+    if (e.data.push.urgent) navigator.vibrate?.(200);
+    await loadTrips().catch(() => {});
+    if (!(view === "add" && W)) render();   // laufende Eingabe nicht stören
+    return;
+  }
   const id = e.data?.open && tripFromUrl(e.data.open);
   if (!id) return;
   if (view === "add" && W && (W.legs?.length || W.rFrom || W.imported)) return;   // laufende Eingabe nicht verwerfen

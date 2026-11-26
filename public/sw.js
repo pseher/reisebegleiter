@@ -1,5 +1,5 @@
 // Reisebegleiter – Service Worker: App startet auch mit schlechtem Netz, Meldungen kommen an
-const V = "rb-129";
+const V = "rb-130";
 const SHELL = ["/", "/app.js", "/style.css", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -28,10 +28,22 @@ self.addEventListener("fetch", e => {
     net.then(res => { clearTimeout(t); give(res); }).catch(() => { clearTimeout(t); saved().then(m => { if (m) give(m); else if (!done) { done = true; resolve(Response.error()); } }); });
   }));
 });
+// Ist die App gerade offen und sichtbar, zeigt sie die Meldung selbst – keine zusätzliche Benachrichtigung.
+// Safari verlangt zu jeder Meldung eine sichtbare Benachrichtigung (sonst endet das Abo): dort still zeigen und gleich wieder schließen.
+const APPLE = /iPhone|iPad|Macintosh/.test(navigator.userAgent) && !/Chrome|CriOS|Chromium|Edg|Firefox|FxiOS/.test(navigator.userAgent);
 self.addEventListener("push", e => {
   let m = {}; try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(m.title || "Umstiegsheld", { body: m.body || "", tag: m.tag || undefined, renotify: !!m.tag,
-    icon: "/icon-192.png", badge: "/icon-192.png", data: { url: m.url || "/" }, requireInteraction: !!m.urgent }));
+  const opts = { body: m.body || "", tag: m.tag || undefined, renotify: !!m.tag, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: m.url || "/" }, requireInteraction: !!m.urgent };
+  e.waitUntil((async () => {
+    const ws = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    const vis = ws.find(w => w.visibilityState === "visible");
+    if (!vis) return self.registration.showNotification(m.title || "Umstiegsheld", opts);
+    vis.postMessage({ push: { title: m.title || "", body: m.body || "", url: m.url || "/", urgent: !!m.urgent } });
+    if (!APPLE) return;
+    const tag = m.tag || `rb-${Date.now()}`;
+    await self.registration.showNotification(m.title || "Umstiegsheld", { ...opts, tag, renotify: false, silent: true, requireInteraction: false });
+    (await self.registration.getNotifications({ tag })).forEach(n => n.close());
+  })());
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();
