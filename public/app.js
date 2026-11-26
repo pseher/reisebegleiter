@@ -767,11 +767,14 @@ let sosBusy = null;
 // „Ich sitze im …“-Knopf: rot nur, wenn wirklich Gefahr besteht – sonst zurückhaltend
 // Plan B und „Andere Verbindungen“: läuft alles, nur eine schmale Zeile – bei Problemen (oder wenn gerade gesucht wird) aufgeklappt
 let OPT_OPEN = null;
+// Mit ✕ geschlossen: Plan B bleibt eingeklappt – bis es schlimmer wird (z. B. von „knapp“ zu „gefährdet“ oder Ausfall)
+const OPT_HIDE = {}, RANK = { OK: 0, PLAN: 0, WATCH: 1, RISK: 2, LOST: 3 };
 function optionsBlock(t) {
   const busy = t.missed != null || t.sos || sosBusy === t.id || t.here || hereBusy === t.id;
   if (t.win && !t.win.picked && t.phase === "before") return `${sosButton(t)}${windowCard(t)}`;
-  const calm = (t.status === "OK" || planOnly(t)) && !busy && t.phase !== "done";
-  if (calm && OPT_OPEN !== t.id) return `<button class="opt-line" data-optopen="${t.id}"><span>Etwas läuft anders?</span> <b>Plan B · Andere Verbindung ›</b></button>`;
+  const hidden = OPT_HIDE[t.id] != null && (RANK[t.status] ?? 0) <= OPT_HIDE[t.id];
+  const calm = ((t.status === "OK" || planOnly(t)) || hidden) && !busy && t.phase !== "done";
+  if (calm && OPT_OPEN !== t.id) return hidden && t.status !== "OK" ? `<button class="opt-line" data-optopen="${t.id}"><span>Plan B ausgeblendet.</span> <b>Wieder ansehen ›</b></button>` : `<button class="opt-line" data-optopen="${t.id}"><span>Etwas läuft anders?</span> <b>Plan B · Andere Verbindung ›</b></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
   return `${calm ? `<button class="opt-line open" data-optopen="${t.id}">Plan B · Andere Verbindung <span class="chev">▴</span></button>` : ""}${sosButton(t)}${body}`;
 }
@@ -988,7 +991,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
   bindAccess(t); bindRet();
-  $app.querySelector("[data-optopen]")?.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; render(); });
+  $app.querySelector("[data-optopen]")?.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; if (OPT_OPEN) delete OPT_HIDE[t.id]; render(); });
   bindHints();
   bindCommon();
 }
@@ -1312,11 +1315,13 @@ function bindCommon() {
     navigator.geolocation.getCurrentPosition(go, () => go(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
   });
   $app.querySelectorAll("[data-sosx]").forEach(b => b.onclick = async () => {
-    const id = b.dataset.sosx; trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
+    const id = b.dataset.sosx, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null;
+    trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
     await api(`/api/trips/${id}/sos`, { method: "DELETE" }).catch(() => {});
   });
   $app.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => {
-    const id = b.dataset.hide; trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();
+    const id = b.dataset.hide, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null;
+    trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();
     await api(`/api/trips/${id}/here`, { method: "DELETE" }).catch(() => {});
   });
   $app.querySelectorAll("[data-here]").forEach(b => b.onclick = async () => {
