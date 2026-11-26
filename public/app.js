@@ -678,8 +678,7 @@ function planBCard(t) {
       <button class="btn sec small-btn" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
   }
   // im Rahmen wie Plan B, mit ✕ zum Ausblenden (kommt von selbst wieder, wenn es schlimmer wird)
-  return `<section class="card ${lost || tr.status === "RISK" ? "sos" : "planb"} opt-card"><div class="card-h"><div class="k">${lost ? "So kommst du jetzt weiter" : "Plan B · Deine Möglichkeiten"}</div><button class="card-x" data-optx="${t.id}" aria-label="Plan B ausblenden">✕</button></div>
-    <div class="tiles">${zb}${curRow}${rows}</div>${SPECIAL}</section>`;
+  return `<h3 class="sec-h" style="margin-top:6px">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>${SPECIAL}`;
 }
 
 // „S Hohenzollerndamm (Berlin)“ = „Hohenzollerndamm“
@@ -767,23 +766,24 @@ function liveBadge(a) {
 // ---------- SOS: im Zug, Verspätung angesagt → sofort Ausstiege und Alternativen ----------
 let sosBusy = null;
 // „Ich sitze im …“-Knopf: rot nur, wenn wirklich Gefahr besteht – sonst zurückhaltend
-// Plan B und „Andere Verbindungen“: läuft alles, nur eine schmale Zeile – bei Problemen (oder wenn gerade gesucht wird) aufgeklappt
+// Plan B: ein zentraler Knopf. Beim Öffnen der Fahrt immer zu; farbig, wenn Plan B gebraucht wird. Ein Tipp öffnet den Kasten.
 let OPT_OPEN = null;
-// Mit ✕ geschlossen: Plan B bleibt eingeklappt – bis es schlimmer wird (z. B. von „knapp“ zu „gefährdet“ oder Ausfall)
-const OPT_HIDE = {}, RANK = { OK: 0, PLAN: 0, WATCH: 1, RISK: 2, LOST: 3 };
+const RANK = { OK: 0, PLAN: 0, WATCH: 1, RISK: 2, LOST: 3 };
 function optionsBlock(t) {
+  if (t.phase === "done") return "";
   const busy = t.missed != null || t.sos || sosBusy === t.id || t.here || hereBusy === t.id;
   if (t.win && !t.win.picked && t.phase === "before") return `${sosButton(t)}${windowCard(t)}`;
-  const hidden = OPT_HIDE[t.id] != null && (RANK[t.status] ?? 0) <= OPT_HIDE[t.id];
-  const calm = ((t.status === "OK" || planOnly(t)) || hidden) && !busy && t.phase !== "done";
-  if (calm && OPT_OPEN !== t.id) return hidden && t.status !== "OK" ? `<button class="opt-line" data-optopen="${t.id}"><span>Plan B ausgeblendet.</span> <b>Wieder ansehen ›</b></button>` : `<button class="opt-line" data-optopen="${t.id}"><span>Etwas läuft anders?</span> <b>Plan B · Andere Verbindung ›</b></button>`;
+  const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length : 0;
+  const tone = st === "LOST" || st === "RISK" ? "bad" : st === "WATCH" ? "watch" : "calm";
+  const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? "Umstieg knapp – Möglichkeiten ansehen" : "Andere Verbindung suchen";
+  if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${sub}${nAlt && tone !== "calm" ? ` · ${nAlt} Möglichkeit${nAlt > 1 ? "en" : ""}` : ""}</span></span><span class="chev">›</span></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
-  return `${calm ? `<button class="opt-line open" data-optopen="${t.id}">Plan B · Andere Verbindung <span class="chev">▴</span></button>` : ""}${sosButton(t)}${body}`;
+  return `<section class="planb-box ${tone}"><button class="pb-head" data-optopen="${t.id}"><b>Plan B</b><span class="small muted">schließen ▴</span></button>${sosButton(t)}${body}</section>`;
 }
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
   const urgent = t.status === "RISK" || t.status === "LOST";
-  return `<button class="btn ${urgent ? "sos-btn" : "sec"} sos-big" data-sos="${t.id}"><b>${urgent ? "SOS: Anschluss in Gefahr" : "Plan B: Verspätung? Anschluss weg?"}</b><span>Ich sitze ${vehicleOf(t.legs[ridingLeg(t)]).im} – such mir sofort eine andere Verbindung</span></button>`;
+  return `<button class="btn ${urgent ? "sos-btn" : "sec"} sos-big" data-sos="${t.id}"><b>${urgent ? "Jetzt neu suchen" : "Neue Verbindung suchen"}</b><span>Ich sitze ${vehicleOf(t.legs[ridingLeg(t)]).im} – such mir ab hier eine andere Verbindung</span></button>`;
 }
 // In welcher Fahrt sitzt du gerade? (auch: Zug steht mit Verspätung noch am Startbahnhof) – sonst -1
 function ridingLeg(t) {
@@ -938,6 +938,7 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
+  if (SCREEN_SIG.split("|")[3] !== String(t.id)) OPT_OPEN = null;   // neu in die Fahrt gekommen: Plan B erst einmal zu
   const hint = hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster)
   $app.innerHTML = `${flashBox()}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
@@ -954,8 +955,7 @@ function renderTrip(t, many) {
     ${t.phase === "before" ? retCard(RET?.tripId === t.id) : ""}
     ${t.follow === true ? "" : optionsBlock(t)}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
-    ${t.phase === "enroute" && t.status !== "OK" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Fahrt · ${t.legs.length} ${t.legs.length === 1 ? "Teilstrecke" : "Teilstrecken"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
-      : `${t.phase === "enroute" && t.status !== "OK" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Fahrt <span class="chev">▴</span></button>` : `<h3 class="sec-h">${t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3>`}<div class="card flat">${timeline(t)}</div>`}
+    <h3 class="sec-h">${t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3><div class="card flat">${timeline(t)}</div>
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
     ${sheet ? `<section class="card" id="sheet">
@@ -993,7 +993,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
   bindAccess(t); bindRet();
-  $app.querySelector("[data-optopen]")?.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; if (OPT_OPEN) delete OPT_HIDE[t.id]; render(); });
+  $app.querySelectorAll("[data-optopen]").forEach(b => b.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; render(); }));
   bindHints();
   bindCommon();
 }
@@ -1316,14 +1316,14 @@ function bindCommon() {
     if (!navigator.geolocation) return go(null);
     navigator.geolocation.getCurrentPosition(go, () => go(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
   });
-  $app.querySelectorAll("[data-optx]").forEach(b => b.onclick = () => { const id = b.dataset.optx, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null; render(); });
+  $app.querySelectorAll("[data-optx]").forEach(b => b.onclick = () => { OPT_OPEN = null; render(); });
   $app.querySelectorAll("[data-sosx]").forEach(b => b.onclick = async () => {
-    const id = b.dataset.sosx, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null;
+    const id = b.dataset.sosx; OPT_OPEN = null;
     trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
     await api(`/api/trips/${id}/sos`, { method: "DELETE" }).catch(() => {});
   });
   $app.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => {
-    const id = b.dataset.hide, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null;
+    const id = b.dataset.hide; OPT_OPEN = null;
     trips = trips.map(x => (x.id === id ? { ...x, here: null } : x)); render();
     await api(`/api/trips/${id}/here`, { method: "DELETE" }).catch(() => {});
   });
