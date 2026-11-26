@@ -16,11 +16,11 @@ async function motis(env, params) {
   const base = env.TRANSITOUS_URL || "https://api.transitous.org";
   const { fromEva, toEva, ...rest } = params;
   const qs = new URLSearchParams(rest).toString();
-  for (const v of ["v6", "v5", "v4"]) {
-    count("motis"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } });
-    if (r.status === 404) continue;
+  for (const v of VER.plan ? [VER.plan] : ["v6", "v5", "v4"]) {
+    count("motis"); count("mt_plan"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } });
+    if (r.status === 404 && !VER.plan) continue;
     if (!r.ok) { count("err_motis"); throw new Error(`Verbindungssuche: HTTP ${r.status}`); }
-    return r.json();
+    VER.plan = v; return r.json();
   }
   throw new Error("Verbindungssuche nicht erreichbar");
 }
@@ -178,15 +178,26 @@ export async function searchStops(env, q, limit = 6) {
 }
 
 // ---------- Abfahrten und Fahrtverlauf an beliebigen Haltestellen (Transitous/MOTIS) ----------
+// Transitous schonen: die funktionierende API-Version merken (statt jedes Mal ältere durchzuprobieren)
+// und gleiche Abrufe kurz zwischenspeichern – mehrere Fahrten/Alternativen fragen oft dieselbe Fahrt ab
+const VER = {}, MEMO = new Map(), MEMO_MS = 50e3;
 async function motisGet(env, path, params) {
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org", qs = new URLSearchParams(params).toString();
-  for (const v of ["v5", "v4", "v3", "v2", "v1"]) {
-    count("motis"); const r = await fetch(`${base}/api/${v}/${path}?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
-    if (!r || r.status === 404) continue;
-    if (!r.ok) throw new Error(`Haltestelle: HTTP ${r.status}`);
-    return r.json();
-  }
-  throw new Error("Haltestellen-Abfahrten nicht erreichbar");
+  const base = env.TRANSITOUS_URL || "https://api.transitous.org", qs = new URLSearchParams(params).toString(), mk = `${path}?${qs}`;
+  const hit = MEMO.get(mk); if (hit && Date.now() - hit.t < MEMO_MS) { count("motis_memo"); return hit.p; }
+  const p = (async () => {
+    const vs = VER[path] ? [VER[path]] : ["v5", "v4", "v3", "v2", "v1"];
+    for (const v of vs) {
+      count("motis"); count(`mt_${path}`); const r = await fetch(`${base}/api/${v}/${path}?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+      if (!r) continue;
+      if (r.status === 404 && !VER[path]) continue;
+      if (!r.ok) throw new Error(`Haltestelle: HTTP ${r.status}`);
+      VER[path] = v; return r.json();
+    }
+    throw new Error("Haltestellen-Abfahrten nicht erreichbar");
+  })();
+  if (MEMO.size > 500) MEMO.clear();
+  MEMO.set(mk, { t: Date.now(), p }); p.catch(() => MEMO.delete(mk));
+  return p;
 }
 const MOCK_STOP = { name: "Mommsenstraße", lat: 52.5045, lon: 13.3066 };
 // Haltestellen in der Nähe eines Standorts

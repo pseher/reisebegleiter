@@ -137,7 +137,7 @@
       const tech = `<details><summary>Technik und Datenquellen</summary>
         <div class="kpis" style="margin-top:10px">
           ${kpi("DB-Abrufe, 24 Std.", num(S(D1, "db")), `Spitze ${peak} je Minute · ${S(D1, "db429")}× „zu viele Anfragen“ (429)`)}
-          ${kpi("Transitous / VBB, 24 Std.", `${num(S(D1, "motis"))} · ${num(S(D1, "vbb"))}`, "Verbindungssuche, Busse und Ausland")}
+          ${kpi("Transitous / VBB, 24 Std.", `${num(S(D1, "motis"))} · ${num(S(D1, "vbb"))}`, S(D1, "mt_plan") + S(D1, "mt_trip") ? `Suchen ${num(S(D1, "mt_plan"))} (davon Plan B automatisch: ${num(S(D1, "pb_auto"))} Läufe) · Fahrtverlauf/Busse ${num(S(D1, "mt_trip"))} · Haltestellen ${num(S(D1, "mt_stoptimes") + S(D1, "mt_reverse-geocode"))} · eingespart ${num(S(D1, "motis_memo"))}` : "Verbindungssuche, Busse und Ausland")}
           ${kpi("Fehler je Quelle, 7 Tage", `${S(W, "err_db")} · ${S(W, "err_motis")} · ${S(W, "err_vbb")}`, `DB · Transitous · VBB – dazu ${S(W, "err_api")} Serverfehler${S(W, "err_vbb_429") + S(W, "err_vbb_5xx") + S(W, "err_vbb_4xx") + S(W, "err_vbb_net") ? `. VBB: ${S(W, "err_vbb_429")}× zu viele Anfragen · ${S(W, "err_vbb_5xx")}× Störung beim VBB · ${S(W, "err_vbb_4xx")}× abgelehnt · ${S(W, "err_vbb_net")}× nicht erreichbar` : ""}`)}
           ${kpi("Prüflauf", runMs ? `${(runMs / 1000).toFixed(1).replace(".", ",")} s` : "–", `Ø Dauer eines Laufs · höchstens ${Math.max(0, ...W.map(x => x.trips_max || 0))} Fahrten gleichzeitig`)}
         </div>

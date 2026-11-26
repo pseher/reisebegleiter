@@ -1,6 +1,6 @@
 import { flush, count } from "./stats.js";
 // Überwachung: Echtzeit für laufende Reisen holen, bewerten, Plan B vorbereiten, Meldungen schicken.
-import { evaluate, diff, transferMinutes, changesFV } from "./engine.js";
+import { evaluate, diff, transferMinutes, changesFV, overnight } from "./engine.js";
 import { findJourney } from "./openboards.js";
 import { connections, resolveConnection, resolveLeg, rideOn } from "./routing.js";
 import { search as searchStationsSync, byEva } from "./stations.js";
@@ -290,7 +290,7 @@ const placeOf = s => (s?.eva ? { eva: s.eva, lat: s.lat, lon: s.lon } : s?.lat !
 // Bewertung + Plan B + Meldungen für eine Reise (nach dem Beobachten)
 export async function assess(env, trip, now, cache) {
   let v = evaluate(trip, now);
-  const prev = { ...(trip.state || {}) }, alt = { ...(prev.alt || {}) }, altAt = { ...(prev.altAt || {}) };
+  const prev = { ...(trip.state || {}) }, alt = { ...(prev.alt || {}) }, altAt = { ...(prev.altAt || {}) }, altSt = { ...(prev.altSt || {}) };
   const firstDep = v.legs[0].dep.rt;
   for (const t of v.transfers) {
     const k = v.transfers.indexOf(t);
@@ -300,10 +300,14 @@ export async function assess(env, trip, now, cache) {
     // Weit vor der Reise gibt es noch keine Echtzeit: Ausweichsuchen erst ab 4 Std. vorher (spart Abfragen)
     if ((acute && firstDep - now < 4 * 3600e3) || calm) {
       // je näher und je kritischer, desto öfter (Alternativen werden dabei auch mit Echtzeit geprüft)
-      const every = t.status === "RISK" || t.status === "LOST" ? 4 : t.arrRt - now < 90 * MIN ? 5 : 12;
+      // Gefundene Möglichkeiten werden ohnehin live mitgeprüft (DB-Tafeln) – neu gesucht wird seltener, um Transitous zu schonen.
+      // Heute geht nichts mehr (alles über Nacht): daran ändert sich so schnell nichts.
+      const has = alt[k]?.length > 0, night = t.status === "LOST" && has && overnight(alt[k], v.bookedArr);
+      const every = night ? 30 : t.status === "LOST" ? (has ? 8 : 4) : t.status === "RISK" ? (has ? 8 : 5) : t.arrRt - now < 90 * MIN ? 10 : 20;
       const woke = acute && alt[k]?.length && alt[k].every(a => !a.watch) && alt[k].some(a => a.legs?.length && Date.parse(a.depPlan || a.dep) - now <= 3 * 3600e3);   // eben noch ruhig (ohne Live), jetzt eng → sofort live prüfen
-      if (!alt[k] || woke || now - (altAt[k] || 0) > every * MIN) { try { alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; } catch (e) { console.log("Plan B:", e.message); } }
-    } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; }
+      const changed = altSt[k] !== t.status;   // Lage hat sich verändert (z. B. gefährdet → klappt nicht): gleich neu suchen
+      if (!alt[k] || woke || changed || now - (altAt[k] || 0) > every * MIN) { try { count("pb_auto"); alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; altSt[k] = t.status; } catch (e) { console.log("Plan B:", e.message); } }
+    } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; delete altSt[k]; }
   }
   // Ausfall ohne Umstieg dahinter (z. B. nur ein Zug): selbst die nächsten Möglichkeiten ab dieser Station suchen
   let here = prev.here;
@@ -315,7 +319,7 @@ export async function assess(env, trip, now, cache) {
   const d0 = diff(trip, v, { ...prev, alt }, now), state = d0.state;
   // „Zug verpasst“: du kümmerst dich gerade selbst darum. (Zeitfenster: die nächste Fahrt wird automatisch überwacht, mit Meldungen)
   const msgs = prev.missed ? [] : d0.msgs;
-  trip.state = { ...prev, ...state, alt, altAt, here, status: v.status, at: now };   // übrige Merker (z. B. undo, geo, bind…) behalten
+  trip.state = { ...prev, ...state, alt, altAt, altSt, here, status: v.status, at: now };   // übrige Merker (z. B. undo, geo, bind…) behalten
   const last = v.legs[v.legs.length - 1];
   if ((v.phase === "done" && now > last.arr.rt + 30 * MIN) || now > last.arr.rt + 4 * 3600e3) trip.active = false;
   trip.ends_at = new Date(last.arr.rt).toISOString();
