@@ -200,6 +200,7 @@ const KICKER = { OK: "Alles gut", WATCH: "Knapp", RISK: "Anschluss gefährdet", 
 const knappLine = t => { const w = (t.transfers || []).find(x => x.status === "WATCH"); return w ? `Umstieg ${cleanStop(w.at || "")} knapp · ${w.gap} Min.` : t.title; };
 const listState = t => {
   const tr = (t.transfers || []).find(x => x.status === t.status);
+  if (t.status === "LOST" && stuckOf(t)) return "Heute nicht mehr – bitte wählen";
   if (t.status === "LOST") return t.missed != null ? "Verpasst – Plan B" : t.legCancel != null || tr?.reason === "cancel" ? "Fällt aus – Plan B" : "Anschluss klappt nicht – Plan B";
   if (t.status === "RISK") return tr && tr.gap < 0 ? "Anschluss klappt wohl nicht" : KICKER.RISK;
   if (t.status === "WATCH" && !t.transfers.some(x => x.status === "WATCH") && t.finalDelay >= 3) return `${t.finalDelay} Min. später`;
@@ -406,20 +407,28 @@ function quickAway() {
 // Wann? „heute“ nicht nennen, sonst „morgen“ bzw. Wochentag – damit eine Ankunft am nächsten Tag nicht übersehen wird
 const dayPre = iso => { const ms = Date.parse(iso), now = Date.now(); return sameDay(ms, now) ? "" : sameDay(ms, now + 864e5) ? "morgen " : `${new Date(ms).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })} `; };
 // Übernachtung: ein langer Halt über die Nacht (≥ 3 Std., Weiterfahrt an einem anderen Tag)
+// Übernachtung = mindestens 3 Std. Warten, und 3 Uhr nachts (Berliner Zeit) liegt in der Wartezeit
+const berlinMin = ms => { const [h, m] = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms)).split(":").map(Number); return h * 60 + m; };
 function nightGap(arr, dep, at) {
-  const g = Math.round((Date.parse(dep) - Date.parse(arr)) / MIN);
-  return g >= 180 && !sameDay(Date.parse(arr), Date.parse(dep)) ? { at, arr, dep, gap: g } : null;
+  const a = Date.parse(arr), d = Date.parse(dep), g = Math.round((d - a) / MIN);
+  if (g < 180) return null;
+  const to3 = (180 - berlinMin(a) + 1440) % 1440;   // Minuten bis zum nächsten 3:00 Uhr
+  return a + to3 * MIN <= d ? { at, arr, dep, gap: g } : null;
 }
 const nightOf = a => { const L = a?.legs || []; for (let j = 0; j + 1 < L.length; j++) { const n = nightGap(L[j].to.rt || L[j].to.plan, L[j + 1].from.rt || L[j + 1].from.plan, cleanStop(L[j].to.name)); if (n) return n; } return null; };
 // Ziel im Ausland? (Bahnhofsnummern in Deutschland beginnen mit 80)
 const abroad = t => { const z = t.legs[t.legs.length - 1].arr; return !/^80\d{5}$/.test(String(z.eva || "")); };
 // Plan geht nicht mehr: die Empfehlung gleich im roten Kasten – ein Tipp genügt. Daneben genau ein zweiter Weg: bei der Bahn gegenprüfen.
-function heroRec(t) {
-  if (t.status !== "LOST" || t.phase === "done") return "";
+function bestRec(t) {
   let a = null, data = "", list = null;
   const hl = t.here && (t.here.mode === "cancel" || t.here.mode === "missed") ? t.here.list : null;
   if (hl?.length) { const i = bestIdx(hl); if (i >= 0) { a = hl[i]; data = `${t.id}|0|${i}|here`; list = hl; } }
   if (!a) { const k = t.transfers.findIndex(x => x.status === "LOST" && x.alt?.length); if (k >= 0) { const i = bestIdx(t.transfers[k].alt, t.plan.dep); if (i >= 0) { a = t.transfers[k].alt[i]; data = `${t.id}|${k}|${i}`; list = t.transfers[k].alt; } } }
+  return { a, data, list };
+}
+function heroRec(t) {
+  if (t.status !== "LOST" || t.phase === "done") return "";
+  const { a, data, list } = bestRec(t);
   const bc = bahnCheck(t);
   const bahnBtn = bc ? `<a class="btn sec small-btn bahn-check" href="${esc(bc.url)}" target="_blank" rel="noopener" data-bahncheck>Bei der Bahn gegenprüfen <span>ab ${esc(bc.from)} ${hm(bc.at)}</span></a>` : "";
   if (!a) return bahnBtn ? `<div class="hero-rec"><div class="small">Ich finde gerade keine passende Möglichkeit und suche weiter.</div>${bahnBtn}</div>` : "";
@@ -437,6 +446,62 @@ function heroRec(t) {
     <button class="btn small-btn" data-adopt="${data}" data-zb="${zb ? "1" : ""}" data-adopt-text="${esc(`${a.label}: ab ${hm(a.dep)}, an ${dayPre(a.arr)}${hm(a.arr)}`)}">Die nehme ich</button>
     ${bahnBtn}${notes}${more ? `<button class="link small" data-optopen="${t.id}" data-optonly>Andere Möglichkeiten ansehen</button>` : ""}</div>`;
 }
+// ---------- „Heute nicht mehr“: die beste Möglichkeit führt über Nacht. Dann nüchtern sagen, was los ist, und wählen lassen ----------
+let STUCK_ORIG = null;          // Fahrt-ID, deren ursprüngliche Fahrt aufgeklappt ist
+const STUCK_REQ = new Set();     // pro Sitzung nur einmal automatisch suchen
+const destOf = t => cleanStop((([...t.legs].reverse().find(isTrainLeg)) || t.legs[t.legs.length - 1]).arr.name);
+function stuckOf(t) {
+  if (t.follow === true || t.status !== "LOST" || t.phase === "done") return null;
+  const r = bestRec(t), morning = t.here?.mode === "morning";
+  const night = r.a ? nightOf(r.a) : null;
+  const late = r.a && !sameDay(Date.parse(r.a.arr), Date.parse(t.planArr)) && Date.parse(r.a.arr) - Date.parse(t.planArr) > 3 * 3600e3;
+  return night || late || morning ? { ...r, night } : null;
+}
+async function loadStuck(id) {
+  try { const v = await api(`/api/trips/${id}/stuck`, { method: "POST" }); trips = trips.map(x => (x.id === id ? v : x)); }
+  catch (e) { trips = trips.map(x => (x.id === id ? { ...x, stuckErr: e.message } : x)); }
+  if (openId === id) render();
+}
+const tile = (icon, title, sub, attrs, extra = "") => `<button class="sk-tile" ${attrs}><span class="sk-i" aria-hidden="true">${icon}</span><span><b>${title}</b><span>${sub}</span>${extra}</span></button>`;
+function stuckView(t, sk) {
+  const now = Date.now(), dest = esc(destOf(t)), k = t.transfers.findIndex(x => x.status === "LOST");
+  const S = k >= 0 ? t.legs[k].arr : t.legs[0].dep, at = esc(cleanStop(S.name)), arrAt = Date.parse(S.rt);
+  const ml = t.here?.mode === "morning" ? t.here.list || [] : null;
+  if (!ml && !t.stuckErr && !STUCK_REQ.has(t.id)) { STUCK_REQ.add(t.id); setTimeout(() => loadStuck(t.id), 0); }
+  const m = ml?.[0] || null;
+  const tiles = [];
+  // 1. Hier übernachten, morgen früh weiter
+  if (m) tiles.push(tile("🛏️", `In ${at} übernachten, morgen früh weiter`, `${esc(dayPre(m.dep))}ab ${hm(m.dep)} → ${dest} an ${sameDay(Date.parse(m.arr), Date.parse(m.dep)) ? "" : esc(dayPre(m.arr))}${hm(m.arr)}`,
+    `data-adopt="${t.id}|0|0|here" data-zb="${t.ticket === "spar" && !t.zbLifted && m.zb ? "1" : ""}" data-adopt-text="${esc(`In ${cleanStop(S.name)} übernachten. Weiter ${dayPre(m.dep)}ab ${hm(m.dep)} mit ${m.label}, an ${dayPre(m.arr)}${hm(m.arr)}`)}"`));
+  else if (!ml && !t.stuckErr) tiles.push(`<div class="sk-tile pending"><span class="sk-i" aria-hidden="true">🛏️</span><span><b>In ${at} übernachten, morgen früh weiter</b><span>Ich suche die erste Verbindung morgen früh …</span></span></div>`);
+  // 2. Heute noch so weit wie möglich – nur, wenn du damit früher ankommst
+  const a = sk.a;
+  if (a && Date.parse(a.dep) > now - MIN && (!m || Date.parse(a.arr) < Date.parse(m.arr) - 5 * MIN)) {
+    const n = sk.night, soon = Date.parse(a.dep) - now < 3 * 3600e3;
+    tiles.push(tile("➡️", n ? `Heute noch bis ${esc(n.at)}, dort übernachten` : "Heute noch weiter fahren",
+      n ? `ab ${hm(a.dep)}, ${esc(n.at)} an ${hm(n.arr)} · ${esc(dayPre(n.dep))}${hm(n.dep)} weiter → an ${sameDay(Date.parse(a.arr), Date.parse(n.dep)) ? "" : esc(dayPre(a.arr))}${hm(a.arr)}` : `ab ${hm(a.dep)} → ${dest} an ${esc(dayPre(a.arr))}${hm(a.arr)}`,
+      `data-adopt="${sk.data}" data-zb="${t.ticket === "spar" && !t.zbLifted && a.zb ? "1" : ""}" data-adopt-text="${esc(`${a.label}: ab ${hm(a.dep)}${n ? `, Übernachtung in ${n.at}` : ""}, an ${dayPre(a.arr)}${hm(a.arr)}`)}"`,
+      soon ? `<span class="sk-dl">Nur noch bis ${hm(a.dep)} möglich</span>` : ""));
+  }
+  // 3. Zurück nach Hause – nur früh in der Fahrt (sucht der Server nur dann)
+  const h = t.stuck?.home?.[0], home = esc(cleanStop(t.legs[0].dep.name));
+  if (h) tiles.push(tile("🏠", `Fahrt abbrechen, zurück nach ${home}`, `ab ${hm(h.dep)} → ${home} an ${hm(h.arr)}`, `data-gohome="${t.id}"`));
+  const none = ml && !tiles.length;
+  const bc = bahnCheck(t);
+  return `<section class="stuck">
+    <h2>Heute kommst du nicht mehr nach ${dest}.</h2>
+    <p>${k >= 0 ? `Dein Anschluss in ${at} klappt nicht, und heute fährt nichts Brauchbares mehr dorthin.` : "Heute fährt nichts Brauchbares mehr dorthin."}</p>
+    <p class="small muted">${arrAt > now ? `Du bist ab ${hm(S.rt)} in ${at}.` : `Du bist in ${at}.`}</p>
+    ${none ? `<p>Ich finde auch morgen früh ab ${at} keine Verbindung. Prüf es bitte bei der Bahn oder frag im Reisezentrum.</p>`
+      : t.stuckErr && !tiles.length ? `<p class="small">${esc(t.stuckErr)}</p>` : `<p class="sk-q">Wie möchtest du weiter?</p><div class="sk-tiles">${tiles.join("")}</div>`}
+    ${h && tiles.length === 1 ? "" : `<p class="sk-note small">ℹ️ Hotel: Bei durchgehend gebuchtem Ticket zahlt meist die Bahn. Frag im Reisezentrum oder beim Zugpersonal.</p>`}
+    ${bc ? `<a class="sk-link" href="${esc(bc.url)}" target="_blank" rel="noopener">↗ Bei der Bahn gegenprüfen <span class="muted">ab ${esc(bc.from)}</span></a>` : ""}
+    ${abroad(t) ? `<p class="small muted">Ins Ausland fehlen mir manchmal Züge – ein Blick bei der Bahn lohnt sich, bevor du ein Hotel nimmst.</p>` : ""}
+    <div class="sk-foot"><button class="link small" data-skorig="${t.id}" aria-expanded="${STUCK_ORIG === t.id}">${STUCK_ORIG === t.id ? "▴ Ursprüngliche Fahrt ausblenden" : "▾ Ursprüngliche Fahrt"}</button>
+      <button class="link small muted" data-del="${t.id}" data-end>Fahrt beenden</button></div>
+  </section>`;
+}
+
 // Zeitfenster: alle Fahrten im Fenster mit Live-Stand, du wählst, welche du nimmst
 function windowCard(t) {
   if (!t.win || t.phase === "done") return "";
@@ -997,23 +1062,24 @@ function renderTrip(t, many) {
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
   if (SCREEN_SIG.split("|")[3] !== String(t.id)) OPT_OPEN = null;   // neu in die Fahrt gekommen: Plan B erst einmal zu
-  const hint = hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster)
+  const SK = stuckOf(t);     // „Heute nicht mehr“: ruhiger Bildschirm statt Alarm
+  const hint = SK ? "" : hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster) – nicht in der Stresslage
   $app.innerHTML = `${flashBox()}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
       <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn kaufen"><i>🛒</i>Ticket kaufen</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : `${hm(t.legs[t.legs.length - 1].arr.rt)}${sameDay(Date.parse(t.legs[t.legs.length - 1].arr.rt), Date.parse(t.legs[0].dep.plan)) ? "" : ` (${new Date(t.legs[t.legs.length - 1].arr.rt).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })})`}`}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
     ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
       : t.follow === "gone" ? `<p class="small explain">👀 Die geteilte Fahrt wurde beim Absender gelöscht – ich überwache diese Verbindung hier einfach weiter.</p>` : ""}
-    ${t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
+    ${SK ? stuckView(t, SK) : t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
       ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? `<p>Laut Fahrplan klappt alles${t.transfers?.length ? ` (${t.transfers.map(x => `Umstieg ${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(", ")})` : ""}. Live-Zeiten kommen meist kurz vor der Abfahrt – dann prüfe ich laufend und melde mich, wenn etwas nicht passt.</p>` : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
-    ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
+    ${t.zbLifted && !SK ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.win?.picked ? windowCard(t) : ""}
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
-    ${t.follow === true ? "" : nextCard(t.next, t)}
+    ${t.follow === true || SK ? "" : nextCard(t.next, t)}
     ${t.phase === "before" ? retCard(RET?.tripId === t.id) : ""}
-    ${t.follow === true ? "" : optionsBlock(t)}
-    <h3 class="sec-h">${t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3><div class="card flat">${timeline(t)}</div>
+    ${t.follow === true || SK ? "" : optionsBlock(t)}
+    ${SK && STUCK_ORIG !== t.id ? "" : `<h3 class="sec-h">${SK ? "Ursprüngliche Fahrt" : t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3><div class="card flat">${timeline(t)}</div>`}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
     ${sheet ? `<section class="card" id="sheet">
@@ -1031,6 +1097,18 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
+  $app.querySelector("[data-skorig]")?.addEventListener("click", e => { STUCK_ORIG = STUCK_ORIG === t.id ? null : t.id; render(); });
+  $app.querySelector("[data-gohome]")?.addEventListener("click", async e => {
+    const h = t.stuck?.home?.[0], home = cleanStop(t.legs[0].dep.name); if (!h) return;
+    if (!(await ask(`Fahrt abbrechen und zurück nach ${home}?\n\n${h.label}: ab ${hm(h.dep)}, an ${hm(h.arr)}\n\nEs wird nichts gebucht. Die Fahrt nach ${destOf(t)} wird beendet, ich überwache dann den Rückweg.`, { ok: "Zurückfahren" }))) return;
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      const n = await api("/api/trips", { method: "POST", body: { legs: h.legs, ticket: t.ticket } });
+      await api(`/api/trips/${t.id}`, { method: "DELETE" }).catch(() => {});
+      openId = n.id; flash = `Alles klar – ich überwache jetzt deinen Rückweg nach ${home}.`;
+    } catch (err) { alert(err.message); }
+    await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
+  });
   // Regelmäßige Fahrt: gilt die Änderung nur heute oder für alle Fahrten?
   $app.querySelectorAll("[data-share]").forEach(b => b.onclick = () => shareTrip(t, b));
   $app.querySelectorAll("[data-bahn]").forEach(b => b.onclick = async () => {
@@ -1332,9 +1410,10 @@ function bindCommon() {
         await api(`/api/routines/${r.id}`, { method: "DELETE", body: { endTrips: true } }).catch(e => alert(e.message)); ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `„${r.name}“ gelöscht.`; openId = null; sheetId = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0); return; }
     } else if (tt?.follow === true) { if (!(await ask("Nicht mehr mitverfolgen?\n\nDu bekommst zu dieser Fahrt keine Mitteilungen mehr. Die reisende Person merkt davon nichts.", { ok: "Nicht mehr mitverfolgen", danger: true }))) return; }
+    else if ("end" in b.dataset) { if (!(await ask("Fahrt beenden?\n\nIch überwache sie dann nicht mehr. Wie du weiterkommst, klärst du selbst.", { ok: "Beenden" }))) return; }
     else if (!(await ask("Fahrt löschen?\n\nSie wird nicht mehr überwacht und verschwindet aus der Liste.", { ok: "Löschen", danger: true }))) return;
     let okDel = true; await api(`/api/trips/${b.dataset.del}`, { method: "DELETE" }).catch(e => { okDel = false; alert(e.message); });
-    if (okDel) flash = tt?.follow === true ? "Du verfolgst die Fahrt nicht mehr mit." : "Fahrt gelöscht.";
+    if (okDel) flash = tt?.follow === true ? "Du verfolgst die Fahrt nicht mehr mit." : "end" in b.dataset ? "Fahrt beendet." : "Fahrt gelöscht.";
     openId = null; sheetId = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
   });
   $app.querySelectorAll("[data-adopt]").forEach(b => b.onclick = async () => {

@@ -518,3 +518,22 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .push-note .pn-main b { display: block; }
 .push-note .pn-main span { display: block; font-size: 14px; color: var(--muted); margin-top: 2px; }
 .push-note .pn-x { position: absolute; top: 6px; right: 6px; background: none; border: 0; font-size: 16px; color: var(--muted); padding: 6px; cursor: pointer; }
+
+/* „Heute nicht mehr“: ruhig, nüchtern, zwei bis drei klare Wahlmöglichkeiten */
+.stuck { background: var(--card); border: 1.5px solid var(--line); border-radius: 18px; padding: 18px 16px 12px; margin: 0 0 14px; }
+.stuck h2 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; }
+.stuck > p { margin: 0 0 6px; line-height: 1.5; }
+.stuck .sk-q { margin: 14px 0 8px; font-weight: 700; font-size: 14px; color: var(--muted); }
+.sk-tiles { display: grid; gap: 8px; }
+.sk-tile { display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--bg); font: inherit; color: var(--ink); cursor: pointer; }
+.sk-tile:hover, .sk-tile:focus-visible { border-color: var(--accent, #1b6aa5); }
+.sk-tile .sk-i { font-size: 20px; line-height: 1.2; }
+.sk-tile b { display: block; font-size: 16px; }
+.sk-tile span span { display: block; font-size: 14px; color: var(--muted); margin-top: 2px; }
+.sk-tile .sk-dl { color: var(--warn, #a15c00); font-weight: 700; font-size: 13px; }
+.sk-tile.pending { cursor: default; opacity: .75; }
+.sk-note { background: var(--bg); border-radius: 10px; padding: 9px 11px; margin: 14px 0 10px !important; color: var(--muted); }
+.sk-link { display: inline-block; margin: 2px 0 8px; font-size: 14px; text-decoration: none; }
+.sk-foot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 6px; }
+.sk-foot .muted { color: var(--muted); }
+.sk-link { color: var(--accent, #1b6aa5); }

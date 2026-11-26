@@ -222,10 +222,10 @@ const rtOf = s => Math.max(Date.parse(s.rt || s.plan) || 0, Date.parse(s.plan) |
 
 // Alternativen ab dem aktuellen Standort (auf Wunsch aus der App): bis zu 3 Verbindungen zum Ziel, live mitgeprüft
 // mode "trip": im Zeitraum der Reise (ab ca. 75 Min. vor der geplanten Abfahrt) – "now": ab sofort
-export async function planFromHere(env, trip, v, here, now, mode = "trip", missedIdx = 0) {
+export async function planFromHere(env, trip, v, here, now, mode = "trip", missedIdx = 0, opts = {}) {
   const last = trip.legs[trip.legs.length - 1], own = +trip.legs[0]?.minT || 0;
   const ci = Math.max(0, v.current), waiting = mode === "next" && now < v.legs[ci].dep.rt;   // am Umstieg wartend: ab diesem Bahnhof, sofort
-  const from = mode === "cancel" ? Math.max(now, v.legs[missedIdx].dep.plan - 60 * MIN) : mode === "now" || mode === "missed" || waiting ? now : mode === "next" ? Math.max(now, v.legs[ci].arr.rt) : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
+  const from = mode === "morning" ? opts.at : mode === "cancel" ? Math.max(now, v.legs[missedIdx].dep.plan - 60 * MIN) : mode === "now" || mode === "missed" || waiting ? now : mode === "next" ? Math.max(now, v.legs[ci].arr.rt) : Math.max(now, v.legs[0].dep.plan - (mode === "start" ? 60 : 75) * MIN);
   const to = placeOf(last.to) || nearestEvaByName(last.to.name);
   if (!to) return [];
   const [normal, roomy, stayList] = await Promise.all([
@@ -242,7 +242,8 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip", misse
   });
   // „Wie geplant“ nur, wenn es genau deine Bahn-Züge sind (Busse/U-Bahn davor dürfen abweichen)
   const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => l.label.replace(/\s/g, "")).join("|");
-  const rest = mode === "next" ? trip.legs.slice(waiting ? ci : ci + 1) : (mode === "missed" || mode === "cancel") ? trip.legs.slice(missedIdx) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
+  const fromIdx = mode === "missed" || mode === "cancel" || mode === "morning";   // ab einer bestimmten Teilstrecke ersetzen
+  const rest = mode === "next" ? trip.legs.slice(waiting ? ci : ci + 1) : fromIdx ? trip.legs.slice(missedIdx) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
   const planSig = sig(rest);
   const seen = new Set(), all = [];
   for (const c of [...stays, ...normal, ...roomy]) {
@@ -255,9 +256,9 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip", misse
   }
   const toName = (last.to.name || "").replace(/\s*\(tief\)$/i, "");
   const out = all.sort((a, b) => rtOf(a.legs[a.legs.length - 1].to) - rtOf(b.legs[b.legs.length - 1].to)).slice(0, 3).map(c => ({
-    kind: mode === "missed" || mode === "cancel" ? "here" : sig(c.legs) === planSig ? "asplanned" : !changesFV(rest, c.legs) && rest.some(isFVLeg) ? "samefv" : "here",
+    kind: fromIdx ? "here" : sig(c.legs) === planSig ? "asplanned" : !changesFV(rest, c.legs) && rest.some(isFVLeg) ? "samefv" : "here",
     // unterwegs: ab dem nächsten Halt ersetzen; fährt der eigene Zug weiter, ist es „Sitzen bleiben“
-    from: mode === "next" ? (waiting ? (ci > 0 ? ci - 1 : "start") : ci) : (mode === "missed" || mode === "cancel") && missedIdx > 0 ? missedIdx - 1 : "start", stay: mode === "next" && !waiting && c.legs[0]?.label.replace(/\s/g, "") === trip.legs[ci].label.replace(/\s/g, ""), at: mode === "next" ? trip.legs[ci].to.name : "deinem Standort",
+    from: mode === "next" ? (waiting ? (ci > 0 ? ci - 1 : "start") : ci) : fromIdx && missedIdx > 0 ? missedIdx - 1 : "start", stay: mode === "next" && !waiting && c.legs[0]?.label.replace(/\s/g, "") === trip.legs[ci].label.replace(/\s/g, ""), at: mode === "next" ? trip.legs[ci].to.name : mode === "morning" ? trip.legs[missedIdx - 1].to.name : "deinem Standort",
     label: c.legs.map(l => l.label).join(" → "), transfers: c.transfers, walkStart: c.walkStart || 0,
     dep: new Date(rtOf(c.legs[0].from)).toISOString(), depPlan: c.legs[0].from.plan, depPl: c.legs[0].from.track || "", firstStop: c.legs[0].from.name,
     arr: new Date(rtOf(c.legs[c.legs.length - 1].to)).toISOString(), arrPlan: c.legs[c.legs.length - 1].to.plan, minGap: Number.isFinite(minGapOf(c.legs)) ? minGapOf(c.legs) : null,
@@ -365,6 +366,7 @@ export async function bindLate(env, trip, now, cache) {
 export function pushKind(m) {
   const t = String(m.title || "");
   if (/^❌/.test(t)) return /fällt aus/.test(t) ? "ausfall" : "verpasst";
+  if (/^🌙/.test(t)) return "verpasst";
   if (/^⚠️/.test(t)) return "gefaehrdet";
   if (/^(✅|↩️)/.test(t)) return "entwarnung";
   if (/^🔀/.test(t)) return "gleis";

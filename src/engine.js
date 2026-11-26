@@ -214,6 +214,29 @@ export function headline(v, trip, now = Date.now()) {
   return { title, sub: late || arrive || `Ziel ${last.arr.name}.` };
 }
 
+// ---------- „Heute nicht mehr“: die beste Möglichkeit bedeutet eine Übernachtung oder Ankunft erst am nächsten Tag ----------
+const bDay = ms => new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+const T0 = x => (typeof x === "number" ? x : Date.parse(x));
+// Übernachtung: ein Halt von mindestens 3 Std., in dem 3 Uhr nachts (Berliner Zeit) liegt
+export function nightStop(a) {
+  const L = a?.legs || [];
+  for (let j = 0; j + 1 < L.length; j++) {
+    const arr = T0(L[j].to.rt || L[j].to.plan), dep = T0(L[j + 1].from.rt || L[j + 1].from.plan);
+    const hm0 = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(arr)).split(":").map(Number);
+    const to3 = (180 - (hm0[0] * 60 + hm0[1]) + 1440) % 1440;   // Minuten bis 3 Uhr nachts (Berlin)
+    if (dep - arr >= 180 * MIN && arr + to3 * MIN <= dep) return { at: String(L[j].to.name || "").replace(/\s*\(tief\)$/i, ""), arr, dep };
+  }
+  return null;
+}
+// Alle gefundenen Möglichkeiten führen über die Nacht (oder kommen erst einen Tag später an als geplant)
+export function overnight(alts, planArr) {
+  const xs = (alts || []).filter(a => a.legs?.length && a.arr);
+  return xs.length > 0 && xs.every(a => nightStop(a) || (Number.isFinite(planArr) && bDay(T0(a.arr)) > bDay(planArr) && T0(a.arr) - planArr > 3 * 3600e3));
+}
+// Ziel für Sätze wie „Heute kommst du nicht mehr nach …“: die Ankunft des letzten Zugs (nicht die U-Bahn-Station danach)
+const LOCAL = l => /SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY/.test(l.mode || "") || /^(S|U|STR|Tram|Bus|Fähre)\s?\d*\b/i.test(String(l.label || ""));
+export const destName = legs => { const l = [...legs].reverse().find(x => !LOCAL(x)) || legs[legs.length - 1]; return String((l.arr || l.to).name || "").replace(/\s*\(tief\)$/i, ""); };
+
 // ---------- Meldungen: Unterschied zwischen letztem bestätigtem Zustand und jetzt ----------
 // state (gespeichert): { tr: [{ conf, pend, pn, sent }], legC: {i: true}, pl: {key: platform}, start: delay, rem: {i: true}, zb, alt: {i: [...]} }
 export function diff(trip, v, prev = {}, now = Date.now()) {
@@ -244,8 +267,10 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     else s.pend = t.status, s.pn = t.status === p.pend ? p.pn + 1 : 1;
     if (s.conf !== p.conf && s.conf !== "DONE") {
       const alt = altText(st.alt[k], ref, spar, now < v.legs[0].dep.rt ? v.legs[0].label : v.legs[k].label);
+      const night = s.conf === "LOST" && overnight(st.alt[k], v.bookedArr);
       if ((s.conf === "RISK" || s.conf === "LOST") && s.sent !== s.conf && !(s.conf === "LOST" && t.reason === "cancel" && (st.legC[k] || st.legC[k + 1]))) {
-        msgs.push(s.conf === "LOST"
+        if (night) s.night = true;
+        msgs.push(night ? nightMsg(t, v, tag(`t${k}`)) : s.conf === "LOST"
           ? { title: t.toMust ? `❌ ${vehicle(t.toLeg).fest} ${t.toLabel} nicht mehr erreichbar` : `❌ Anschluss in ${t.at} klappt nicht`, body: `${t.reason === "cancel" ? `${t.toLabel} fällt aus.` : `${t.fromLabel} kommt erst ${hm(t.arrRt)} an, ${t.toLabel} fährt schon ${hm(t.depRt)}.`}${alt || " Ich suche eine andere Verbindung."}${zbNote()}`, tag: tag(`t${k}`), urgent: true }
           : { title: p.sent === "LOST" ? `↩️ Anschluss in ${t.at} vielleicht doch noch möglich` : t.gap < 0 ? `⚠️ Anschluss in ${t.at} klappt wohl nicht` : t.toMust ? `⚠️ ${vehicle(t.toLeg).fest} ${t.toLabel} gefährdet` : `⚠️ Anschluss in ${t.at} gefährdet`,
             body: `${t.gap >= 0 ? `Nur noch ${mins(t.gap)} zum Umsteigen` : `Nach der aktuellen Verspätung ca. ${mins(-t.gap)} zu spät – das kann sich noch ändern`}${t.arrPl && t.depPl ? ` (${platWord(t.fromLeg, t.arrPl)} → ${platWord(t.toLeg, t.depPl)})` : ""}.${alt || " Ich behalte das im Blick."}`, tag: tag(`t${k}`), urgent: true });
@@ -256,6 +281,8 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
         s.sent = null;
       }
     }
+    // Erst später klar (Möglichkeiten gefunden): heute geht es nicht mehr – einmal deutlich sagen, ersetzt die vorige Meldung
+    if (s.conf === "LOST" && s.sent === "LOST" && !s.night && overnight(st.alt[k], v.bookedArr)) { s.night = true; msgs.push(nightMsg(t, v, tag(`t${k}`))); }
     st.tr[k] = s;
   });
 
@@ -303,6 +330,9 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
   return { state: st, msgs: msgs.map(m => ({ ...m, body: m.body.replace(/\.\./g, ".") })) };
 }
 
+function nightMsg(t, v, tg) {
+  return { title: `🌙 Heute kommst du nicht mehr nach ${destName(v.legs)}`, body: `${t.reason === "cancel" ? `${t.toLabel} fällt aus` : `Anschluss in ${t.at} klappt nicht`}, und heute fährt nichts Brauchbares mehr. Tippe, um zu wählen, wie es weitergeht.`, tag: tg, urgent: true };
+}
 // Kurzer Vorschlag für Meldungen: was tun, wann am Ziel, Unterschied zum Plan
 export function altText(alts, refArr, spar = false, curLabel = "") {
   if (!alts?.length) return "";

@@ -47,8 +47,8 @@ function view(trip, now = Date.now()) {
   const undoZb = canUndo && changesFV(st.undo.legs, trip.legs);       // nur dann betrifft die Änderung die Zugbindung
   // Zugbindung je Möglichkeit immer frisch bewerten (auch für früher gespeicherte Ergebnisse)
   const hasFV = trip.legs.some(isFV);
-  const hereRaw = st.here && now - st.here.at < (st.here.mode === "missed" || st.here.mode === "cancel" ? 3 * 3600e3 : 30 * MIN) ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
-  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : hereRaw?.mode === "missed" ? trip.legs.slice(st.missed?.i || 0) : hereRaw?.mode === "cancel" ? trip.legs.slice(hereRaw.idx || 0) : trip.legs, restFV = restLegs.some(isFV);
+  const hereRaw = st.here && now - st.here.at < (st.here.mode === "morning" ? 6 * 3600e3 : st.here.mode === "missed" || st.here.mode === "cancel" ? 3 * 3600e3 : 30 * MIN) ? st.here : null;          // Standort-Ergebnisse sind nur kurz gültig
+  const restLegs = hereRaw?.mode === "next" ? trip.legs.slice(Math.max(0, v.current) + 1) : hereRaw?.mode === "missed" ? trip.legs.slice(st.missed?.i || 0) : hereRaw?.mode === "cancel" || hereRaw?.mode === "morning" ? trip.legs.slice(hereRaw.idx || 0) : trip.legs, restFV = restLegs.some(isFV);
   const here = hereRaw ? { ...hereRaw, list: (hereRaw.list || []).map(a => { const zb = restFV && changesFV(restLegs, a.legs || []);
     return { ...a, zb, kind: a.kind === "asplanned" && hereRaw.mode !== "missed" ? a.kind : restFV && !zb ? "samefv" : "here" }; }) } : null;
   const altZb = (a, k) => { if (!hasFV || !a.legs) return false;
@@ -56,7 +56,8 @@ function view(trip, now = Date.now()) {
     return a.kind === "stay" ? replaced.some(l => isFV(l) && l.label !== trip.legs[k]?.label) : changesFV(replaced, a.legs); };
   const sosV = st.sos && now - st.sos.at < 45 * MIN ? { ...st.sos, list: (st.sos.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs.slice((a.from ?? 0) + 1), a.legs || []) })) } : null;
   const win = st.win ? { from: st.win.from, to: st.win.to, picked: !!st.win.picked, prev: st.win.prev && Date.parse(st.win.prev.arr) > now ? { dep: st.win.prev.dep, label: st.win.prev.label } : null, list: (st.win.list || []).map(a => ({ ...a, zb: hasFV && changesFV(trip.legs, a.legs || []) })) } : null;
-  return { id: trip.id, follow: st.follow?.trip ? true : st.follow?.gone ? "gone" : false, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
+  const stuck = st.stuck && now - st.stuck.at < 3 * 3600e3 ? { home: st.stuck.home || [], at: iso(st.stuck.at) } : null;
+  return { id: trip.id, stuck, follow: st.follow?.trip ? true : st.follow?.gone ? "gone" : false, routine: st.routine || null, rname: st.rname || null, rnote: st.rnote || null, win, ticket: trip.ticket, plan: current, canUndo, undoZb, here, sos: sosV, missed: v.missed, planArr: iso(v.legs[v.legs.length - 1].arr.plan), minT: +trip.legs[0]?.minT || 0, created_at: trip.created_at, active: trip.active, checkedAt: st.at || null,
     status: v.status, phase: v.phase, title: v.title, sub: v.sub, next: v.next ? { ...v.next, at: iso(v.next.at), plan: iso(v.next.plan), depAt: iso(v.next.depAt), then: v.next.then ? { ...v.next.then, at: iso(v.next.then.at) } : null } : null, zbLifted: v.zbLifted, zbWhy: v.zbWhy, finalDelay: v.finalDelay, current: v.current,
     legs: v.legs.map(l => ({ ...l, dep: { ...l.dep, plan: iso(l.dep.plan), rt: iso(l.dep.rt) }, arr: { ...l.arr, plan: iso(l.arr.plan), rt: iso(l.arr.rt) } })),
     transfers: v.transfers.map((t, k) => ({ ...t, arrRt: iso(t.arrRt), depRt: iso(t.depRt), alt: (st.alt?.[k] || []).map(a => ({ ...a, zb: altZb(a, k) })), altChecked: !!st.altAt?.[k] })) };
@@ -535,6 +536,35 @@ async function api(req, env, url) {
     }
     count("pb_here"); const list = await planFromHere(env, t, evaluate(t, now), here, now, mode);
     t.state = { ...(t.state || {}), here: { at: now, mode, list } };
+    await db.update(env, "rb_trips", t.id, { state: t.state });
+    return json(view(t, now));
+  }
+
+  // „Heute nicht mehr“: erste Verbindung morgen früh ab dem Umstieg suchen – und, früh in der Fahrt, den Weg zurück zum Start
+  const mst = /^\/api\/trips\/([0-9a-f-]{36})\/stuck$/i.exec(p);
+  if (mst && method === "POST") {
+    const t = await ownTrip(env, dev, mst[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const now = Date.now(), v = evaluate(t, now), k = v.transfers.findIndex(x => x.status === "LOST");
+    if (k < 0) return fail(409, "Dein Anschluss klappt wieder – bitte neu laden.");
+    const S = withCoords(t.legs[k].to);
+    if (S.lat == null && !S.eva) return fail(400, "Für diesen Bahnhof kenne ich keinen Ort.");
+    const here = S.eva ? { eva: S.eva, lat: S.lat, lon: S.lon } : { lat: S.lat, lon: S.lon };
+    const { wallToMs } = await import("./routines.js");
+    const arrS = v.legs[k].arr.rt, d0 = berlinDate(arrS), h = +new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", hourCycle: "h23" }).format(new Date(arrS));
+    const day = h < 4 ? d0 : new Date(Date.parse(`${d0}T12:00:00Z`) + 864e5).toISOString().slice(0, 10);
+    count("pb_stuck");
+    const list = await planFromHere(env, t, v, here, now, "morning", k + 1, { at: wallToMs(day, "05:00") }).catch(() => []);
+    // zurück nach Hause nur am Anfang der Fahrt (höchstens 2 Std. unterwegs) und nur, wenn du heute noch ankommst
+    let home = [];
+    if (now - v.legs[0].dep.rt <= 2 * 3600e3) {
+      const o = withCoords(t.legs[0].from), op = o.eva ? { eva: o.eva, lat: o.lat, lon: o.lon } : o.lat != null ? { lat: o.lat, lon: o.lon } : null;
+      if (op) home = (await connections(env, here, op, Math.max(now, arrS), +t.legs[0]?.minT || 0).catch(() => []))
+        .map(c => ({ label: c.legs.map(l => l.label).join(" → "), dep: c.legs[0].from.rt || c.legs[0].from.plan, arr: c.legs[c.legs.length - 1].to.rt || c.legs[c.legs.length - 1].to.plan, transfers: c.transfers, legs: c.legs }))
+        .filter(c => berlinDate(Date.parse(c.arr)) === berlinDate(now) && !c.legs.some(l => l.cancelled))
+        .sort((a, b) => Date.parse(a.arr) - Date.parse(b.arr)).slice(0, 1);
+    }
+    t.state = { ...(t.state || {}), here: { at: now, mode: "morning", idx: k + 1, list }, stuck: { at: now, home } };
     await db.update(env, "rb_trips", t.id, { state: t.state });
     return json(view(t, now));
   }
