@@ -765,6 +765,16 @@ function liveBadge(a) {
 // ---------- SOS: im Zug, Verspätung angesagt → sofort Ausstiege und Alternativen ----------
 let sosBusy = null;
 // „Ich sitze im …“-Knopf: rot nur, wenn wirklich Gefahr besteht – sonst zurückhaltend
+// Plan B und „Andere Verbindungen“: läuft alles, nur eine schmale Zeile – bei Problemen (oder wenn gerade gesucht wird) aufgeklappt
+let OPT_OPEN = null;
+function optionsBlock(t) {
+  const busy = t.missed != null || t.sos || sosBusy === t.id || t.here || hereBusy === t.id;
+  if (t.win && !t.win.picked && t.phase === "before") return `${sosButton(t)}${windowCard(t)}`;
+  const calm = (t.status === "OK" || planOnly(t)) && !busy && t.phase !== "done";
+  if (calm && OPT_OPEN !== t.id) return `<button class="opt-line" data-optopen="${t.id}"><span>Etwas läuft anders?</span> <b>Plan B · Andere Verbindung ›</b></button>`;
+  const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
+  return `${calm ? `<button class="opt-line open" data-optopen="${t.id}">Plan B · Andere Verbindung <span class="chev">▴</span></button>` : ""}${sosButton(t)}${body}`;
+}
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
   const urgent = t.status === "RISK" || t.status === "LOST";
@@ -937,8 +947,7 @@ function renderTrip(t, many) {
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${t.follow === true ? "" : nextCard(t.next, t)}
     ${t.phase === "before" ? retCard(RET?.tripId === t.id) : ""}
-    ${t.follow === true ? "" : `${sosButton(t)}
-    ${t.win && !t.win.picked && t.phase === "before" ? windowCard(t) : t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t)}`}
+    ${t.follow === true ? "" : optionsBlock(t)}
     ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.phase === "enroute" && t.status !== "OK" && !TL_OPEN ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Fahrt · ${t.legs.length} ${t.legs.length === 1 ? "Teilstrecke" : "Teilstrecken"}${t.legs.length > 1 ? `, ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""} <span class="chev">▾</span></button>`
       : `${t.phase === "enroute" && t.status !== "OK" ? `<button class="sec-h tl-toggle" data-tlopen>Ganze Fahrt <span class="chev">▴</span></button>` : `<h3 class="sec-h">${t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3>`}<div class="card flat">${timeline(t)}</div>`}
@@ -979,6 +988,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
   bindAccess(t); bindRet();
+  $app.querySelector("[data-optopen]")?.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; render(); });
   bindHints();
   bindCommon();
 }
