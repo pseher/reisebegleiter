@@ -385,9 +385,9 @@ function tiles(cur) {
     ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach")}
     ${tile('data-go="routines"', `↻${ROUTINES.length ? `<em class="cnt">${ROUTINES.length}</em>` : ""}`, "Regelmäßige Fahrten", ROUTINES.length ? `${ROUTINES.length} ${ROUTINES.length === 1 ? "wird" : "werden"} überwacht` : "Schulweg, Arbeitsweg …")}
     ${tile("data-tticket", "🎫", "Gebuchte Fahrt überwachen", "Ticket, Screenshot oder DB-Link")}
-    ${!sosTrip ? tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt – wohin?", "quick")
-      : sosTrip.status === "RISK" || sosTrip.status === "LOST" ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS: Anschluss in Gefahr", "Dein Plan klappt wohl nicht – ich suche sofort eine andere Verbindung", "sos")
-      : tile(`data-sos="${sosTrip.id}" data-sosopen`, "⇄", "Verspätung? Plan B suchen", "Ich sitze drin – zeig mir, wo ich anders weiterkomme", "quick")}
+    ${sosTrip && (sosTrip.status === "RISK" || sosTrip.status === "LOST") ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS: Anschluss in Gefahr", "Dein Plan klappt wohl nicht – ich suche sofort eine andere Verbindung", "sos")
+      : sosTrip && sosTrip.status === "WATCH" ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "⇄", "Anschluss wird knapp", "Möglichkeiten ab deinem Zug ansehen", "quick")
+      : tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt – wohin?", "quick")}
   </div>`;
 }
 function bindTiles() {
