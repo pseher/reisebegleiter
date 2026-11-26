@@ -430,7 +430,7 @@ function heroRec(t) {
   if (t.status !== "LOST" || t.phase === "done") return "";
   const { a, data, list } = bestRec(t);
   const bc = bahnCheck(t);
-  const bahnBtn = bc ? `<a class="btn sec small-btn bahn-check" href="${esc(bc.url)}" target="_blank" rel="noopener" data-bahncheck>Bei der Bahn gegenprüfen <span>ab ${esc(bc.from)} ${hm(bc.at)}</span></a>` : "";
+  const bahnBtn = bc ? `<a class="btn sec small-btn bahn-check" href="${esc(bc.url)}" target="_blank" rel="noopener" data-bahncheck>Bei der Bahn gegenprüfen <span>ab ${esc(bc.from)} ${hm(bc.at)}${bc.cut ? ` · bis ${esc(bc.to)} (Ausland fehlt)` : ""}</span></a>` : "";
   if (!a) return bahnBtn ? `<div class="hero-rec"><div class="small">Ich finde gerade keine passende Möglichkeit und suche weiter.</div>${bahnBtn}</div>` : "";
   const zb = t.ticket === "spar" && !t.zbLifted && a.zb;
   const l0 = a.legs?.[0], pl = a.depPl ? ` · ${platWord(l0 || { label: a.label }, a.depPl)}` : "";
@@ -495,7 +495,7 @@ function stuckView(t, sk) {
     ${none ? `<p>Ich finde auch morgen früh ab ${at} keine Verbindung. Prüf es bitte bei der Bahn oder frag im Reisezentrum.</p>`
       : t.stuckErr && !tiles.length ? `<p class="small">${esc(t.stuckErr)}</p>` : `<p class="sk-q">Wie möchtest du weiter?</p><div class="sk-tiles">${tiles.join("")}</div>`}
     ${h && tiles.length === 1 ? "" : `<p class="sk-note small">ℹ️ Hotel: Bei durchgehend gebuchtem Ticket zahlt meist die Bahn. Frag im Reisezentrum oder beim Zugpersonal.</p>`}
-    ${bc ? `<a class="sk-link" href="${esc(bc.url)}" target="_blank" rel="noopener">↗ Bei der Bahn gegenprüfen <span class="muted">ab ${esc(bc.from)}</span></a>` : ""}
+    ${bc ? `<a class="sk-link" href="${esc(bc.url)}" target="_blank" rel="noopener">↗ Bei der Bahn gegenprüfen <span class="muted">ab ${esc(bc.from)}${bc.cut ? ` · bis ${esc(bc.to)}` : ""}</span></a>` : ""}
     ${abroad(t) ? `<p class="small muted">Ins Ausland fehlen mir manchmal Züge – ein Blick bei der Bahn lohnt sich, bevor du ein Hotel nimmst.</p>` : ""}
     <div class="sk-foot"><button class="link small" data-skorig="${t.id}" aria-expanded="${STUCK_ORIG === t.id}">${STUCK_ORIG === t.id ? "▴ Ursprüngliche Fahrt ausblenden" : "▾ Ursprüngliche Fahrt"}</button>
       <button class="link small muted" data-del="${t.id}" data-end>Fahrt beenden</button></div>
@@ -1114,7 +1114,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-bahn]").forEach(b => b.onclick = async () => {
     const url = bahnUrl(t), x = bahnUrl.last;
     const show = n => cleanStop(n.replace(/, Berlin$/, ""));
-    const ok = await ask(`Weiter zu bahn.de?\n\nDas wird übergeben:\nStart: ${show(x.from)}\nZiel: ${show(x.to)}\nAbfahrt: ${day(x.at)}, ${hm(x.at)}\n1 Person, 2. Klasse\n\nPrüfe bei der Bahn Reisende, Ermäßigung und Verbindung. Gebucht und bezahlt wird nur dort.`, { ok: "Zu bahn.de", cancel: "Abbrechen" });
+    const ok = await ask(`Weiter zu bahn.de?\n\nDas wird übergeben:\nStart: ${show(x.from)}\nZiel: ${show(x.to)}\nAbfahrt: ${day(x.at)}, ${hm(x.at)}\n1 Person, 2. Klasse${x.cut ? `\n\nIns Ausland kann ich die Fahrt nur bis zum letzten deutschen Bahnhof übergeben. Die Strecke ${show(x.to)} → ${x.cut} ergänzt du bitte bei bahn.de oder buchst sie beim Bahnunternehmen im Ausland.` : ""}\n\nPrüfe bei der Bahn Reisende, Ermäßigung und Verbindung. Gebucht und bezahlt wird nur dort.`, { ok: "Zu bahn.de", cancel: "Abbrechen" });
     if (ok) window.open(url, "_blank", "noopener");
   });
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
@@ -2377,10 +2377,23 @@ const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l
   && (/RAIL|HIGHSPEED|LONG_DISTANCE|NIGHT/.test(l.mode || "") || /^(ICE|IC|EC|ECE|ICD|IRE|RE|RB|MEX|RJX?|NJ|EN|D|TGV|EST|FEX)\s?\d/i.test(String(l.label || "")));
 const showBahn = t => t.phase === "before" && t.ticket !== "dticket" && !t.follow && t.legs.some(isTrainLeg);
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
+// Ziel für die Bahn-Übergabe: Ankunft des letzten Zugs an einem deutschen Bahnhof (Bahnhofsnummer 80…).
+// Ins Ausland findet die Bahn-Suche mit unseren Daten oft keine Verbindung – dann bis zum letzten deutschen Bahnhof übergeben.
+const deStop = s => /^80\d{5}$/.test(String(s?.eva || ""));
+function bahnDest(legs) {
+  const trains = legs.filter(isTrainLeg), last = trains[trains.length - 1] || legs[legs.length - 1];
+  if (deStop(last.arr)) return { stop: last.arr };
+  const de = [...trains].reverse().find(l => deStop(l.arr)) || [...trains].reverse().find(l => deStop(l.dep));
+  if (!de) return { stop: last.arr };
+  const stop = deStop(de.arr) ? de.arr : de.dep;
+  return { stop, cut: cleanStop(last.arr.name) };
+}
 function bahnUrl(t) {
-  const L = t.legs, last = [...L].reverse().find(isTrainLeg) || L[L.length - 1];
-  // Start = deine erste Haltestelle (auch Bus/Tram), Ziel = Ankunft des letzten Zugs; Abfahrt = Abfahrt an der ersten Haltestelle
-  return bahnLink(L[0].dep, last.arr, L[0].dep.plan);
+  const L = t.legs, d = bahnDest(L);
+  // Start = deine erste Haltestelle (auch Bus/Tram), Ziel = Ankunft des letzten Zugs (in Deutschland); Abfahrt = Abfahrt an der ersten Haltestelle
+  const url = bahnLink(L[0].dep, d.stop, L[0].dep.plan);
+  bahnUrl.last.cut = d.cut || "";
+  return url;
 }
 // Format wie die Links, die bahn.de selbst erzeugt: soid/zoid = „A=1@O=Name@X=Länge·10⁶@Y=Breite·10⁶@U=80@L=Bahnhofsnummer@“
 function bahnLink(a, z, at) {
@@ -2403,7 +2416,9 @@ function bahnCheck(t) {
   else { const i = Math.max(0, L.findIndex(l => Date.parse(l.dep.rt) > now - MIN)); from = L[i].dep; at = new Date(Math.max(now, Date.parse(L[i].dep.rt))).toISOString(); next = i; }
   const last = [...L.slice(next)].reverse().find(isTrainLeg);
   if (!last || sameStation(from.name, last.arr.name)) return null;   // danach fährt kein Zug mehr
-  return { url: bahnLink(from, last.arr, at), from: cleanStop(from.name), at };
+  const d = bahnDest(L.slice(next));
+  if (sameStation(from.name, d.stop.name)) return null;
+  return { url: bahnLink(from, d.stop, at), from: cleanStop(from.name), at, to: cleanStop(d.stop.name), cut: d.cut || "" };
 }
 // Kurz-Nachricht zum aktuellen Stand – passt zu jeder Lage (vor der Fahrt, unterwegs, Plan B, angekommen)
 function statusText(t) {
