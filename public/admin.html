@@ -111,10 +111,10 @@
       const leadN = S(W, "lead_n"), lead = leadN ? Math.round(S(W, "lead_sum") / leadN) : null;
       const benefit = `<h2 class="sec">Nutzen</h2><p class="sec-sub">Wie oft die App gewarnt und geholfen hat (letzte 7 Tage).</p>
         <div class="kpis">
-          ${wk("Mitteilungen erzeugt", kinds.map(k => `p_${k[0]}`), `${num(S(W, "p_sent"))} davon zugestellt (nur Geräte mit erlaubten Mitteilungen).`)}
+          ${wk("Mitteilungen erzeugt", kinds.map(k => `p_${k[0]}`), `${num(S(W, "p_sent"))}× an Geräte zugestellt – eine Mitteilung kann an mehrere Geräte gehen (mehrere Geräte, Mitverfolgende). Nur Geräte mit erlaubten Mitteilungen.`)}
           ${wk("Probleme erkannt", ["p_gefaehrdet", "p_verpasst", "p_ausfall"], "gefährdete oder verpasste Anschlüsse und Ausfälle, zu denen gewarnt wurde")}
-          ${kpi("Vorwarnzeit", lead == null ? "–" : `${lead} Min.`, lead == null ? "Noch keine Warnung in 7 Tagen." : `So lange vor dem Umstieg kam im Schnitt die erste Warnung (${leadN} Warnungen).`)}
-          ${wk("Plan B gesucht", ["pb_sos", "pb_here"], `über „Plan B/SOS“ ${S(W, "pb_sos")} · „Andere Verbindungen“ ${S(W, "pb_here")}`)}
+          ${kpi("Vorwarnzeit", lead == null ? "–" : `${lead} Min.`, lead == null ? "Noch keine Warnung in 7 Tagen." : `So lange vor dem Umstieg kam im Schnitt die erste Warnung (${leadN} Warnungen, nur bis 6 Std. vorher${S(W, "lead_early") ? ` · ${S(W, "lead_early")} noch früher` : ""}). Zahlen vor dem 26.11. enthalten auch frühere Warnungen.`)}
+          ${wk("Plan B gesucht", ["pb_sos", "pb_here", "pb_stuck"], `über „Plan B/SOS“ ${S(W, "pb_sos")} · „Andere Verbindungen“ ${S(W, "pb_here")} · „Heute nicht mehr“ ${S(W, "pb_stuck")}`)}
           ${wk("Alternative übernommen", ["pb_adopt"], `${S(W, "pb_undo")}× „Zurück zum alten Plan“ · ${S(W, "pb_win")}× Fahrt aus Zeitfenster gewählt`)}
         </div>
         <div class="rows" style="margin-top:10px">${kinds.map(([k, n]) => `<div><span>${n}</span><b>${num(S(W, `p_${k}`))}</b></div>`).join("")}</div>`;
@@ -138,7 +138,7 @@
         <div class="kpis" style="margin-top:10px">
           ${kpi("DB-Abrufe, 24 Std.", num(S(D1, "db")), `Spitze ${peak} je Minute · ${S(D1, "db429")}× „zu viele Anfragen“ (429)`)}
           ${kpi("Transitous / VBB, 24 Std.", `${num(S(D1, "motis"))} · ${num(S(D1, "vbb"))}`, "Verbindungssuche, Busse und Ausland")}
-          ${kpi("Fehler je Quelle, 7 Tage", `${S(W, "err_db")} · ${S(W, "err_motis")} · ${S(W, "err_vbb")}`, `DB · Transitous · VBB – dazu ${S(W, "err_api")} Serverfehler`)}
+          ${kpi("Fehler je Quelle, 7 Tage", `${S(W, "err_db")} · ${S(W, "err_motis")} · ${S(W, "err_vbb")}`, `DB · Transitous · VBB – dazu ${S(W, "err_api")} Serverfehler${S(W, "err_vbb_429") + S(W, "err_vbb_5xx") + S(W, "err_vbb_4xx") + S(W, "err_vbb_net") ? `. VBB: ${S(W, "err_vbb_429")}× zu viele Anfragen · ${S(W, "err_vbb_5xx")}× Störung beim VBB · ${S(W, "err_vbb_4xx")}× abgelehnt · ${S(W, "err_vbb_net")}× nicht erreichbar` : ""}`)}
           ${kpi("Prüflauf", runMs ? `${(runMs / 1000).toFixed(1).replace(".", ",")} s` : "–", `Ø Dauer eines Laufs · höchstens ${Math.max(0, ...W.map(x => x.trips_max || 0))} Fahrten gleichzeitig`)}
         </div>
         <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>Transitous</th><th>VBB</th><th>KI</th><th>Fehler</th><th>Fahrten max.</th></tr>${dayRows}</table></div>

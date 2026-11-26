@@ -420,7 +420,7 @@ export async function runMonitor(env, now = Date.now()) {
     // Nur speichern, wenn sich etwas geändert hat oder die Fahrt gerade geprüft wurde – nicht jede Minute alle (Abfrage-Limit je Lauf)
     if (t._dirty || t._legsDirty || !t.active || noAt(t.state) !== before || checked.has(t.id)) await saveTrip(env, t).catch(e => console.log("Speichern:", e.message));
     const acc = t.account_id || t.device_id;   // Meldungen gehen an alle Geräte des Kontos
-    for (const m of msgs) { count(`p_${pushKind(m)}`); if (m.lead != null && m.lead >= 0) { count("lead_sum", m.lead); count("lead_n"); } }
+    for (const m of msgs) { count(`p_${pushKind(m)}`); if (m.lead != null && m.lead >= 0) { if (m.lead <= 360) { count("lead_sum", m.lead); count("lead_n"); } else count("lead_early"); } }
     if (msgs.length) out.set(acc, [...(out.get(acc) || []), { ...bundle(msgs), url: `/?trip=${encodeURIComponent(t.id)}` }]);
   } catch (e) { console.log("Fahrt", t.id, e.message); count("err_run"); }   // eine kaputte Fahrt darf nicht alle anderen aufhalten
   for (const m of rMsgs) { const { acc, ...msg } = m; count("p_regel"); out.set(acc, [...(out.get(acc) || []), msg]); }
