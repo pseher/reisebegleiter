@@ -484,3 +484,4 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .opt-line span:first-child { white-space: nowrap; }
 .opt-line .chev { margin-left: auto; color: var(--accent); }
 .opt-line.open { border-style: solid; color: var(--accent); font-weight: 700; }
+.opt-card .tiles { margin-top: 8px; }

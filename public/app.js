@@ -677,7 +677,9 @@ function planBCard(t) {
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
       <button class="btn sec small-btn" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
   }
-  return `<h3 class="sec-h">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>${SPECIAL}`;
+  // im Rahmen wie Plan B, mit ✕ zum Ausblenden (kommt von selbst wieder, wenn es schlimmer wird)
+  return `<section class="card ${lost || tr.status === "RISK" ? "sos" : "planb"} opt-card"><div class="card-h"><div class="k">${lost ? "So kommst du jetzt weiter" : "Plan B · Deine Möglichkeiten"}</div><button class="card-x" data-optx="${t.id}" aria-label="Plan B ausblenden">✕</button></div>
+    <div class="tiles">${zb}${curRow}${rows}</div>${SPECIAL}</section>`;
 }
 
 // „S Hohenzollerndamm (Berlin)“ = „Hohenzollerndamm“
@@ -1314,6 +1316,7 @@ function bindCommon() {
     if (!navigator.geolocation) return go(null);
     navigator.geolocation.getCurrentPosition(go, () => go(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
   });
+  $app.querySelectorAll("[data-optx]").forEach(b => b.onclick = () => { const id = b.dataset.optx, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null; render(); });
   $app.querySelectorAll("[data-sosx]").forEach(b => b.onclick = async () => {
     const id = b.dataset.sosx, tt = trips.find(x => x.id === id); OPT_HIDE[id] = RANK[tt?.status] ?? 0; if (OPT_OPEN === id) OPT_OPEN = null;
     trips = trips.map(x => (x.id === id ? { ...x, sos: null } : x)); render();
