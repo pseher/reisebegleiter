@@ -393,18 +393,39 @@ function quickAway() {
     () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
 }
 
-// Plan geht nicht mehr: die Empfehlung gleich im roten Kasten – ein Tipp genügt
+// Wann? „heute“ nicht nennen, sonst „morgen“ bzw. Wochentag – damit eine Ankunft am nächsten Tag nicht übersehen wird
+const dayPre = iso => { const ms = Date.parse(iso), now = Date.now(); return sameDay(ms, now) ? "" : sameDay(ms, now + 864e5) ? "morgen " : `${new Date(ms).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })} `; };
+// Übernachtung: ein langer Halt über die Nacht (≥ 3 Std., Weiterfahrt an einem anderen Tag)
+function nightGap(arr, dep, at) {
+  const g = Math.round((Date.parse(dep) - Date.parse(arr)) / MIN);
+  return g >= 180 && !sameDay(Date.parse(arr), Date.parse(dep)) ? { at, arr, dep, gap: g } : null;
+}
+const nightOf = a => { const L = a?.legs || []; for (let j = 0; j + 1 < L.length; j++) { const n = nightGap(L[j].to.rt || L[j].to.plan, L[j + 1].from.rt || L[j + 1].from.plan, cleanStop(L[j].to.name)); if (n) return n; } return null; };
+// Ziel im Ausland? (Bahnhofsnummern in Deutschland beginnen mit 80)
+const abroad = t => { const z = t.legs[t.legs.length - 1].arr; return !/^80\d{5}$/.test(String(z.eva || "")); };
+// Plan geht nicht mehr: die Empfehlung gleich im roten Kasten – ein Tipp genügt. Daneben genau ein zweiter Weg: bei der Bahn gegenprüfen.
 function heroRec(t) {
   if (t.status !== "LOST" || t.phase === "done") return "";
-  let a = null, data = "";
+  let a = null, data = "", list = null;
   const hl = t.here && (t.here.mode === "cancel" || t.here.mode === "missed") ? t.here.list : null;
-  if (hl?.length) { const i = bestIdx(hl); if (i >= 0) { a = hl[i]; data = `${t.id}|0|${i}|here`; } }
-  if (!a) { const k = t.transfers.findIndex(x => x.status === "LOST" && x.alt?.length); if (k >= 0) { const i = bestIdx(t.transfers[k].alt, t.plan.dep); if (i >= 0) { a = t.transfers[k].alt[i]; data = `${t.id}|${k}|${i}`; } } }
-  if (!a) return "";
+  if (hl?.length) { const i = bestIdx(hl); if (i >= 0) { a = hl[i]; data = `${t.id}|0|${i}|here`; list = hl; } }
+  if (!a) { const k = t.transfers.findIndex(x => x.status === "LOST" && x.alt?.length); if (k >= 0) { const i = bestIdx(t.transfers[k].alt, t.plan.dep); if (i >= 0) { a = t.transfers[k].alt[i]; data = `${t.id}|${k}|${i}`; list = t.transfers[k].alt; } } }
+  const bc = bahnCheck(t);
+  const bahnBtn = bc ? `<a class="btn sec small-btn bahn-check" href="${esc(bc.url)}" target="_blank" rel="noopener" data-bahncheck>Bei der Bahn gegenprüfen <span>ab ${esc(bc.from)} ${hm(bc.at)}</span></a>` : "";
+  if (!a) return bahnBtn ? `<div class="hero-rec"><div class="small">Ich finde gerade keine passende Möglichkeit und suche weiter.</div>${bahnBtn}</div>` : "";
   const zb = t.ticket === "spar" && !t.zbLifted && a.zb;
   const l0 = a.legs?.[0], pl = a.depPl ? ` · ${platWord(l0 || { label: a.label }, a.depPl)}` : "";
-  return `<div class="hero-rec"><div class="small">Empfohlen:</div><div><b>${esc(a.label)}</b> ab ${hm(a.dep)}${esc(pl)} → an ${hm(a.arr)}</div>
-    <button class="btn small-btn" data-adopt="${data}" data-zb="${zb ? "1" : ""}" data-adopt-text="${esc(`${a.label}: ab ${hm(a.dep)}, an ${hm(a.arr)}`)}">Die nehme ich</button></div>`;
+  const night = nightOf(a), dest = cleanStop(t.legs[t.legs.length - 1].arr.name), more = (list?.length || 0) - dupAlts(list, list ? list.indexOf(a) : -1).size > 1;
+  const head = night
+    ? `<div class="rec-night"><b>Heute kommst du nicht mehr nach ${esc(dest)}.</b> Früheste Ankunft: <b>${esc(dayPre(a.arr))}${hm(a.arr)}</b>, mit Übernachtung in ${esc(night.at)}.</div><div class="small">Empfohlen:</div>`
+    : `<div class="small">Empfohlen:</div>`;
+  const notes = [
+    night ? `🏨 Hotel: Bei durchgehend gebuchtem Ticket zahlt meist die Bahn – frag im Reisezentrum (bei einzeln gebuchten Teilstrecken oft nicht).` : "",
+    bc && (night || abroad(t)) ? `Ins Ausland fehlen mir manchmal Züge – prüf das kurz bei der Bahn${night ? ", bevor du ein Hotel nimmst" : ""}.` : "",
+  ].filter(Boolean).map(x => `<p class="small rec-note">${x}</p>`).join("");
+  return `<div class="hero-rec">${head}<div><b>${esc(a.label)}</b> ab ${hm(a.dep)}${esc(pl)} → an ${esc(dayPre(a.arr))}${hm(a.arr)}</div>
+    <button class="btn small-btn" data-adopt="${data}" data-zb="${zb ? "1" : ""}" data-adopt-text="${esc(`${a.label}: ab ${hm(a.dep)}, an ${dayPre(a.arr)}${hm(a.arr)}`)}">Die nehme ich</button>
+    ${bahnBtn}${notes}${more ? `<button class="link small" data-optopen="${t.id}" data-optonly>Andere Möglichkeiten ansehen</button>` : ""}</div>`;
 }
 // Zeitfenster: alle Fahrten im Fenster mit Live-Stand, du wählst, welche du nimmst
 function windowCard(t) {
@@ -600,7 +621,7 @@ function nextCard(n, t) {
   const missBtn = t && t.follow !== true && n.i != null && (n.kind === "ride-change" || n.kind === "ride-arrive") && since >= 0 && since <= 20 * MIN
     ? `<button class="link small miss" data-missed="${t.id}|${n.i}">Doch nicht eingestiegen? Neu suchen</button>` : "";
   if (n.kind === "lost") return `<section class="card next"><div class="k">${n.cancelled ? "Anschluss fällt aus" : "Anschluss verpasst"}</div>
-      <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b>. Deine Möglichkeiten stehen unter „So kommst du jetzt weiter“.</div></section>`;
+      <div><b>${esc(n.label)}</b> ${n.cancelled ? "fällt aus" : "ist schon weg"}. Bleib in <b>${esc(n.station)}</b>. Deine Möglichkeiten stehen oben und unter „Plan B“.</div></section>`;
   const head = { board: "Einsteigen", change: "Umsteigen", "ride-change": n.then?.lost ? "Nächster Halt" : "Nächster Halt: umsteigen", "ride-arrive": "Ankunft" }[n.kind];
   const pc = n.platformChanged ? `<span class="late">Gleiswechsel${n.platformPlan ? ` (statt Gleis ${esc(n.platformPlan)})` : ""}</span>` : "";
   let body;
@@ -614,7 +635,7 @@ function nextCard(n, t) {
   else body = `<div class="big">${hm(n.at)} ${gl(n.platform, n)}</div>${lateLine(n.delay, n.plan)}
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(cleanStop(n.station))}</b>${n.platform ? "" : ""}</div>
       ${n.then && n.then.station && !sameStation(n.then.station, n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
-      ${n.then ? (n.then.lost ? `<div class="small"><span class="late">Anschluss ${esc(n.then.label)} ${n.then.cancelled ? "fällt aus" : "klappt nicht"}</span></div>`
+      ${n.then ? (n.then.lost ? `<div class="muted small">${inMin(n.at)}</div>`
         : thenBox(n, t)) : `<div class="muted small">${inMin(n.at)}</div>`}`;
   return `<section class="card next"><div class="k">${head}</div>${body}${missBtn}</section>`;
 }
@@ -659,12 +680,13 @@ function planBCard(t) {
   const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">${tr.status === "RISK" && tr.gap < 0 ? "Dein Plan (klappt wohl nicht)" : "Dein Plan"}</div><div class="cmp-main">
       ${losZiel(t.plan.dep, t.plan.arr)}${stepsHtml(planSteps(t))}${curState ? `<div class="cmp-live">${curState}</div>` : ""}</div></div>`;
   const liveOf = liveBadge;
-  const rows = tr.alt.map((a, ai) => {
+  const hide = dupAlts(tr.alt, rec);
+  const rows = tr.alt.map((a, ai) => { if (hide.has(ai)) return "";
     const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
     return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${tag(a)}${recTag(ai === rec)}</div><div class="cmp-main">
       ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}
       ${a.from === "start" ? losZiel(a.dep, a.arr || a.dep, t.plan.dep, lost ? t.planArr : t.plan.arr) : losZiel(a.dep, a.arr || a.dep, null, lost ? t.planArr : t.plan.arr).replace("ab <b>", `ab ${esc(cleanStop(a.at))} <b>`)}
-      ${stepsHtml(altSteps(a))}
+      ${altSummary(a, id, isOpen)}${isOpen ? stepsHtml(altSteps(a)) : ""}
       <div class="cmp-live">${liveOf(a)}${zbOn && a.zb ? ` ${zbBadge}` : ""}</div>
       ${takeBtn(`${t.id}|${k}|${ai}`, { ...a, zb: a.zb !== false }, ai === rec, `${tag(a)}: ab ${hm(a.dep)}, an ${hm(a.arr || a.dep)}\n${a.label}`)}
     </div></div>`; }).join("");
@@ -678,7 +700,23 @@ function planBCard(t) {
       <button class="btn sec small-btn" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
   }
   // im Rahmen wie Plan B, mit ✕ zum Ausblenden (kommt von selbst wieder, wenn es schlimmer wird)
-  return `<h3 class="sec-h" style="margin-top:6px">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>${SPECIAL}`;
+  return `<h3 class="sec-h" style="margin-top:6px">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>${lost ? "" : SPECIAL}`;
+}
+// Kurz: Umstiege und Übernachtung in einer Zeile, die Züge erst auf Antippen
+function altSummary(a, id, isOpen) {
+  const n = Math.max(0, (a.legs?.length || 1) - 1), night = nightOf(a);
+  const bits = [n ? `${n} Umstieg${n > 1 ? "e" : ""}` : "ohne Umstieg", night ? `🌙 Übernachtung in ${esc(night.at)}` : ""].filter(Boolean).join(" · ");
+  return `<div class="alt-sum small">${bits} <button class="link small" data-cmp="${id}" aria-expanded="${isOpen}">${isOpen ? "Züge ausblenden" : "Züge zeigen"}</button></div>`;
+}
+// Fast gleiche Möglichkeiten nur einmal: dieselben Züge (ohne Bus/Tram/U-Bahn am Ende), es bleibt die empfohlene bzw. die früher ankommende
+function dupAlts(list, rec) {
+  const key = a => (a.legs || []).filter(l => isTrainLeg(l)).map(l => `${l.label}@${l.from.plan}`).join("|");
+  const seen = new Map(), hide = new Set();
+  (list || []).forEach((a, i) => { const kk = key(a); if (!kk) return;
+    if (!seen.has(kk)) { seen.set(kk, i); return; }
+    const j = seen.get(kk), keepI = i === rec || (j !== rec && Date.parse(a.arr || a.dep) < Date.parse(list[j].arr || list[j].dep));
+    if (keepI) { hide.add(j); seen.set(kk, i); } else hide.add(i); });
+  return hide;
 }
 
 // „S Hohenzollerndamm (Berlin)“ = „Hohenzollerndamm“
@@ -693,10 +731,15 @@ function stepLive(x) {
 const stepTime = (rt, plan, live) => { const d = plan ? Math.round((Date.parse(rt) - Date.parse(plan)) / MIN) : 0;
   return live && d >= 2 ? `<s class="muted">${hm(plan)}</s> <b class="late">${hm(rt)}</b>` : hm(rt); };
 function stepsHtml(steps) {
-  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${stepTime(x.dep, x.depPlan, x.live)}</span><span class="st-b"><b>${esc(x.label)}</b>${stepLive(x)}${x.pl ? ` <span class="muted">${esc(platWord({ label: x.label, mode: x.mode }, x.pl))}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${stepTime(x.arr, x.arrPlan, x.live)}</span></span></li>
+  const d0 = steps[0] ? Date.parse(steps[0].dep) : 0;
+  const dTag = iso => sameDay(Date.parse(iso), d0) ? "" : `<span class="st-day">${new Date(iso).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })}</span>`;
+  return `<ol class="steps-l">${steps.map((x, i) => `<li><span class="st-t">${dTag(x.dep)}${stepTime(x.dep, x.depPlan, x.live)}</span><span class="st-b"><b>${esc(x.label)}</b>${stepLive(x)}${x.pl ? ` <span class="muted">${esc(platWord({ label: x.label, mode: x.mode }, x.pl))}</span>` : ""} ${esc(cleanStop(x.from))} → ${esc(cleanStop(x.to))} <span class="muted">an ${stepTime(x.arr, x.arrPlan, x.live)}</span></span></li>
     ${i < steps.length - 1 ? `<li class="st-x"><span class="st-t"></span><span class="st-b muted">${(() => { const g = Math.round((Date.parse(steps[i + 1].dep) - Date.parse(x.arr)) / MIN);
       const walk = plainStop(x.to) !== plainStop(steps[i + 1].from) && (x.walk == null || x.walk > 0);
       if (g < 0) return `<span class="late">Anschluss klappt wohl nicht – ${-g} Min. zu spät</span>`;
+      const walkTxt = walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : "";
+      if (nightGap(x.arr, steps[i + 1].dep)) return `<b class="warn-t">🌙 Übernachtung in ${esc(cleanStop(x.to))}</b> · weiter ${esc(dayPre(steps[i + 1].dep))}${hm(steps[i + 1].dep)}${walkTxt}`;
+      if (g >= 60) return `Aufenthalt ${fmtSpan(g)}${walkTxt}`;
       return `<span class="${g < 3 ? "late" : (ownMin() ? g < ownMin() : g < 6) ? "warn-t" : ""}">Umstieg ${g} Min.</span>${walk ? `, zu Fuß zu ${esc(cleanStop(steps[i + 1].from))}${x.walk ? ` (ca. ${x.walk} Min.)` : ""}` : ""}`; })()}</span></li>` : ""}`).join("")}</ol>`;
 }
 // Teilstrecken einer Möglichkeit (MOTIS) mit Echtzeit aus der Beobachtung
@@ -712,8 +755,9 @@ const planSteps = t => t.legs.map((l, i) => ({ mode: l.mode, label: nice(l), fro
 function losZiel(dep, arr, refDep, refArr) {
   const dd = refDep ? Math.round((Date.parse(dep) - Date.parse(refDep)) / MIN) : 0, da = refArr ? Math.round((Date.parse(arr) - Date.parse(refArr)) / MIN) : 0;
   const w = (m, a, b) => (Math.abs(m) < 2 ? "" : m < 0 ? `${fmtSpan(-m)} ${a}` : `${fmtSpan(m)} ${b}`);
-  const notes = [refDep && w(dd, "früher los", "später los"), refArr && (Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `<b class="ok-t">${fmtSpan(-da)} früher am Ziel</b>` : `${fmtSpan(da)} später am Ziel`)].filter(Boolean);
-  return `<div class="cmp-times">ab <b>${hm(dep)}</b> <span class="muted">→</span> an <b>${hm(arr)}</b></div>${notes.length ? `<div class="cmp-goal">${notes.join(" · ")}</div>` : ""}`;
+  const notes = [refDep && w(dd, "früher los", "später los"), refArr && (Math.abs(da) < 2 ? "gleich am Ziel" : da > 0 && !sameDay(Date.parse(arr), Date.parse(refArr)) ? `statt ${sameDay(Date.parse(refArr), Date.now()) ? "heute " : ""}${hm(refArr)}` : da < 0 ? `<b class="ok-t">${fmtSpan(-da)} früher am Ziel</b>` : `${fmtSpan(da)} später am Ziel`)].filter(Boolean);
+  const nd = sameDay(Date.parse(arr), Date.parse(dep)) ? "" : `${new Date(arr).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })} `;
+  return `<div class="cmp-times">ab <b>${hm(dep)}</b> <span class="muted">→</span> an <b>${nd}${hm(arr)}</b></div>${notes.length ? `<div class="cmp-goal">${notes.join(" · ")}</div>` : ""}`;
 }
 const fmtSpan = m => (m >= 60 ? `${Math.floor(m / 60)} Std.${m % 60 ? ` ${m % 60} Min.` : ""}` : `${m} Min.`);
 
@@ -773,12 +817,12 @@ function optionsBlock(t) {
   if (t.phase === "done") return "";
   const busy = t.missed != null || t.sos || sosBusy === t.id || t.here || hereBusy === t.id;
   if (t.win && !t.win.picked && t.phase === "before") return `${sosButton(t)}${windowCard(t)}`;
-  const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length : 0;
+  const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length - dupAlts(t.transfers[k].alt, bestIdx(t.transfers[k].alt, t.plan.dep)).size : 0;
   const tone = st === "LOST" || st === "RISK" ? "bad" : st === "WATCH" ? "watch" : "calm";
   const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? "Umstieg knapp – Möglichkeiten ansehen" : "Andere Verbindung suchen";
   if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${sub}${nAlt && tone !== "calm" ? ` · ${nAlt} Möglichkeit${nAlt > 1 ? "en" : ""}` : ""}</span></span><span class="chev">›</span></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
-  return `<section class="planb-box ${tone}"><button class="pb-head" data-optopen="${t.id}"><b>Plan B</b><span class="small muted">schließen ▴</span></button>${sosButton(t)}${body}</section>`;
+  return `<section class="planb-box ${tone}"><button class="pb-head" data-optopen="${t.id}"><b>Plan B</b><span class="small muted">schließen ▴</span></button>${body}</section>`;
 }
 function sosButton(t) {
   if (!sosAvailable(t) || t.sos || sosBusy === t.id || t.missed != null) return "";
@@ -823,15 +867,18 @@ let hereBusy = null;
 // Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
 function searchSeg(t, cur) {
   const enroute = t.phase === "enroute", ns = nextStop(t);
-  const opts = enroute ? [["next", `Ab ${cleanStop(ns.name)}`, `ab ${hm(ns.at)}`], ["now", "Mein Standort", "jetzt"]]
+  // Sitzt du drin und steigst danach noch um: „Woanders aussteigen“ sucht Ausstiege entlang der Fahrt (früher der große Knopf „Jetzt neu suchen“)
+  const sos = sosAvailable(t) && !t.sos && sosBusy !== t.id && t.missed == null ? [["sos", "Woanders aussteigen", `${vehicleOf(t.legs[ridingLeg(t)]).im} suchen`]] : [];
+  const opts = enroute ? [...sos, ["next", `Ab ${cleanStop(ns.name)}`, `ab ${hm(ns.at)}`], ["now", "Mein Standort", "jetzt"]]
     : [["start", `Ab ${cleanStop(t.legs[0].dep.name).replace(/\//g, "/\u200b")}`, "zur Reisezeit"], ["trip", "Mein Standort", "zur Reisezeit"], ["now", "Mein Standort", "jetzt"]];
-  return `<div class="seg" role="group" aria-label="Andere Verbindungen suchen" style="grid-template-columns:repeat(${opts.length},1fr)">${opts.map(([m, a, b]) =>
-    `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "trip" || m === "now" ? PIN : ""}${esc(a)}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
+  return `<div class="seg" role="group" aria-label="Selbst suchen" style="grid-template-columns:repeat(${opts.length},1fr)">${opts.map(([m, a, b]) =>
+    m === "sos" ? `<button data-sos="${t.id}"><b>${esc(a)}</b><span>${esc(b)}</span></button>`
+    : `<button data-here="${t.id}" data-mode="${m}" aria-pressed="${m === cur}"><b>${m === "trip" || m === "now" ? PIN : ""}${esc(a)}</b><span>${esc(b)}</span></button>`).join("")}</div>`;
 }
 function hereCard(t) {
   if (t.phase === "done") return "";
   if (hereBusy === t.id) return `<section class="card"><div class="k">Andere Verbindungen</div><div class="spinner"></div></section>`;
-  if (!t.here) return `<section class="card"><div class="k">Andere Verbindungen suchen</div>${searchSeg(t, null)}</section>`;
+  if (!t.here) return `<div class="self-search"><div class="k">Selbst suchen</div>${searchSeg(t, null)}</div>`;
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const mode = t.here.mode || "trip";
@@ -948,13 +995,13 @@ function renderTrip(t, many) {
     ${t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? "PLAN" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – noch ohne Live-Daten" : esc(t.title)}</h2>
       ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? `<p>Laut Fahrplan klappt alles${t.transfers?.length ? ` (${t.transfers.map(x => `Umstieg ${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(", ")})` : ""}. Live-Zeiten kommen meist kurz vor der Abfahrt – dann prüfe ich laufend und melde mich, wenn etwas nicht passt.</p>` : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
+    ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     ${t.win?.picked ? windowCard(t) : ""}
     ${t.canUndo ? `<div class="banner info small row" style="align-items:center"><span style="flex:3">Du fährst jetzt mit ${esc(t.legs.map(l => nice(l)).join(" → "))}.${t.ticket === "spar" && !t.zbLifted && t.undoZb ? " Achtung: Dein Sparpreis gilt hier evtl. nicht, solange die Zugbindung nicht aufgehoben ist." : ""}</span><button class="chip" data-undo="${t.id}" style="flex:0 0 auto">Zurück zum alten Plan</button></div>` : ""}
     ${t.rnote ? `<div class="banner info small">↻ ${esc(t.rnote)}</div>` : ""}
     ${t.follow === true ? "" : nextCard(t.next, t)}
     ${t.phase === "before" ? retCard(RET?.tripId === t.id) : ""}
     ${t.follow === true ? "" : optionsBlock(t)}
-    ${t.zbLifted ? `<div class="banner"><b>Dein Sparpreis gilt jetzt voraussichtlich auch in anderen Zügen.</b> Grund: ${esc(t.zbWhy || (t.legs.some(l => l.dep.cancelled || l.arr.cancelled) ? "Zugausfall" : "Verspätung bzw. absehbar verpasster Anschluss"))} (DB-Regeln zur Zugbindung). <a href="https://www.bahn.de/faq/zugbindung-aufgehoben-bedeutung" target="_blank" rel="noopener">Regeln</a></div>` : ""}
     <h3 class="sec-h">${t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3><div class="card flat">${timeline(t)}</div>
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
@@ -993,7 +1040,8 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-must]").forEach(b => b.onclick = e => { e.stopPropagation(); const v = b.dataset.must.split("|")[1]; patch({ mustLeg: v === "" ? null : +v }); });
   bindRoutineForm(t);
   bindAccess(t); bindRet();
-  $app.querySelectorAll("[data-optopen]").forEach(b => b.addEventListener("click", () => { OPT_OPEN = OPT_OPEN === t.id ? null : t.id; render(); }));
+  $app.querySelectorAll("[data-optopen]").forEach(b => b.addEventListener("click", () => { const only = "optonly" in b.dataset; OPT_OPEN = only || OPT_OPEN !== t.id ? t.id : null; render();
+    if (only) $app.querySelector(".planb-box")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   bindHints();
   bindCommon();
 }
@@ -2234,18 +2282,32 @@ const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l
 const showBahn = t => t.phase === "before" && t.ticket !== "dticket" && !t.follow && t.legs.some(isTrainLeg);
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
 function bahnUrl(t) {
-  // Format wie die Links, die bahn.de selbst erzeugt: soid/zoid = „A=1@O=Name@X=Länge·10⁶@Y=Breite·10⁶@U=80@L=Bahnhofsnummer@“
   const L = t.legs, last = [...L].reverse().find(isTrainLeg) || L[L.length - 1];
   // Start = deine erste Haltestelle (auch Bus/Tram), Ziel = Ankunft des letzten Zugs; Abfahrt = Abfahrt an der ersten Haltestelle
-  const a = L[0].dep, z = last.arr;
+  return bahnLink(L[0].dep, last.arr, L[0].dep.plan);
+}
+// Format wie die Links, die bahn.de selbst erzeugt: soid/zoid = „A=1@O=Name@X=Länge·10⁶@Y=Breite·10⁶@U=80@L=Bahnhofsnummer@“
+function bahnLink(a, z, at) {
   // Haltestellen ohne Bahnhofsnummer heißen bei der Bahn „Roseneck, Berlin“ statt „Roseneck (Berlin)“
   const nm = s => /^\d{6,9}$/.test(String(s.eva || "")) ? String(s.name || "").replace(/\s*\(Berlin\)$/, "") : String(s.name || "").replace(/\s*\(([^)]+)\)\s*$/, ", $1");
   const loc = s => { const ok = /^\d{6,9}$/.test(String(s.eva || ""));
     return `A=1@O=${nm(s)}@${s.lat != null ? `X=${Math.round(s.lon * 1e6)}@Y=${Math.round(s.lat * 1e6)}@` : ""}${ok ? `U=80@L=${s.eva}@` : ""}`; };
-  const hd = new Date(a.plan).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
+  const hd = new Date(at).toLocaleString("sv-SE", { timeZone: "Europe/Berlin" }).replace(" ", "T").slice(0, 19);
   const q = new URLSearchParams({ sts: "true", so: nm(a), zo: nm(z), kl: "2", r: "13:16:KLASSENLOS:1", soid: loc(a), zoid: loc(z), sot: "ST", zot: "ST", hd, hza: "D" });
-  bahnUrl.last = { from: nm(a), to: nm(z), at: a.plan };
+  bahnUrl.last = { from: nm(a), to: nm(z), at };
   return `https://www.bahn.de/buchung/fahrplan/suche#${q.toString().replace(/\+/g, "%20")}`;
+}
+// Plan B bei der Bahn gegenprüfen: ab dem Bahnhof, an dem der Anschluss platzt (bzw. wo du gerade bist), zur echten Ankunftszeit dort
+function bahnCheck(t) {
+  if (t.phase === "done" || !t.legs.some(isTrainLeg)) return null;
+  const now = Date.now(), L = t.legs;
+  const k = t.transfers.findIndex(x => x.status === "LOST" || x.status === "RISK");
+  let from, at, next;   // next = erste Fahrt ab dort
+  if (k >= 0 && Date.parse(L[k].arr.rt) > now - 30 * MIN) { from = L[k].arr; at = L[k].arr.rt; next = k + 1; }   // Ankunft am Umstieg (noch unterwegs oder gerade da)
+  else { const i = Math.max(0, L.findIndex(l => Date.parse(l.dep.rt) > now - MIN)); from = L[i].dep; at = new Date(Math.max(now, Date.parse(L[i].dep.rt))).toISOString(); next = i; }
+  const last = [...L.slice(next)].reverse().find(isTrainLeg);
+  if (!last || sameStation(from.name, last.arr.name)) return null;   // danach fährt kein Zug mehr
+  return { url: bahnLink(from, last.arr, at), from: cleanStop(from.name), at };
 }
 // Kurz-Nachricht zum aktuellen Stand – passt zu jeder Lage (vor der Fahrt, unterwegs, Plan B, angekommen)
 function statusText(t) {

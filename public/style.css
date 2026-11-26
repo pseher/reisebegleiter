@@ -499,3 +499,15 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .planb-box > .card { box-shadow: none; }
 .planb-box .card { border: 0; background: transparent; padding: 8px 2px; margin: 0 0 6px; }
 .planb-box .sos-big { margin: 0 0 10px; }
+
+/* Plan B ruhiger: Übernachtung klar, zweiter Weg zur Bahn, kompakte Möglichkeiten */
+.hero-rec .rec-night { margin: 0 0 8px; font-size: 16px; line-height: 1.35; }
+.hero-rec .bahn-check { display: flex; flex-direction: column; align-items: center; gap: 1px; text-decoration: none; margin-top: 8px; }
+.hero-rec .bahn-check span { font-size: 12px; font-weight: 400; opacity: .8; }
+.hero-rec .rec-note { margin: 8px 0 0; color: var(--muted); }
+.hero-rec .link { margin-top: 8px; }
+.alt-sum { margin: 4px 0 2px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.alt-sum .link { padding: 0; }
+.st-day { display: block; font-size: 11px; color: var(--muted); font-weight: 600; line-height: 1; }
+.self-search { margin-top: 14px; }
+.self-search .k { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
