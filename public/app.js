@@ -574,6 +574,22 @@ function bindRoutineForm(t) {
 }
 
 // Der nächste Schritt – groß und eindeutig
+// Nach dem Aussteigen: klar zeigen, womit es weitergeht – Zug und Ziel, Abfahrt, Gleis, Zeit zum Umsteigen
+function thenBox(n, t) {
+  const th = n.then, nl = t?.legs?.[n.i + 1], tr = t?.transfers?.[n.i];
+  const cls = th.gap < 0 || tr?.status === "RISK" || tr?.status === "LOST" ? "bad" : tr?.status === "WATCH" ? "watch" : "ok";
+  const name = esc(/^\d/.test(th.label) && nl?.mode && MODE[nl.mode] ? `${MODE[nl.mode][0]} ${th.label}` : th.label);
+  const late = nl ? Math.round((Date.parse(nl.dep.rt) - Date.parse(nl.dep.plan)) / MIN) : 0;
+  const fromPl = n.platform, toPl = th.platform;
+  return `<div class="then-box">
+    <div class="tb-k">Weiter mit</div>
+    <div class="tb-main"><b>${name}</b>${nl?.arr?.name ? ` <span class="muted">→ ${esc(cleanStop(nl.arr.name))}</span>` : ""}</div>
+    <div class="tb-row"><span class="tb-t">${hm(th.at)}</span>${toPl ? gl(toPl, th) : ""}<span class="muted small">${inMin(th.at)}</span></div>
+    ${late >= 2 ? `<div class="small"><span class="late">${late} Min. später</span> · geplant ${hm(nl.dep.plan)}</div>` : ""}
+    ${th.platformChanged ? `<div class="small"><span class="late">Gleiswechsel (statt Gleis ${esc(th.platformPlan)})</span></div>` : ""}
+    <div class="tb-gap ${cls}">${th.gap >= 0 ? `${dur(th.gap)} zum Umsteigen` : `voraussichtlich ${-th.gap} Min. zu spät`}${fromPl && toPl ? ` · Gleis ${esc(fromPl)} → Gleis ${esc(toPl)}` : ""}</div>
+  </div>`;
+}
 function nextCard(n, t) {
   if (!n) return "";
   if (n.kind === "missed") return `<section class="card next"><div class="k">${vehicleOf(t?.legs?.[n.i]).n} verpasst</div>
@@ -599,7 +615,7 @@ function nextCard(n, t) {
       <div>${n.kind === "ride-change" ? "Aussteigen in" : "Ankunft in"} <b>${esc(cleanStop(n.station))}</b>${n.platform ? "" : ""}</div>
       ${n.then && n.then.station && !sameStation(n.then.station, n.station) ? `<div class="walk-box">Danach zu Fuß zu ${esc(cleanStop(n.then.station))} ${walkBtn({ name: n.station, lat: n.lat, lon: n.lon }, { name: n.then.station, lat: n.then.lat, lon: n.then.lon })}</div>` : ""}
       ${n.then ? (n.then.lost ? `<div class="small"><span class="late">Anschluss ${esc(n.then.label)} ${n.then.cancelled ? "fällt aus" : "klappt nicht"}</span></div>`
-        : `<div class="then">Dann <b>${esc(n.then.label)}</b> um ${hm(n.then.at)}${n.then.platform ? `, ${esc(platWord(n.then, n.then.platform))}` : ""}${n.then.platformChanged ? ` <span class="late">Gleiswechsel (statt ${esc(n.then.platformPlan)})</span>` : ""} · ${n.then.gap >= 0 ? `${n.then.gap} Min. Zeit` : `<span class="late">voraussichtlich ${-n.then.gap} Min. zu spät</span>`}</div>`) : `<div class="muted small">${inMin(n.at)}</div>`}`;
+        : thenBox(n, t)) : `<div class="muted small">${inMin(n.at)}</div>`}`;
   return `<section class="card next"><div class="k">${head}</div>${body}${missBtn}</section>`;
 }
 
