@@ -312,3 +312,14 @@ test("Reise ändern: mittlere Züge fest, davor und danach neu, neue Umstiegszei
   const bad = await call(`/api/trips/${t.id}`, { auth: A, method: "PUT", body: { keep: { a: 1, b: 2 }, pre: [L("Tram 9", 5.8, 6.5, "A", "B")], post: [], ticket: "flex" } });
   assert.equal(bad.status, 400);
 });
+
+test("Umstieg schon erreicht: angekommen, Anschluss fährt noch – nicht mehr „knapp“, auch wenn weniger als die eigene Umstiegszeit", async () => {
+  const { evaluate } = await import("../src/engine.js");
+  const now = Date.now(), iso = m => new Date(now + m * 60e3).toISOString();
+  const trip = { legs: [
+    { jid: "", label: "ICE 1009", mode: "HIGHSPEED_RAIL", minT: 15, from: { name: "Berlin Südkreuz", eva: "8011113", plan: iso(-100) }, to: { name: "Erfurt Hbf", eva: "8010101", plan: iso(-9) } },
+    { jid: "", label: "ICE 375", mode: "HIGHSPEED_RAIL", minT: 15, from: { name: "Erfurt Hbf", eva: "8010101", plan: iso(1) }, to: { name: "Frankfurt (Main) Hbf", eva: "8000105", plan: iso(130) } }], obs: [], state: {} };
+  const v = evaluate(trip, now);
+  assert.equal(v.transfers[0].status, "OK");
+  assert.equal(v.status, "OK");
+});

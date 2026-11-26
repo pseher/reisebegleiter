@@ -587,7 +587,7 @@ function thenBox(n, t) {
     <div class="tb-row"><span class="tb-t">${hm(th.at)}</span>${toPl ? gl(toPl, th) : ""}<span class="muted small">${inMin(th.at)}</span></div>
     ${late >= 2 ? `<div class="small"><span class="late">${late} Min. später</span> · geplant ${hm(nl.dep.plan)}</div>` : ""}
     ${th.platformChanged ? `<div class="small"><span class="late">Gleiswechsel (statt Gleis ${esc(th.platformPlan)})</span></div>` : ""}
-    <div class="tb-gap ${cls}">${th.gap >= 0 ? `${dur(th.gap)} zum Umsteigen` : `voraussichtlich ${-th.gap} Min. zu spät`}${fromPl && toPl ? ` · Gleis ${esc(fromPl)} → Gleis ${esc(toPl)}` : ""}</div>
+    <div class="tb-gap ${cls}">${th.gap >= 0 ? `${dur(th.gap)} zum Umsteigen` : `voraussichtlich ${-th.gap} Min. zu spät`}${fromPl && toPl ? (String(fromPl).trim() === String(toPl).trim() ? ` · am selben Gleis` : ` · Gleis ${esc(fromPl)} → Gleis ${esc(toPl)}`) : ""}</div>
   </div>`;
 }
 function nextCard(n, t) {

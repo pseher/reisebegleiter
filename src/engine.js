@@ -84,6 +84,8 @@ export function evaluate(trip, now = Date.now()) {
     else if (a.cancelled || d.cancelled || legs[i].dep.cancelled) { status = "LOST"; reason = "cancel"; }
     // rechnerisch nicht zu schaffen: mit echter Ankunftsprognose oder kurz vorher sicher verpasst; nur geschätzt und noch weit weg → gefährdet (kann aufgeholt werden)
     else if (gap < 0 && (until <= 45 || !a.estimated)) { status = "LOST"; reason = "late"; }
+    // Schon am Umsteigebahnhof angekommen und der Anschluss ist noch da: dann ist es nicht mehr „knapp“, sondern einfach „jetzt umsteigen“
+    else if (a.rt <= now && gap >= 0) status = "OK";
     // Eigene Umstiegszeit eingestellt: genau so viel Zeit ist ausreichend – knapp erst darunter (Puffer nur, wenn der Zug schon verspätet ist)
     // Eigene Umstiegszeit: ab dieser Zeit ist alles gut. Darunter „knapp“ (gelb) – „gefährdet“ (rot) erst, wenn es auch praktisch eng wird.
     else if (own > 0) {
