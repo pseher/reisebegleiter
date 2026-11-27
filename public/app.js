@@ -148,7 +148,7 @@ addEventListener("popstate", () => {
   guard = false;
   if (view === "add" && W) { const bk = document.getElementById("wBack"); if (bk) return bk.click(); W = null; return go("home"); }
   if (view !== "home") return go("home");
-  if (openId && subOpen()) { const hx = document.querySelector("[data-pbclose]"); if (BLK) { BLK = null; render(); } else if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
+  if (openId && subOpen()) { const hx = document.querySelector("[data-pbclose]"); if (BLK) { blkLeave().then(ok => ok ? render() : history.pushState({ rb: 1 }, "")); } else if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
   if (openId) { openId = null; sheetId = null; }
   render();
 });
@@ -896,7 +896,7 @@ function optionsBlock(t) {
   if (!busy && OPT_OPEN !== t.id && (planOnly(t) || !["WATCH", "RISK", "LOST"].includes(t.status))) return "";
   const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length - dupAlts(t.transfers[k].alt, bestIdx(t.transfers[k].alt, t.plan.dep)).size : 0;
   const tone = st === "LOST" || st === "RISK" ? "bad" : st === "WATCH" ? "watch" : "calm";
-  const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? "Umstieg knapp – Möglichkeiten ansehen" : "Andere Verbindung suchen";
+  const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? (t.transfers.some(x => x.status === "WATCH") ? "Umstieg knapp – Möglichkeiten ansehen" : "Verspätung – Möglichkeiten ansehen") : "Andere Verbindung suchen";
   if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${sub}${nAlt && tone !== "calm" ? ` · ${nAlt} Möglichkeit${nAlt > 1 ? "en" : ""}` : ""}</span></span><span class="chev">›</span></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
   return `<section class="planb-box ${tone}"><div class="pb-head"><b>Plan B</b><button class="card-x" data-pbclose="${t.id}" aria-label="Plan B schließen">✕</button></div>${body}</section>`;
@@ -1020,7 +1020,7 @@ function timeline(t) {
     const past = Date.parse(l.arr.rt) < Date.now(), open = openLeg === `${t.id}:${i}`;
     rows.push(`<li class="leg-row ${past ? "past" : ""}"><button data-leg="${t.id}:${i}" aria-expanded="${open}">
       <span class="tm">${l.dep.delay >= 1 ? `<s class="muted small">${hm(l.dep.plan)}</s><br><b class="late">${hm(l.dep.rt)}</b>` : hm(l.dep.rt)}<br><span class="muted">${l.arr.delay >= 1 ? `<s class="small">${hm(l.arr.plan)}</s> <span class="late">${hm(l.arr.rt)}</span>` : hm(l.arr.rt)}</span></span>
-      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">${vehicleOf(l).fest.toLowerCase()}</span>` : ""}${l.live ? "" : ` <span class="muted small">nur Fahrplan</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
+      <span class="ln"><span class="chip-t">${esc(nice(l))}</span>${l.must ? ` <span class="must">${vehicleOf(l).fest.toLowerCase()}</span>` : ""}${l.live ? "" : ` <span class="muted small">noch ohne Live-Zeit</span>`}${l.dep.cancelled || l.arr.cancelled ? ` <span class="late">fällt aus</span>` : ""}<br>
         <span class="small">${esc(l.dep.name)} → ${esc(l.arr.name)}</span></span>
       <span class="pl small">${esc(platWord(l, l.dep.platform))}</span></button>
       ${open ? `<div class="detail small">
@@ -1058,6 +1058,14 @@ function transferText(tr) {
 }
 
 let TL_OPEN = false;   // „Ganze Reise“ unterwegs aufgeklappt?
+// Ticket sichtbar in der Fahrt: Sparpreis = Zugbindung; Deutschlandticket im Fernzug gilt nicht
+function ticketNote(t) {
+  const fv = t.legs.filter(l => isFVc({ label: l.label, mode: l.mode })).map(l => esc(l.label));
+  if (t.ticket === "spar") return ` · Sparpreis${fv.length ? ` (Zugbindung: ${[...new Set(fv)].join(", ")})` : ""}`;
+  if (t.ticket === "dticket") return fv.length ? ` · <span class="warn-t">Deutschlandticket gilt nicht im ${[...new Set(fv)].join(", ")}</span>` : " · Deutschlandticket";
+  if (t.ticket === "bc100") return " · BahnCard 100";
+  return "";
+}
 function renderTrip(t, many) {
   CUR_OWN = +t.minT || 0; CUR_ZB = t.ticket === "spar" && !t.zbLifted;
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
@@ -1066,10 +1074,10 @@ function renderTrip(t, many) {
   if (BLK?.id === t.id) return renderBlocks(t);   // Fahrt ändern als Bausteine
   if (SCREEN_SIG.split("|")[3] !== String(t.id)) OPT_OPEN = null;   // neu in die Fahrt gekommen: Plan B erst einmal zu
   const SK = stuckOf(t);     // „Heute nicht mehr“: ruhiger Bildschirm statt Alarm
-  const hint = SK ? "" : hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster) – nicht in der Stresslage
+  const hint = "";   // Hinweise zu App/Mitteilungen nur auf der Startseite – in der Fahrt stören sie
   $app.innerHTML = `${flashBox()}
     <div class="trip-head"><h1 class="th-title">${t.rname ? `<span class="th-r">↻ ${esc(t.rname)}</span>` : ""}${route(t)}</h1>
-      <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn kaufen"><i>🛒</i>Ticket kaufen</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : `${hm(t.legs[t.legs.length - 1].arr.rt)}${sameDay(Date.parse(t.legs[t.legs.length - 1].arr.rt), Date.parse(t.legs[0].dep.plan)) ? "" : ` (${new Date(t.legs[t.legs.length - 1].arr.rt).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })})`}`}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}</p></div>
+      <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn kaufen"><i>🛒</i>Ticket kaufen</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : `${hm(t.legs[t.legs.length - 1].arr.rt)}${sameDay(Date.parse(t.legs[t.legs.length - 1].arr.rt), Date.parse(t.legs[0].dep.plan)) ? "" : ` (${new Date(t.legs[t.legs.length - 1].arr.rt).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })})`}`}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}${ticketNote(t)}</p></div>
     ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
       : t.follow === "gone" ? `<p class="small explain">👀 Die geteilte Fahrt wurde beim Absender gelöscht – ich überwache diese Verbindung hier einfach weiter.</p>` : ""}
     ${SK ? stuckView(t, SK) : t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? "PLAN compact" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – laut Fahrplan passt alles" : esc(t.title)}</h2>
@@ -1087,7 +1095,7 @@ function renderTrip(t, many) {
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
     <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
     ${sheet ? `<section class="card" id="sheet">
-      ${t.phase === "before" ? `<button class="btn sec" data-edit="${t.id}">Fahrt ändern (Zeit, Strecke, Verbindung)</button>` : ""}
+      ${t.phase === "before" ? `<button class="btn sec" data-edit="${t.id}">Fahrt ändern (Zeiten, Start, Verbindung)</button>` : ""}
       <p class="small muted">Zeit, die ich mindestens zum Umsteigen brauche</p>
       <div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-tmt="${m}" aria-pressed="${(t.minT || 0) === m}">${l}</button>`).join("")}</div>
       <p class="small muted">Ticket (nur für den Hinweis zur Zugbindung)</p>
@@ -1103,9 +1111,9 @@ function renderTrip(t, many) {
   $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
   $app.querySelector("[data-skorig]")?.addEventListener("click", e => { STUCK_ORIG = STUCK_ORIG === t.id ? null : t.id; render(); });
   $app.querySelector("[data-gohome]")?.addEventListener("click", async e => {
-    const h = t.stuck?.home?.[0], home = cleanStop(t.legs[0].dep.name); if (!h) return;
+    const b = e.currentTarget, h = t.stuck?.home?.[0], home = cleanStop(t.legs[0].dep.name); if (!h) return;
     if (!(await ask(`Fahrt abbrechen und zurück nach ${home}?\n\n${h.label}: ab ${hm(h.dep)}, an ${hm(h.arr)}\n\nEs wird nichts gebucht. Die Fahrt nach ${destOf(t)} wird beendet, ich überwache dann den Rückweg.`, { ok: "Zurückfahren" }))) return;
-    const b = e.currentTarget; b.disabled = true;
+    b.disabled = true;
     try {
       const n = await api("/api/trips", { method: "POST", body: { legs: h.legs, ticket: t.ticket } });
       await api(`/api/trips/${t.id}`, { method: "DELETE" }).catch(() => {});
@@ -1118,7 +1126,7 @@ function renderTrip(t, many) {
   $app.querySelectorAll("[data-bahn]").forEach(b => b.onclick = async () => {
     const url = bahnUrl(t), x = bahnUrl.last;
     const show = n => cleanStop(n.replace(/, Berlin$/, ""));
-    const ok = await ask(`Weiter zu bahn.de?\n\nDas wird übergeben:\nStart: ${show(x.from)}\nZiel: ${show(x.to)}\nAbfahrt: ${day(x.at)}, ${hm(x.at)}\n1 Person, 2. Klasse${x.cut ? `\n\nIns Ausland kann ich die Fahrt nur bis zum letzten deutschen Bahnhof übergeben. Die Strecke ${show(x.to)} → ${x.cut} ergänzt du bitte bei bahn.de oder buchst sie beim Bahnunternehmen im Ausland.` : ""}\n\nPrüfe bei der Bahn Reisende, Ermäßigung und Verbindung. Gebucht und bezahlt wird nur dort.`, { ok: "Zu bahn.de", cancel: "Abbrechen" });
+    const ok = await ask(`Weiter zu bahn.de?\n\nDas wird übergeben:\nStart: ${show(x.from)}\nZiel: ${show(x.to)}\nAbfahrt: ${day(x.at)}, ${hm(x.at)}\n1 Person, 2. Klasse${t.legs.filter(isTrainLeg).length > 1 ? `\n\nWähle dort diese Züge: ${t.legs.filter(isTrainLeg).map(l => `${l.label} (${hm(l.dep.plan)})`).join(" → ")}` : ""}${x.cut ? `\n\nIns Ausland kann ich die Fahrt nur bis zum letzten deutschen Bahnhof übergeben. Die Strecke ${show(x.to)} → ${x.cut} ergänzt du bitte bei bahn.de oder buchst sie beim Bahnunternehmen im Ausland.` : ""}\n\nPrüfe bei der Bahn Reisende, Ermäßigung und Verbindung. Gebucht und bezahlt wird nur dort.`, { ok: "Zu bahn.de", cancel: "Abbrechen" });
     if (ok) window.open(url, "_blank", "noopener");
   });
   $app.querySelectorAll("[data-edit]").forEach(b => b.onclick = async () => {
@@ -1506,12 +1514,18 @@ function bindCommon() {
 // ---------- Fahrt ändern als Bausteine: jede Teilstrecke einzeln früher oder später, auch andere Linien ----------
 // Geladen wird erst beim ersten Tippen auf ‹ oder › (Abfahrts- und Ankunftstafel), danach wird nur noch geblättert.
 let BLK = null;
+// Verlassen: gewählte Änderungen nicht stillschweigend verwerfen
+async function blkLeave() {
+  if (!BLK) return true;
+  if (Object.values(BLK.sel).some(v => v != null) && !(await ask("Änderungen verwerfen?\n\nDeine Auswahl wird nicht übernommen.", { ok: "Verwerfen", cancel: "Weiter ändern" }))) return false;
+  BLK = null; return true;
+}
 function openBlocks(t) { BLK = { id: t.id, sel: {}, lists: {}, err: {}, note: {}, loading: null }; scrollTo(0, 0); render(); }
 const lk = s => String(s || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
 function bCur(t, i) {
   const L = BLK.lists[i], k = BLK.sel[i], l = t.legs[i];
   if (L && k != null && L[k]) { const o = L[k]; return { label: o.label, mode: o.mode, dep: o.from.plan, arr: o.to.plan, from: o.from.name, to: o.to.name, walk: o.walk || 0, opt: o, changed: true }; }
-  return { label: nice(l), mode: l.mode, dep: l.dep.plan, arr: l.arr.plan, from: l.dep.name, to: l.arr.name, walk: l.walk || 0, changed: false };
+  return { label: nice(l), mode: l.mode, dep: l.dep.plan, arr: l.arr.plan, from: l.dep.name, to: l.arr.name, walk: t.transfers?.[i]?.walk ?? l.walk ?? 0, changed: false };   // Fußweg wie in der Fahrtansicht
 }
 const isOrig = (t, i, o) => lk(o.label) === lk(t.legs[i].label) && Math.abs(Date.parse(o.from.plan) - Date.parse(t.legs[i].dep.plan)) < 90e3;
 async function bStep(t, i, dir) {
@@ -1547,9 +1561,11 @@ async function bStep(t, i, dir) {
   render();
 }
 function bGap(t, i) {
-  // Puffer = Zeit am Einstieg nach Ankunft und Fußweg. Weniger als deine Umstiegszeit (oder unter 3 Min.): Hinweis
-  const a = bCur(t, i), b = bCur(t, i + 1), g = Math.round((Date.parse(b.dep) - Date.parse(a.arr)) / MIN) - (a.walk || 0), own = +t.minT || 0, need = own || 3;
-  return { g, own, need, cls: g < 0 ? "bad" : g < need ? "warn" : "ok", a, b };
+  // Gleiche Maßstäbe wie die Überwachung: Umstiegszeit gesamt gegen deine eigene Umstiegszeit bzw. die übliche Zeit an diesem Bahnhof (+2 Min.)
+  const a = bCur(t, i), b = bCur(t, i + 1), tot = Math.round((Date.parse(b.dep) - Date.parse(a.arr)) / MIN), walk = a.walk || 0, g = tot - walk;
+  const own = +t.minT || 0, need = t.transfers?.[i]?.need ?? walk + 3;
+  const tight = own ? tot < own : tot < need + 2;
+  return { g, tot, walk, own, need, cls: g < 0 ? "bad" : tight ? "warn" : "ok", a, b };
 }
 function renderBlocks(t) {
   const n = t.legs.length, now = Date.now();
@@ -1564,43 +1580,49 @@ function renderBlocks(t) {
     const block = `<div class="blk-b${c.changed ? " ch" : ""}${past ? " past" : ""}">${arrow(-1, "‹", "früher")}<div class="blk-m"><b>${esc(c.label)} · ${hm(c.dep)}</b><span>${esc(cleanStop(c.from))} → ${esc(cleanStop(c.to))} · an ${hm(c.arr)}</span><span class="blk-d">${past ? "schon gefahren" : delta}${other}</span>${fv}${msg}</div>${arrow(1, "›", "später")}</div>`;
     if (i === n - 1) return block;
     const G = bGap(t, i);
-    const walk = G.a.walk ? `zu Fuß ${G.a.walk} Min. · ` : "";
-    const txt = G.g < 0 ? `${walk}verpasst ${esc(G.b.label)} (${-G.g} Min. zu spät)`
-      : G.cls === "warn" ? `${walk}nur ${G.g} Min. Puffer – ${G.own ? `weniger als deine Umstiegszeit (${G.own} Min.)` : "sehr knapp"} für ${esc(G.b.label)}`
-      : `${walk}${G.g} Min. Puffer`;
+    // gleiche Form wie in der Fahrtansicht: Umstiegszeit gesamt, davon Fußweg, übrig bleibt der Puffer
+    const head = `Umstieg ${G.tot} Min.${G.walk ? `, davon ${G.walk} zu Fuß` : ""}`;
+    const txt = G.g < 0 ? `${head} – verpasst ${esc(G.b.label)} (${-G.g} Min. zu spät)`
+      : G.cls === "warn" ? `${head} – ${G.own ? `weniger als deine Umstiegszeit (${G.own} Min.)` : "knapp"}`
+      : head;
     return `${block}<div class="blk-g ${G.cls}"><i aria-hidden="true"></i>${txt}</div>`;
   }).join("");
   const changed = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null);
   const first = bCur(t, 0), last = bCur(t, n - 1), da = Math.round((Date.parse(last.arr) - Date.parse(t.legs[n - 1].arr.plan)) / MIN);
-  const sum = changed.length ? `<div class="blk-s"><b>Neu: ab ${hm(first.dep)} → an ${hm(last.arr)}</b><span>${da === 0 ? "Ankunft unverändert" : `Ankunft ${Math.abs(da)} Min. ${da < 0 ? "früher" : "später"}`}</span></div>` : "";
+  const miss = t.legs.slice(0, -1).map((_, i) => bGap(t, i)).find(G => G.g < 0);
+  const sum = !changed.length ? "" : miss ? `<div class="blk-s bad"><b>So geht es nicht</b><span>Du verpasst den ${esc(miss.b.label)}. Nimm für das rot markierte Stück eine frühere Fahrt – oder verschiebe auch den ${esc(miss.b.label)} mit ›.</span></div>`
+    : `<div class="blk-s"><b>Neu: ab ${hm(first.dep)} → an ${hm(last.arr)}</b><span>${da === 0 ? "Ankunft unverändert" : `Ankunft ${Math.abs(da)} Min. ${da < 0 ? "früher" : "später"}`}</span></div>`;
   $app.innerHTML = `${flashBox()}<section class="blk">
     <div class="blk-h"><div><div class="k">Fahrt ändern</div><h2>${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[n - 1].arr.name))}</h2></div><button class="card-x" data-blkx aria-label="Ändern schließen">✕</button></div>
-    <p class="small muted">Tippe ‹ oder ›, um ein Stück früher oder später zu nehmen – auch mit einer anderen Linie. Der Rest bleibt, wie er ist.</p>
+    <button class="btn sec blk-start" data-bstart>📍 Ich starte woanders</button>
+    <p class="small muted">Oder tippe ‹ oder ›, um ein Stück früher oder später zu nehmen – auch mit einer anderen Linie. Der Rest bleibt, wie er ist.</p>
     <div class="blk-l">${rows}</div>
     ${sum}
-    <button class="btn" data-bsave${changed.length ? "" : ` aria-disabled="true"`}>${changed.length ? "So übernehmen" : "Noch nichts geändert"}</button>
-    <button class="link small blk-full" data-bfull>Ganz neu suchen</button>
+    <button class="btn" data-bsave${changed.length && !miss ? "" : ` aria-disabled="true"`}>${!changed.length ? "Noch nichts geändert" : miss ? "Anschluss verpasst – so nicht möglich" : "So übernehmen"}</button>
+    <button class="link small blk-full" data-bfull>Ganz neu suchen (anderer Tag oder Ziel)</button>
   </section>`;
-  $app.querySelector("[data-blkx]").onclick = () => { BLK = null; render(); };
+  $app.querySelector("[data-blkx]").onclick = async () => { if (await blkLeave()) render(); };
+  $app.querySelector("[data-bstart]").onclick = async e => { e.currentTarget.disabled = true; BLK = null; await startEdit(t, "start"); };
   $app.querySelectorAll("[data-bstep]").forEach(b => b.onclick = () => bStep(t, +b.dataset.bstep, +b.dataset.dir));
   $app.querySelector("[data-bfull]").onclick = async e => { e.currentTarget.disabled = true; BLK = null; await startEdit(t); };
   $app.querySelector("[data-bsave]").onclick = async e => {
+    const btn = e.currentTarget;   // vor dem ersten await merken (danach ist currentTarget leer)
     const ch = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null).map(Number);
     if (!ch.length) return;
     if (t.legs.slice(0, -1).some((_, i) => bGap(t, i).g < 0)) return alert("Mit dieser Wahl erreichst du einen Anschluss nicht.\n\nWähl bitte für das rot markierte Stück eine andere Fahrt.");
     const tight = t.legs.slice(0, -1).map((_, i) => bGap(t, i)).filter(G => G.cls === "warn");
-    if (tight.length && !(await ask(`Knapper Umstieg\n\n${tight.map(G => `Zum ${G.b.label} bleiben nur ${G.g} Min.${G.a.walk ? ` (nach ${G.a.walk} Min. Fußweg)` : ""}${G.own ? ` – deine Umstiegszeit ist ${G.own} Min.` : ""}`).join("\n")}\n\nTrotzdem so übernehmen?`, { ok: "Trotzdem übernehmen", cancel: "Andere Fahrt wählen" }))) return;
+    if (tight.length && !(await ask(`Knapper Umstieg\n\n${tight.map(G => `Zum ${G.b.label} hast du nur ${G.tot} Min.${G.walk ? `, davon ${G.walk} zu Fuß` : ""}${G.own ? ` – deine Umstiegszeit ist ${G.own} Min.` : ""}`).join("\n")}\n\nTrotzdem so übernehmen?`, { ok: "Trotzdem übernehmen", cancel: "Andere Fahrt wählen" }))) return;
     const fv = ch.map(i => bCur(t, i)).filter(c => t.ticket === "spar" && isFVc({ label: c.label, mode: c.mode }));
     if (fv.length && !(await ask(`Achtung Sparpreis\n\nDein Ticket gilt nur für die gebuchten Züge. ${fv.map(c => c.label).join(", ")} geht nur, wenn die Zugbindung aufgehoben ist – sonst brauchst du dafür ein anderes Ticket.`, { ok: "Trotzdem ändern" }))) return;
-    const b = e.currentTarget; b.disabled = true; b.textContent = "Wird geändert …";
+    const b = btn; b.disabled = true; b.textContent = "Wird geändert …";
     try {
       await api(`/api/trips/${t.id}`, { method: "PUT", body: { replace: Object.fromEntries(ch.map(i => [i, BLK.lists[i][BLK.sel[i]]])), ticket: t.ticket } });
-      flash = "Fahrt geändert. Ich überwache jetzt die neue Verbindung.";
+      flash = t.routine ? "Nur heute geändert – deine regelmäßige Fahrt bleibt, wie sie ist. Ich überwache jetzt die neue Verbindung." : "Fahrt geändert. Ich überwache jetzt die neue Verbindung.";
       BLK = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
     } catch (err) { alert(err.message); b.disabled = false; b.textContent = "So übernehmen"; }
   };
 }
-async function startEdit(t) {
+async function startEdit(t, mode) {
   const first = t.legs[0].dep, last = t.legs[t.legs.length - 1].arr;
   const st = async s => s.eva ? { eva: s.eva, name: s.name } : s.lat != null ? { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
   const [rFrom, rTo] = await Promise.all([st(first), st(last)]);
@@ -1609,6 +1631,9 @@ async function startEdit(t) {
   W = { step: ok ? "conns" : "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom, rTo, when: Math.max(Date.now(), Date.parse(first.plan) - 40 * MIN), conns: null,
     editId: t.id, editTicket: t.ticket, minT: t.minT || 0, ref: { dep: first.plan, arr: last.plan, trains: t.legs.map(lineKey).join(">"), legs: t.legs.map(l => ({ label: nice(l), lk: lineKey(l), dep: l.dep.plan, arr: l.arr.plan, to: l.arr.name, pl: l.dep.platform || "", apl: l.arr.platform || "", mode: l.mode, at: { eva: l.dep.eva || "", name: l.dep.name, lat: l.dep.lat, lon: l.dep.lon }, arrAt: { eva: l.arr.eva || "", name: l.arr.name, lat: l.arr.lat, lon: l.arr.lon } })) },
     keepSet: (() => { const k = t.legs.findIndex(l => l.must); return k >= 0 && Date.parse(t.legs[k].dep.plan) > Date.now() ? [k] : []; })() };
+  // „Ich starte woanders“: gleich zur Eingabe von Start/Ziel, Ziel bleibt; kurzfristig (in den nächsten 3 Std.) ab jetzt
+  if (mode === "start") { W.step = "route"; W.rFrom = null; W.keepSet = []; W.startNew = true;
+    W.when = Date.parse(first.plan) - Date.now() < 3 * 3600e3 ? Date.now() : Date.parse(first.plan); }
   go("add");
 }
 function startWizard() { W = { step: "route", mode: "route", legs: [], station: null, from: Date.now(), list: null, rFrom: null, rTo: null, when: Date.now(), conns: null }; }
@@ -1750,7 +1775,10 @@ function toggleKeep(i) {
 function keepPicker() {
   if (!W.editId || !(W.ref.legs?.length > 1)) return W.editId ? `<p class="small muted" style="margin:0 2px 8px">Tippe eine frühere oder spätere Verbindung an. Ticket bleibt.</p>` : "";
   const K = keepInfo(), set = W.keepSet || [];
-  const opts = W.ref.legs.map((x, i) => (Date.parse(x.dep) > Date.now() ? `<button class="kp-c" data-keep="${i}" aria-pressed="${set.includes(i)}">${esc(x.label)} ${hm(x.dep)}</button>` : "")).join("");
+  // Start geändert: nur Teile ab dem neuen Start anbieten (liegt er nicht auf der Strecke, gibt es nichts zu behalten)
+  const s0 = W.rFrom && !sameStation(W.rFrom.name || "", W.ref.legs[0].at.name) ? W.ref.legs.findIndex(x => sameStation(x.at.name, W.rFrom.name || "")) : 0;
+  if (s0 < 0) return `<p class="small muted" style="margin:0 2px 8px">Neuer Start – ich suche die ganze Fahrt ab dort neu.</p>`;
+  const opts = W.ref.legs.map((x, i) => (i >= s0 && Date.parse(x.dep) > Date.now() ? `<button class="kp-c" data-keep="${i}" aria-pressed="${set.includes(i)}">${esc(x.label)} ${hm(x.dep)}</button>` : "")).join("");
   const where = x => esc(cleanStop(x.at.name)), whereTo = x => esc(cleanStop(x.to || ""));
   const txt = !K ? "Ich suche die ganze Fahrt neu. Tippe Züge an, die bleiben sollen."
     : !K.pre && !K.post ? "Alle Züge bleiben – nichts neu zu suchen."
@@ -1758,7 +1786,7 @@ function keepPicker() {
     : K.pre ? `Neu: bis zum ${esc(K.first.label)} in ${where(K.first)}, danach wie bisher.`
     : `Bis ${whereTo(K.last)} wie bisher, danach neu.`;
   const mt = `<div class="kp-row"><span class="kp-l">Umstiegszeit</span><div class="kp-sc">${MINT_OPTS.map(([m, l]) => `<button class="kp-c" data-emt="${m}" aria-pressed="${(+W.minT || 0) === m}">${m ? `${m} Min.` : "wie geplant"}</button>`).join("")}</div></div>`;
-  return `<div class="keep-card kp"><div class="kp-row"><span class="kp-l">Welche Züge willst du behalten?</span><div class="kp-sc"><button class="kp-c" data-keep="" aria-pressed="${!K}">Alles neu</button>${opts}</div></div>
+  return `<div class="keep-card kp"><div class="kp-row"><span class="kp-l">Welche Teile willst du behalten?</span><div class="kp-sc"><button class="kp-c" data-keep="" aria-pressed="${!K}">Alles neu</button>${opts}</div></div>
     ${mt}<p class="kp-t">${txt}</p></div>`;
 }
 // gleiche Fahrt wie die bisherige Reise? (gleiche Linien, gleiche Abfahrt)
@@ -1817,7 +1845,8 @@ function connList(list) {
     const arr = ph === "pre" ? (K.post ? K.last.arr : R.arr) : lastL.to.plan;
     const mins = Math.round((Date.parse(arr) - Date.parse(tripDep)) / MIN);
     const vs = R && !cur ? (() => { const dd = Math.round((Date.parse(tripDep) - Date.parse(R.dep)) / MIN), da = Math.round((Date.parse(arr) - Date.parse(ph === "pre" && K.post ? K.last.arr : R.arr)) / MIN);
-      return [Math.abs(dd) < 1 ? "gleiche Abfahrt" : dd < 0 ? `${fmtSpan(-dd)} früher los` : `${fmtSpan(dd)} später los`, Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `${fmtSpan(-da)} früher am Ziel` : `${fmtSpan(da)} später am Ziel`].join(" · "); })() : "";
+      const moved = W.rFrom && R.legs?.[0] && !sameStation(W.rFrom.name || "", R.legs[0].at.name);   // anderer Start: Abfahrt nicht vergleichbar
+      return [moved ? "" : Math.abs(dd) < 1 ? "gleiche Abfahrt" : dd < 0 ? `${fmtSpan(-dd)} früher los` : `${fmtSpan(dd)} später los`, Math.abs(da) < 2 ? "gleich am Ziel" : da < 0 ? `${fmtSpan(-da)} früher am Ziel` : `${fmtSpan(da)} später am Ziel`].filter(Boolean).join(" · "); })() : "";
     const nextDay = !sameDay(Date.parse(arr), Date.parse(tripDep)) ? ` <span class="small muted">(${new Date(arr).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })})</span>` : "";
     const liveLine = late >= 2 || arrLate >= 2 ? `Aktuell: ${late >= 2 ? `ab ${hm(first.from.rt || c.dep)} (+${late})` : ""}${late >= 2 && arrLate >= 2 ? " · " : ""}${arrLate >= 2 ? `an ${hm(lastL.to.rt)} (+${arrLate})` : ""}` : "";
     return `<li><button data-c="${i}" class="${mine || cur ? "fav-hit" : ""}">${cur ? `<span class="small fav-tag">● Deine bisherige Fahrt</span>` : mine ? `<span class="small fav-tag">★ Deine übliche Verbindung</span>` : ""}<div class="train" style="grid-template-columns:1fr auto">
@@ -1918,7 +1947,7 @@ function renderWizard() {
         ${FAVS.length > 3 && !W.favAll ? `<button class="link small" data-favall>Alle ${FAVS.length} Favoriten zeigen</button>` : ""}`}
 
 </section>` : ""}
-      ${W.quick ? "" : W.editId ? `<h1>Neue Verbindung für deine Fahrt</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>` : !W.impOpen ? `<h1>${W.regIntent ? "Von wo nach wo?" : "Wohin geht es?"}</h1>` : `<section class="card import">
+      ${W.quick ? "" : W.editId ? (W.startNew ? `<h1>Von wo startest du?</h1><p class="small muted">Ziel bleibt ${esc(cleanStop(W.rTo?.name || ""))}. Ticket und Umstiegszeit bleiben.</p>` : `<h1>Neue Verbindung für deine Fahrt</h1><p class="small muted">Ändere Uhrzeit, Datum, Start oder Ziel und wähle dann die passende Verbindung. Ticket und Umstiegszeit bleiben.</p>`) : !W.impOpen ? `<h1>${W.regIntent ? "Von wo nach wo?" : "Wohin geht es?"}</h1>` : `<section class="card import">
         <h1 style="margin-top:0">Gebuchte Fahrt überwachen</h1>
         <p class="small muted" style="margin-top:0">Gib mir dein Ticket (PDF), einen Screenshot aus dem DB Navigator oder den geteilten Link/Text. Ich lese die Verbindung heraus und überwache sie für dich.</p>
         <p class="small muted" style="margin-top:-4px">Das Auslesen macht eine KI (Claude). Bitte prüf das Ergebnis kurz. <a href="/datenschutz.html#ki">Mehr dazu</a></p>
@@ -2342,7 +2371,9 @@ async function saveTrip(ticket) {
   if (W.editId) {
     const id = W.editId, minT = W.minT;
     const key = x => String(x || "").replace(/\s/g, "").toUpperCase();
-    const oldFV = [...new Set(W.ref.legs.filter(isFVc).map(x => key(x.label)))], newFV = [...new Set(W.legs.filter(isFVc).map(x => key(x.label)))];
+    // gebunden ist der Sparpreis an den Zug zu seiner Zeit: gleiche Nummer zu anderer Zeit ist ein anderer Zug
+    const tk = (lab, ms) => `${key(lab)}@${Math.round(Date.parse(ms) / 60e3)}`;
+    const oldFV = [...new Set(W.ref.legs.filter(isFVc).map(x => tk(x.label, x.dep)))], newFV = [...new Set(W.legs.filter(isFVc).map(x => tk(x.label, x.from?.plan || x.dep)))];
     if ((ticket || W.editTicket) === "spar" && newFV.some(x => !oldFV.includes(x))) {
       const nw = W.legs.filter(isFVc).filter(l => !oldFV.includes(key(l.label))).map(l => l.label);
       if (!(await ask(`Achtung Sparpreis\n\nDein Ticket gilt nur für die gebuchten Züge${oldFV.length ? ` (${W.ref.legs.filter(isFVc).map(x => x.label).join(", ")})` : ""}. Mit der neuen Verbindung fährst du ${[...new Set(nw)].join(", ")} – das geht nur, wenn die Zugbindung aufgehoben ist. Sonst brauchst du ein neues Ticket.`, { ok: "Trotzdem ändern", cancel: "Abbrechen" }))) return;
@@ -2385,7 +2416,8 @@ async function saveTrip(ticket) {
     }
     if (W.pushAsk) { const ask0 = W.pushAsk; ask0.then(r => (r === "granted" ? enablePush().then(() => render()) : null)).catch(() => {}); }
     const n = (W.multi || [W.legs]).length;
-    flash = n > 1 ? `${n} Fahrten angelegt. Ich melde mich, wenn du etwas tun solltest.` : "Fahrt angelegt. Ich melde mich, wenn du etwas tun solltest.";
+    const tell = pushState() === "on" ? "Ich melde mich, wenn du etwas tun solltest." : "Schalte Mitteilungen ein, damit ich dich unterwegs warnen kann.";
+    flash = n > 1 ? `${n} Fahrten angelegt. ${tell}` : `Fahrt angelegt. ${tell}`;
     const optOut = W.pushNo, lg = W.legs || [];
     if (n === 1 && lg.length && !W.retNo && !W.quick) offerReturn({ tripId: newId, from: W.rFrom || placeOfStop(lg[0].from), to: W.rTo || placeOfStop(lg[lg.length - 1].to), after: Date.parse(lg[lg.length - 1].to.plan) });
     W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home"); if (!optOut) askPushSoon();
@@ -2479,7 +2511,7 @@ const tripLines = legs => { const a = legs[0], z = legs[legs.length - 1], f = l 
 // Nur „richtige“ Züge (Regional- und Fernverkehr) – S-Bahn, U-Bahn, Tram und Bus bucht man nicht bei der Bahn
 const isTrainLeg = l => !/^(SUBURBAN|SUBWAY|METRO|TRAM|BUS|COACH|FERRY)$/.test(l.mode || "") && !/^(S|U|STR|Tram|Bus|Fähre)\s?\d*\b/i.test(String(l.label || ""))
   && (/RAIL|HIGHSPEED|LONG_DISTANCE|NIGHT/.test(l.mode || "") || /^(ICE|IC|EC|ECE|ICD|IRE|RE|RB|MEX|RJX?|NJ|EN|D|TGV|EST|FEX)\s?\d/i.test(String(l.label || "")));
-const showBahn = t => t.phase === "before" && t.ticket !== "dticket" && !t.follow && t.legs.some(isTrainLeg);
+const showBahn = t => t.phase === "before" && !["dticket", "spar", "bc100"].includes(t.ticket) && !t.follow && t.legs.some(isTrainLeg);   // Sparpreis/BahnCard 100: Ticket ist schon da
 // Suche auf bahn.de vorbelegt (Start, Ziel, Abfahrt) – auf dem Handy öffnet sich ggf. der DB Navigator
 // Ziel für die Bahn-Übergabe: Ankunft des letzten Zugs an einem deutschen Bahnhof (Bahnhofsnummer 80…).
 // Ins Ausland findet die Bahn-Suche mit unseren Daten oft keine Verbindung – dann bis zum letzten deutschen Bahnhof übergeben.

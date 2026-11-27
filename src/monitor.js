@@ -311,7 +311,8 @@ export async function assess(env, trip, now, cache) {
       const every = night ? 30 : t.status === "LOST" ? (has ? 8 : 4) : t.status === "RISK" ? (has ? 8 : 5) : t.arrRt - now < 90 * MIN ? 10 : 20;
       const woke = acute && alt[k]?.length && alt[k].every(a => !a.watch) && alt[k].some(a => a.legs?.length && Date.parse(a.depPlan || a.dep) - now <= 3 * 3600e3);   // eben noch ruhig (ohne Live), jetzt eng → sofort live prüfen
       const changed = altSt[k] !== t.status;   // Lage hat sich verändert (z. B. gefährdet → klappt nicht): gleich neu suchen
-      if (!alt[k] || woke || changed || now - (altAt[k] || 0) > every * MIN) { try { count("pb_auto"); alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; altSt[k] = t.status; } catch (e) { console.log("Plan B:", e.message); } }
+      if (!alt[k] || woke || changed || now - (altAt[k] || 0) > every * MIN) { try { count("pb_auto"); alt[k] = await planB(env, trip, v, k, now); altAt[k] = now; altSt[k] = t.status;
+        if (trip.ticket === "dticket") alt[k] = alt[k].filter(a => !(a.legs || []).some(isFVLeg)); /* Deutschlandticket: kein Fernverkehr vorschlagen */ } catch (e) { console.log("Plan B:", e.message); } }
     } else if (t.status === "OK" || t.status === "DONE") { delete alt[k]; delete altAt[k]; delete altSt[k]; }
   }
   // Ausfall ohne Umstieg dahinter (z. B. nur ein Zug): selbst die nächsten Möglichkeiten ab dieser Station suchen

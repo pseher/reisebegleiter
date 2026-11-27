@@ -74,7 +74,7 @@ export async function connections(env, from, to, timeMs, minT = 0, arriveBy = fa
     const seen = new Set();
     const l = simplify(data).filter(c => !c.legs.some(x => x.mode === "COACH" || x.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
       .filter(c => { const k = c.legs.map(x => `${x.label}@${x.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((x, y) => Date.parse(x.dep) - Date.parse(y.dep));
+      .sort((x, y) => Date.parse(x.legs[0].from.plan) - Date.parse(y.legs[0].from.plan));   // nach der angezeigten Planzeit
     // „Ankunft bis“: die Verbindungen kurz vor der Zeit sind die interessanten, nicht die frühesten im Suchfenster
     if (arriveBy) l.splice(0, Math.max(0, l.length - 8)); else l.length = Math.min(l.length, 8);
     await rideOn(env, l, mt).catch(e => console.log("Weiterfahren:", e.message));

@@ -266,7 +266,9 @@ export function diff(trip, v, prev = {}, now = Date.now()) {
     else if (t.reason === "cancel" || (t.status === p.pend && p.pn + 1 >= 2)) s.conf = t.status, s.pend = null, s.pn = 0;
     else s.pend = t.status, s.pn = t.status === p.pend ? p.pn + 1 : 1;
     if (s.conf !== p.conf && s.conf !== "DONE") {
-      const alt = altText(st.alt[k], ref, spar, now < v.legs[0].dep.rt ? v.legs[0].label : v.legs[k].label);
+      // Vor der Abfahrt, noch ohne Live-Daten: keinen Ersatz vorschlagen – dann passt man die Fahrt über „Ändern“ an
+      const planOnly = now < v.legs[0].dep.rt && v.legs.every(l => !l.dep.live && !l.arr.live);
+      const alt = planOnly ? " Über „Ändern“ kannst du eine andere Fahrt wählen." : altText(st.alt[k], ref, spar, now < v.legs[0].dep.rt ? v.legs[0].label : v.legs[k].label);
       const night = s.conf === "LOST" && overnight(st.alt[k], v.bookedArr);
       if ((s.conf === "RISK" || s.conf === "LOST") && s.sent !== s.conf && !(s.conf === "LOST" && t.reason === "cancel" && (st.legC[k] || st.legC[k + 1]))) {
         if (night) s.night = true;

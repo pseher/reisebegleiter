@@ -569,3 +569,6 @@ span.blk-a { border: 0; background: none; cursor: default; }
 .hero.compact { padding-top: 12px; padding-bottom: 12px; }
 .hero.compact h2 { font-size: 19px; margin: 2px 0 4px; }
 .hero.compact p { font-size: 14px; margin: 0 0 2px; }
+.blk-s.bad { border: 1.5px solid #d64545; }
+.blk-s.bad b { color: var(--bad, #b42318); }
+.blk-start { margin: 10px 0 6px; }
