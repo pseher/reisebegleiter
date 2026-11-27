@@ -603,3 +603,5 @@ span.blk-a { border: 0; background: none; cursor: default; }
 @media (max-width: 370px) { .trip-head .th-act { gap: 4px; } .trip-head .th-act .act { font-size: 11.5px; padding: 6px 2px; } }
 /* Startseite ohne Fahrten: „Neue Fahrt“ über die ganze Breite */
 .tiles4 .tile.wide { grid-column: 1 / -1; }
+.planb-btn.risk { background: var(--risk-bg); border-color: var(--risk); } .planb-btn.risk .pb-ic { background: var(--risk); color: #fff; } .planb-btn.risk .pb-tx span { color: var(--risk); font-weight: 700; }
+.planb-box.risk { border-color: var(--risk); }

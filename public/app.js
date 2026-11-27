@@ -64,16 +64,17 @@ async function register() {
 }
 async function api(path, opts = {}, retry = true) {
   try { return await api0(path, opts, retry); }
-  catch (e) { if (e instanceof TypeError) throw new Error("Keine Verbindung zum Internet. Bitte gleich noch einmal versuchen."); throw e; }
+  catch (e) { if (e?.name === "AbortError") throw new Error("Das hat zu lange gedauert – das Netz ist gerade schwach oder der Dienst hakt. Bitte noch einmal versuchen."); if (e instanceof TypeError) throw new Error("Keine Verbindung zum Internet. Bitte gleich noch einmal versuchen."); throw e; }
 }
 // Erst anmelden, wenn jemand die App wirklich nutzt (sucht, anlegt …) – bloßes Öffnen, Vorschau-Bots oder Testaufrufe zählen so nicht als Nutzer
 const EMPTY = { "/api/trips": [], "/api/routines": [], "/api/favs": [], "/api/prefs": {}, "/api/places": [], "/api/devices": [] };
 async function api0(path, { method = "GET", body } = {}, retry = true) {
   if (!AUTH && method === "GET" && path in EMPTY) return structuredClone(EMPTY[path]);
   if (!AUTH) await register();
-  const r = await fetch(path, { method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), "X-RB-Env": `${typeof BNAME === "function" ? BNAME() : ""}|${typeof pushHere === "function" && pushHere() ? 1 : 0}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const ac = new AbortController(), to = setTimeout(() => ac.abort(), 45000);   // nie endlos warten (z. B. Netz weg, Server hängt)
+  const r = await fetch(path, { signal: ac.signal, method, headers: { Authorization: `Bearer ${AUTH.id}.${AUTH.token}`, ...(standalone ? { "X-RB-App": "1" } : {}), "X-RB-Env": `${typeof BNAME === "function" ? BNAME() : ""}|${typeof pushHere === "function" && pushHere() ? 1 : 0}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401 && retry) { AUTH = null; try { localStorage.removeItem("rb_auth"); } catch {} return api0(path, { method, body }, false); }   // Gerät unbekannt (z. B. aufgeräumt): neu anfangen
-  const data = await r.json().catch(() => ({}));
+  const data = await r.json().catch(() => ({})); clearTimeout(to);
   if (!r.ok) throw new Error(data.error || `Fehler ${r.status}`);
   return data;
 }
@@ -901,9 +902,9 @@ function optionsBlock(t) {
   // Plan B erst, wenn es live Abweichungen gibt (knapp, gefährdet, verpasst) – vorher passt man die Fahrt über „Ändern“ an
   if (!busy && OPT_OPEN !== t.id && (planOnly(t) || !["WATCH", "RISK", "LOST"].includes(t.status))) return "";
   const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length - dupAlts(t.transfers[k].alt, bestIdx(t.transfers[k].alt, t.plan.dep)).size : 0;
-  const tone = st === "LOST" || st === "RISK" ? "bad" : st === "WATCH" ? "watch" : "calm";
+  const tone = st === "LOST" ? "bad" : st === "RISK" ? "risk" : st === "WATCH" ? "watch" : "calm";
   const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? (t.transfers.some(x => x.status === "WATCH") ? "Umstieg knapp – Möglichkeiten ansehen" : "Verspätung – Möglichkeiten ansehen") : "Andere Verbindung suchen";
-  if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${sub}${nAlt && tone !== "calm" ? ` · ${nAlt} Möglichkeit${nAlt > 1 ? "en" : ""}` : ""}</span></span><span class="chev">›</span></button>`;
+  if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${nAlt && tone !== "calm" && st !== "LOST" ? `${sub.replace(" – Möglichkeiten ansehen", "")} · ${nAlt} ${nAlt > 1 ? "Möglichkeiten" : "Möglichkeit"} ansehen` : sub}</span></span><span class="chev">›</span></button>`;
   const body = t.missed != null ? hereCard(t) : t.sos || sosBusy === t.id ? sosCard(t) : t.here || hereBusy === t.id ? hereCard(t) : planBCard(t) + hereCard(t);
   return `<section class="planb-box ${tone}"><div class="pb-head"><b>Plan B</b><button class="card-x" data-pbclose="${t.id}" aria-label="Plan B schließen">✕</button></div>${body}</section>`;
 }
@@ -2038,7 +2039,7 @@ function renderWizard() {
     const fullDate = ms => new Date(ms).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
     // Was wird gesucht? ganze Fahrt · bis zum ersten festen Zug · ab dem letzten festen Zug
     const sFrom = ph === "post" ? K.last.arrAt : W.rFrom, sTo = ph === "pre" ? K.first.at : W.rTo;
-    const sub = !K ? `${W.byArr ? "an bis" : "ab"} ${fullDate(W.when)}${REGIONAL ? " · nur Nahverkehr" : ""}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
+    const sub = !K ? `${W.byArr ? "Ankunft bis" : "Abfahrt ab"} ${fullDate(W.when)}${REGIONAL ? " · nur Nahverkehr" : ""}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
     const stepNote = K && K.pre && K.post ? `<p class="small" style="margin:0 2px 6px"><b>${ph === "pre" ? "Teil 1 von 2" : "Teil 2 von 2"}:</b> ${ph === "pre" ? `bis ${esc(cleanStop(K.first.at.name))}` : `ab ${esc(cleanStop(K.last.to || ""))}`}</p>` : "";
     const title = ph === "none" ? `${esc(W.rFrom.name)} → ${esc(W.rTo.name)}` : `${esc(sFrom.name)} → ${esc(sTo.name)}`;
     $app.innerHTML = `${head}<h1>${title}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${sub}</p>
