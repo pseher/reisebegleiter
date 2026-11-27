@@ -35,7 +35,7 @@ const STOPS = new Map();
 // VBB: Abfahrt bzw. Ankunft derselben Linie zur geplanten Zeit an der nächsten Haltestelle
 async function vbbOne(env, s, label, kind, cache) {
   if (!inVBB(s)) return null;
-  const base = env.VBB_REST_URL || "https://v6.vbb.transport.rest", h = { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" };
+  const base = env.VBB_REST_URL || "https://v6.vbb.transport.rest", h = { "User-Agent": "Umstiegsheld/1.0 (+https://umstiegsheld.de; kontakt@umstiegsheld.de)", Accept: "application/json" };
   const key = `vbbstop|${s.lat.toFixed(4)},${s.lon.toFixed(4)}`;
   let stopId = cache?.get(key) || STOPS.get(key);   // Haltestellen-ID bleibt gleich: über Läufe hinweg merken (spart Abrufe)
   if (!stopId) {

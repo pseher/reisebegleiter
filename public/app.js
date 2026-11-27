@@ -1215,7 +1215,7 @@ function renderSettings() {
     ${recoveryCard()}
     ${devicesCard()}
     ${appCard()}
-    <p class="foot">Echtzeitdaten: DB InfraGO (OpenBoards) · Verbindungen: Transitous/MOTIS · Angaben ohne Gewähr</p>`;
+    <p class="foot">Echtzeitdaten: DB InfraGO (OpenBoards), VBB · Verbindungen: <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous/MOTIS und seine Quellen</a> · Karten- und Ortsdaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-Mitwirkende</a> · Angaben ohne Gewähr</p>`;
   $app.querySelectorAll("[data-theme-set]").forEach(b => b.onclick = () => { THEME = b.dataset.themeSet; try { localStorage.setItem("rb_theme", THEME); } catch {} applyTheme(); render(); });
   $app.querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { setMinT(+b.dataset.mt); render(); });
   document.getElementById("pushTest")?.addEventListener("click", () => api("/api/push/test", { method: "POST" }).then(r => alert(r.ok ? "Gesendet – kommt gleich an." : "Konnte nicht gesendet werden.")).catch(e => alert(e.message)));
