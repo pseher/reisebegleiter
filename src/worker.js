@@ -2,7 +2,7 @@ import { flush, count } from "./stats.js";
 // Reisebegleiter – Worker: Schnittstelle für die App (/api/*) und Überwachung per Cron
 import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
-import { connections, resolveConnection, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime, searchPlaces } from "./routing.js";
+import { connections, resolveConnection, segmentOptions, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime, searchPlaces } from "./routing.js";
 import { importTrip, onlyBahnLink } from "./importer.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
@@ -540,6 +540,18 @@ async function api(req, env, url) {
     return json(view(t, now));
   }
 
+  // Fahrt ändern als Bausteine: andere Fahrten für genau eine Teilstrecke (früher/später, auch andere Linien)
+  const mseg = /^\/api\/trips\/([0-9a-f-]{36})\/segment$/i.exec(p);
+  if (mseg && method === "POST") {
+    const t = await ownTrip(env, dev, mseg[1]);
+    if (!t) return fail(404, "Reise nicht gefunden");
+    const b = await req.json().catch(() => ({})), i = +b.i;
+    if (!Number.isInteger(i) || i < 0 || i >= t.legs.length) return fail(400, "Teilstrecke unbekannt");
+    const legs = t.legs.map(l => ({ ...l, from: withCoords(l.from), to: withCoords(l.to) }));
+    try { return json({ i, list: await segmentOptions(env, legs, i) }); }
+    catch (e) { return fail(502, e.message || "Abfahrten gerade nicht abrufbar. Versuch es gleich noch einmal."); }
+  }
+
   // „Heute nicht mehr“: erste Verbindung morgen früh ab dem Umstieg suchen – und, früh in der Fahrt, den Weg zurück zum Start
   const mst = /^\/api\/trips\/([0-9a-f-]{36})\/stuck$/i.exec(p);
   if (mst && method === "POST") {
@@ -653,8 +665,18 @@ async function api(req, env, url) {
       // Feste Züge als Block [a..b]: davor und/oder danach neu gewählte Teilstrecken
       if (b.keep && Number.isInteger(b.keep.a) && Number.isInteger(b.keep.b) && b.keep.a >= 0 && b.keep.b >= b.keep.a && b.keep.b < t.legs.length)
         legs = [...(Array.isArray(b.pre) ? b.pre : []), ...t.legs.slice(b.keep.a, b.keep.b + 1), ...(Array.isArray(b.post) ? b.post : [])];
+      // Bausteine: einzelne Teilstrecken durch andere Fahrten ersetzen, der Rest bleibt unverändert
+      if (b.replace && typeof b.replace === "object" && !Array.isArray(b.replace)) {
+        const idx = Object.keys(b.replace).map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < t.legs.length);
+        if (!idx.length) return fail(400, "Nichts geändert.");
+        const rep = {};
+        for (const i of idx) { const o = b.replace[i];
+          if (!o?.from?.plan || !o?.to?.plan || !o.label) return fail(400, "Teilstrecke unvollständig");
+          rep[i] = (await resolveConnection(env, [o]))[0]; }
+        legs = t.legs.map((l, i) => (rep[i] ? (({ live, ...x }) => ({ ...x, minT: l.minT || 0, must: false }))(rep[i]) : l));
+      }
       if (b.minT != null && Number.isFinite(+b.minT)) { const m = Math.min(30, Math.max(0, +b.minT)); legs = legs.map(l => ({ ...l, minT: m })); }
-      const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && (kf != null || b.keep) ? "Mit dieser Verbindung erreichst du den festen Zug nicht." : bad);
+      const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && (kf != null || b.keep || b.replace) ? (b.replace ? "Mit dieser Wahl erreichst du den nächsten Anschluss nicht." : "Mit dieser Verbindung erreichst du den festen Zug nicht.") : bad);
       return json(await replaceLegs(env, t, legs, b.ticket));
     }
     if (method === "PATCH") {

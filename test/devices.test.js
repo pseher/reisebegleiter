@@ -323,3 +323,19 @@ test("Umstieg schon erreicht: angekommen, Anschluss fährt noch – nicht mehr �
   assert.equal(v.transfers[0].status, "OK");
   assert.equal(v.status, "OK");
 });
+
+test("Bausteine: eine Teilstrecke durch eine andere Fahrt ersetzen, der Rest bleibt", async () => {
+  const call2 = async (path, auth, method = "GET", body) => { const r = await worker.fetch(new Request(`http://x${path}`, { method, headers: { "CF-Connecting-IP": "10.0.0.8", ...(auth ? { Authorization: `Bearer ${auth.id}.${auth.token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil: p => p }); return { s: r.status, j: await r.json() }; };
+  const A = (await call2("/api/register", null, "POST", {})).j, T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const bus = { jid: "", tid: "b40", label: "Bus M29", mode: "BUS", from: { eva: "", name: "S Halensee", plan: iso(40), lat: 52.4964, lon: 13.2903 }, to: { eva: "", name: "Lehniner Platz", plan: iso(44), lat: 52.4999, lon: 13.3074 } };
+  const re = { jid: "b", label: "RE 1", from: { eva: "8010406", name: "Berlin-Charlottenburg", plan: iso(70) }, to: { eva: "8010224", name: "Magdeburg Hbf", plan: iso(170) } };
+  const t = (await call2("/api/trips", A, "POST", { ticket: "dticket", legs: [bus, re] })).j;
+  const seg = await call2(`/api/trips/${t.id}/segment`, A, "POST", { i: 0 });
+  assert.equal(seg.s, 200, JSON.stringify(seg.j)); assert.ok(seg.j.list.length >= 3);
+  const later = seg.j.list.find(o => o.from.plan === iso(50));   // 10 Min. später
+  const v = await call2(`/api/trips/${t.id}`, A, "PUT", { replace: { 0: later } });
+  assert.equal(v.s, 200, JSON.stringify(v.j)); assert.equal(v.j.legs[0].dep.plan, iso(50)); assert.equal(v.j.legs[1].label, "RE 1"); assert.equal(v.j.legs[1].dep.plan, iso(70));
+  const late = (await call2(`/api/trips/${t.id}/segment`, A, "POST", { i: 0 })).j.list.find(o => o.from.plan === iso(70));   // 30 Min. später: RE 1 verpasst
+  const bad = await call2(`/api/trips/${t.id}`, A, "PUT", { replace: { 0: late } });
+  assert.equal(bad.s, 400); assert.match(bad.j.error, /nächsten Anschluss/);
+});

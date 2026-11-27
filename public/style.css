@@ -537,3 +537,31 @@ input.txt { width: 100%; min-height: var(--tap); font: inherit; padding: 10px 14
 .sk-foot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 6px; }
 .sk-foot .muted { color: var(--muted); }
 .sk-link { color: var(--accent, #1b6aa5); }
+
+/* Fahrt ändern als Bausteine */
+.blk { padding: 4px 0 20px; }
+.blk-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.blk-h h2 { font-size: 21px; margin: 2px 0 4px; line-height: 1.25; }
+.blk-l { margin: 14px 0 12px; }
+.blk-b { display: flex; align-items: center; gap: 6px; background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 6px; }
+.blk-b.ch { border-color: var(--accent, #1b6aa5); }
+.blk-b.past { opacity: .6; }
+.blk-a { flex: 0 0 44px; height: 52px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--bg); color: var(--ink); font-size: 26px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+span.blk-a { border: 0; background: none; cursor: default; }
+.blk-a:disabled { opacity: .6; }
+.blk-m { flex: 1; min-width: 0; text-align: center; }
+.blk-m b { display: block; font-size: 16px; }
+.blk-m span { display: block; font-size: 13px; color: var(--muted); margin-top: 1px; }
+.blk-m .blk-d { color: var(--accent, #1b6aa5); }
+.blk-b:not(.ch) .blk-d { color: var(--muted); }
+.blk-m .blk-w { color: var(--warn, #a15c00); font-weight: 700; }
+.blk-m .blk-n { color: var(--muted); font-style: italic; }
+.blk-g { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 7px 0 7px 22px; }
+.blk-g i { width: 9px; height: 9px; border-radius: 50%; background: #3fb96b; flex: 0 0 9px; }
+.blk-g.warn i { background: #e0a526; } .blk-g.warn { color: var(--warn, #a15c00); }
+.blk-g.bad i { background: #d64545; } .blk-g.bad { color: var(--bad, #b42318); font-weight: 700; }
+.blk-s { background: var(--card); border-radius: 12px; padding: 10px 12px; margin: 4px 0 12px; }
+.blk-s b { display: block; } .blk-s span { font-size: 13px; color: var(--muted); }
+.blk [aria-disabled="true"] { opacity: .55; }
+.blk-full { display: block; margin: 12px auto 0; }
+.spinner.sm { width: 18px; height: 18px; border-width: 2px; margin: 0; }

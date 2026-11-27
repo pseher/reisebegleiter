@@ -135,7 +135,7 @@ document.addEventListener("visibilitychange", async () => {
 // Solange man nicht auf der Startseite ist, liegt ein Eintrag im Verlauf. „Zurück“ macht dann einen Schritt in der App.
 let guard = false, skipPop = false;
 // Aufgeklappte Möglichkeiten/Einstellungen zählen als eigener Schritt: „Zurück“ klappt sie erst zu, statt die App zu verlassen
-const subOpen = () => !!(openCmp || sheetId || document.querySelector("[data-pbclose]"));
+const subOpen = () => !!(BLK || openCmp || sheetId || document.querySelector("[data-pbclose]"));
 const atRoot = () => view === "home" && !openId;
 function syncHistory() {
   if (!atRoot() && !guard) { history.pushState({ rb: 1 }, ""); guard = true; }
@@ -148,7 +148,7 @@ addEventListener("popstate", () => {
   guard = false;
   if (view === "add" && W) { const bk = document.getElementById("wBack"); if (bk) return bk.click(); W = null; return go("home"); }
   if (view !== "home") return go("home");
-  if (openId && subOpen()) { const hx = document.querySelector("[data-pbclose]"); if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
+  if (openId && subOpen()) { const hx = document.querySelector("[data-pbclose]"); if (BLK) { BLK = null; render(); } else if (openCmp || sheetId) { openCmp = null; sheetId = null; render(); } else if (hx) hx.click(); return; }
   if (openId) { openId = null; sheetId = null; }
   render();
 });
@@ -1061,6 +1061,7 @@ function renderTrip(t, many) {
   const checked = t.legs.flatMap(l => [l.dep.checked, l.arr.checked]).filter(Boolean), fresh = checked.length ? Math.max(...checked) : null;
   const noLive = t.legs.every(l => !l.dep.live && !l.arr.live);
   const sheet = sheetId === t.id;
+  if (BLK?.id === t.id) return renderBlocks(t);   // Fahrt ändern als Bausteine
   if (SCREEN_SIG.split("|")[3] !== String(t.id)) OPT_OPEN = null;   // neu in die Fahrt gekommen: Plan B erst einmal zu
   const SK = stuckOf(t);     // „Heute nicht mehr“: ruhiger Bildschirm statt Alarm
   const hint = SK ? "" : hintCard();   // Hinweis zu Mitteilungen unten (nach dem Anlegen fragt ein eigenes Fenster) – nicht in der Stresslage
@@ -1121,7 +1122,7 @@ function renderTrip(t, many) {
     const r = t.routine && ROUTINES.find(x => x.id === t.routine);
     if (r) { const a = await ask(`Was möchtest du ändern?\n\n„${r.name}“ ist eine regelmäßige Fahrt.`, { ok: `Nur ${dateWord(new Date(t.legs[0].dep.plan).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }))}`, alt: "Alle Fahrten" });
       if (a === "alt") return changeRoutine(r); if (!a) return; }
-    b.disabled = true; await startEdit(t); });
+    openBlocks(t); });
   $app.querySelectorAll("[data-favt]").forEach(b => b.onclick = () => { const was = isFav(t); toggleFav(t); flash = was ? "Aus den Favoriten entfernt." : "Als Favorit gemerkt – du findest ihn unter „Neue Fahrt“."; render(); });
   const patch = async body => { await api(`/api/trips/${t.id}`, { method: "PATCH", body }).catch(e => alert(e.message)); await loadTrips().catch(() => {}); render(); };
   $app.querySelectorAll("[data-tmt]").forEach(b => b.onclick = () => patch({ minT: +b.dataset.tmt }));   // nur diese Reise
@@ -1499,6 +1500,82 @@ function bindCommon() {
 // ---------- Reise anlegen (Assistent) ----------
 // W = { step, legs: [], station, from (Zeit), list, train, error }
 // Bestehende Reise ändern: Assistent mit Start, Ziel und Zeit der Reise vorbelegt
+// ---------- Fahrt ändern als Bausteine: jede Teilstrecke einzeln früher oder später, auch andere Linien ----------
+// Geladen wird erst beim ersten Tippen auf ‹ oder › (Abfahrts- und Ankunftstafel), danach wird nur noch geblättert.
+let BLK = null;
+function openBlocks(t) { BLK = { id: t.id, sel: {}, lists: {}, err: {}, note: {}, loading: null }; scrollTo(0, 0); render(); }
+const lk = s => String(s || "").replace(/^(Bus|Tram|STR|Fähre)\s+/i, "").replace(/\s/g, "").toUpperCase();
+function bCur(t, i) {
+  const L = BLK.lists[i], k = BLK.sel[i], l = t.legs[i];
+  if (L && k != null && L[k]) { const o = L[k]; return { label: o.label, mode: o.mode, dep: o.from.plan, arr: o.to.plan, from: o.from.name, to: o.to.name, walk: o.walk || 0, opt: o, changed: true }; }
+  return { label: nice(l), mode: l.mode, dep: l.dep.plan, arr: l.arr.plan, from: l.dep.name, to: l.arr.name, walk: l.walk || 0, changed: false };
+}
+const isOrig = (t, i, o) => lk(o.label) === lk(t.legs[i].label) && Math.abs(Date.parse(o.from.plan) - Date.parse(t.legs[i].dep.plan)) < 90e3;
+async function bStep(t, i, dir) {
+  if (!BLK.lists[i]) {
+    BLK.loading = i; BLK.err[i] = ""; render();
+    try { BLK.lists[i] = ((await api(`/api/trips/${t.id}/segment`, { method: "POST", body: { i } })).list || []).sort((a, b) => Date.parse(a.from.plan) - Date.parse(b.from.plan)); }
+    catch (e) { BLK.err[i] = e.message; }
+    if (!BLK) return; BLK.loading = null;
+    if (!BLK.lists[i]) return render();
+  }
+  const L = BLK.lists[i], d = Date.parse(bCur(t, i).dep);
+  let p = BLK.sel[i] != null ? BLK.sel[i] : L.findIndex(o => isOrig(t, i, o)), j;
+  if (p >= 0) j = p + dir;
+  else j = dir > 0 ? L.findIndex(o => Date.parse(o.from.plan) >= d) : L.map(o => Date.parse(o.from.plan) <= d).lastIndexOf(true);
+  BLK.note[i] = "";
+  if (j < 0 || j >= L.length) BLK.note[i] = dir > 0 ? "Später finde ich hier gerade keine Fahrt." : "Früher finde ich hier keine Fahrt mehr.";
+  else BLK.sel[i] = isOrig(t, i, L[j]) ? null : j;
+  render();
+}
+function bGap(t, i) {
+  const a = bCur(t, i), b = bCur(t, i + 1), g = Math.round((Date.parse(b.dep) - Date.parse(a.arr)) / MIN) - (a.walk || 0), need = Math.max(+t.minT || 0, 2);
+  return { g, cls: g < 0 ? "bad" : g < need ? "warn" : "ok", a, b };
+}
+function renderBlocks(t) {
+  const n = t.legs.length, now = Date.now();
+  const rows = t.legs.map((l, i) => {
+    const c = bCur(t, i), past = Date.parse(l.dep.plan) < now - MIN && !c.changed, busy = BLK.loading === i;
+    const dm = Math.round((Date.parse(c.dep) - Date.parse(l.dep.plan)) / MIN);
+    const delta = !c.changed ? "wie bisher" : dm === 0 ? "andere Fahrt, gleiche Zeit" : `${Math.abs(dm)} Min. ${dm < 0 ? "früher" : "später"} als bisher`;
+    const other = c.changed && cleanStop(c.to) !== cleanStop(l.arr.name) ? ` · aussteigen: ${esc(cleanStop(c.to))}` : "";
+    const fv = c.changed && t.ticket === "spar" && isFVc({ label: c.label, mode: c.mode }) ? `<span class="blk-w">Sparpreis gilt nur im gebuchten Zug</span>` : "";
+    const msg = BLK.err[i] ? `<span class="blk-w">${esc(BLK.err[i])}</span>` : BLK.note[i] ? `<span class="blk-n">${esc(BLK.note[i])}</span>` : "";
+    const arrow = (dir, sym, lab) => past ? `<span class="blk-a"></span>` : `<button class="blk-a" data-bstep="${i}" data-dir="${dir}" aria-label="${lab}"${busy ? " disabled" : ""}>${busy ? `<span class="spinner sm"></span>` : sym}</button>`;
+    const block = `<div class="blk-b${c.changed ? " ch" : ""}${past ? " past" : ""}">${arrow(-1, "‹", "früher")}<div class="blk-m"><b>${esc(c.label)} · ${hm(c.dep)}</b><span>${esc(cleanStop(c.from))} → ${esc(cleanStop(c.to))} · an ${hm(c.arr)}</span><span class="blk-d">${past ? "schon gefahren" : delta}${other}</span>${fv}${msg}</div>${arrow(1, "›", "später")}</div>`;
+    if (i === n - 1) return block;
+    const G = bGap(t, i);
+    const txt = G.g < 0 ? `verpasst ${esc(G.b.label)} (${-G.g} Min. zu spät)` : `${G.a.walk ? `zu Fuß ${G.a.walk} Min. · ` : ""}${G.g} Min. Puffer${G.cls === "warn" ? ", knapp" : ""}`;
+    return `${block}<div class="blk-g ${G.cls}"><i aria-hidden="true"></i>${txt}</div>`;
+  }).join("");
+  const changed = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null);
+  const first = bCur(t, 0), last = bCur(t, n - 1), da = Math.round((Date.parse(last.arr) - Date.parse(t.legs[n - 1].arr.plan)) / MIN);
+  const sum = changed.length ? `<div class="blk-s"><b>Neu: ab ${hm(first.dep)} → an ${hm(last.arr)}</b><span>${da === 0 ? "Ankunft unverändert" : `Ankunft ${Math.abs(da)} Min. ${da < 0 ? "früher" : "später"}`}</span></div>` : "";
+  $app.innerHTML = `${flashBox()}<section class="blk">
+    <div class="blk-h"><div><div class="k">Fahrt ändern</div><h2>${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[n - 1].arr.name))}</h2></div><button class="card-x" data-blkx aria-label="Ändern schließen">✕</button></div>
+    <p class="small muted">Tippe ‹ oder ›, um ein Stück früher oder später zu nehmen – auch mit einer anderen Linie. Der Rest bleibt, wie er ist.</p>
+    <div class="blk-l">${rows}</div>
+    ${sum}
+    <button class="btn" data-bsave${changed.length ? "" : ` aria-disabled="true"`}>${changed.length ? "So übernehmen" : "Noch nichts geändert"}</button>
+    <button class="link small blk-full" data-bfull>Ganz neu suchen</button>
+  </section>`;
+  $app.querySelector("[data-blkx]").onclick = () => { BLK = null; render(); };
+  $app.querySelectorAll("[data-bstep]").forEach(b => b.onclick = () => bStep(t, +b.dataset.bstep, +b.dataset.dir));
+  $app.querySelector("[data-bfull]").onclick = async e => { e.currentTarget.disabled = true; BLK = null; await startEdit(t); };
+  $app.querySelector("[data-bsave]").onclick = async e => {
+    const ch = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null).map(Number);
+    if (!ch.length) return;
+    if (t.legs.slice(0, -1).some((_, i) => bGap(t, i).g < 0)) return alert("Mit dieser Wahl erreichst du einen Anschluss nicht.\n\nWähl bitte für das rot markierte Stück eine andere Fahrt.");
+    const fv = ch.map(i => bCur(t, i)).filter(c => t.ticket === "spar" && isFVc({ label: c.label, mode: c.mode }));
+    if (fv.length && !(await ask(`Achtung Sparpreis\n\nDein Ticket gilt nur für die gebuchten Züge. ${fv.map(c => c.label).join(", ")} geht nur, wenn die Zugbindung aufgehoben ist – sonst brauchst du dafür ein anderes Ticket.`, { ok: "Trotzdem ändern" }))) return;
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Wird geändert …";
+    try {
+      await api(`/api/trips/${t.id}`, { method: "PUT", body: { replace: Object.fromEntries(ch.map(i => [i, BLK.lists[i][BLK.sel[i]]])), ticket: t.ticket } });
+      flash = "Fahrt geändert. Ich überwache jetzt die neue Verbindung.";
+      BLK = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
+    } catch (err) { alert(err.message); b.disabled = false; b.textContent = "So übernehmen"; }
+  };
+}
 async function startEdit(t) {
   const first = t.legs[0].dep, last = t.legs[t.legs.length - 1].arr;
   const st = async s => s.eva ? { eva: s.eva, name: s.name } : s.lat != null ? { eva: "", name: s.name, lat: s.lat, lon: s.lon, stop: true } : (await api(`/api/stations?q=${encodeURIComponent(cleanStop(s.name))}`).catch(() => []))[0] || null;
