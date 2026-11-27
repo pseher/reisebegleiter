@@ -605,3 +605,22 @@ span.blk-a { border: 0; background: none; cursor: default; }
 .tiles4 .tile.wide { grid-column: 1 / -1; }
 .planb-btn.risk { background: var(--risk-bg); border-color: var(--risk); } .planb-btn.risk .pb-ic { background: var(--risk); color: #fff; } .planb-btn.risk .pb-tx span { color: var(--risk); font-weight: 700; }
 .planb-box.risk { border-color: var(--risk); }
+/* Plan B: Dein Plan in einer Zeile, darunter 1–3 Möglichkeiten mit Begründung */
+.pb-plan { font-size: 15px; margin: 2px 0 10px; }
+.pb-sub { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 4px 0 6px; }
+.pb-list { display: flex; flex-direction: column; gap: 8px; }
+.pb-alt { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.pb-alt.is-rec { border: 2px solid var(--accent); }
+.pa-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16px; }
+.pa-t { margin: 4px 0 6px; font-size: 15px; }
+.pa-why { list-style: none; padding: 0; margin: 0 0 6px; font-size: 14px; }
+.pa-why li { padding-left: 20px; position: relative; margin: 2px 0; }
+.pa-why li::before { position: absolute; left: 0; font-weight: 700; }
+.pa-why li.ok::before { content: "✓"; color: var(--ok); }
+.pa-why li.bad { color: var(--risk); } .pa-why li.bad::before { content: "!"; color: var(--risk); left: 5px; }
+.pa-why li.mut { color: var(--muted); } .pa-why li.mut::before { content: "·"; left: 5px; }
+.pa-act { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pa-act .btn { width: auto; margin: 4px 0 0; padding-left: 18px; padding-right: 18px; }
+.pb-more { display: block; margin: 2px auto 0; }
+.pb-alt .steps-l { margin-top: 8px; }
+.pa-act .link { font-size: 14px; }

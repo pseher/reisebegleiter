@@ -759,19 +759,38 @@ function planBCard(t) {
   const curNext = t.legs.find(l => Date.parse(l.dep.rt) > Date.now() - MIN) || t.legs[0];
   const curState = curNext.dep.cancelled ? `<span class="badge bad">fällt aus</span>` : tr.status === "LOST" ? `<span class="badge bad">Anschluss in ${esc(cleanStop(tr.at))} klappt nicht</span>`
     : tr.status === "RISK" ? `<span class="badge warn">Anschluss in ${esc(cleanStop(tr.at))} ${tr.gap < 0 ? "klappt wohl nicht" : "gefährdet"}</span>` : curNext.dep.delay >= 3 ? `<span class="badge warn">${esc(nice(curNext))} ${curNext.dep.delay} Min. später</span>` : curNext.live ? `<span class="badge good">pünktlich</span>` : "";
-  const curRow = lost ? "" : `<div class="cmp-row cur"><div class="cmp-tag">${tr.status === "RISK" && tr.gap < 0 ? "Dein Plan (klappt wohl nicht)" : "Dein Plan"}</div><div class="cmp-main">
-      ${losZiel(t.plan.dep, t.plan.arr)}${stepsHtml(planSteps(t))}${curState ? `<div class="cmp-live">${curState}</div>` : ""}</div></div>`;
-  const liveOf = liveBadge;
+  const curRow = lost ? "" : `<div class="pb-plan"><span class="muted">Dein Plan:</span> an <b>${hm(t.plan.arr)}</b>${curState ? ` · ${curState}` : ""}</div>`;
   const hide = dupAlts(tr.alt, rec);
-  const rows = tr.alt.map((a, ai) => { if (hide.has(ai)) return "";
-    const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id;
-    return `<div class="cmp-row ${a.reach ? "arr-ok" : arrTone(a.arr || a.dep, t.planArr || t.plan.arr, a.watch)}"><div class="cmp-tag">${tag(a)}${recTag(ai === rec)}</div><div class="cmp-main">
-      ${a.reach ? `<div class="cmp-point"><b class="ok-t">${esc(a.reach)}</b></div>` : ""}
-      ${a.from === "start" ? losZiel(a.dep, a.arr || a.dep, t.plan.dep, lost ? t.planArr : t.plan.arr) : losZiel(a.dep, a.arr || a.dep, null, lost ? t.planArr : t.plan.arr).replace("ab <b>", `ab ${esc(cleanStop(a.at))} <b>`)}
-      ${altSummary(a, id, isOpen)}${isOpen ? stepsHtml(altSteps(a)) : ""}
-      <div class="cmp-live">${liveOf(a)}${zbOn && a.zb ? ` ${zbBadge}` : ""}</div>
-      ${takeBtn(`${t.id}|${k}|${ai}`, { ...a, zb: a.zb !== false }, ai === rec, `${tag(a)}: ab ${hm(a.dep)}, an ${hm(a.arr || a.dep)}\n${a.label}`)}
-    </div></div>`; }).join("");
+  // Kandidaten: machbar, keine Doppelten; die empfohlene zuerst, dann früh am Ziel mit genug Zeit zum Umsteigen
+  const cand = tr.alt.map((a, ai) => ({ a, ai })).filter(x => !hide.has(x.ai) && !infeasible(x.a) && x.a.kind !== "asplanned");
+  const score = x => (x.ai === rec ? -1e15 : 0) + Date.parse(x.a.arr || x.a.dep) - Math.min(gapOf(x.a) ?? 15, 15) * MIN;
+  cand.sort((x, y) => score(x) - score(y));
+  const all = PB_ALL === t.id, top = all ? cand : cand.slice(0, 3);
+  const pg = tr.gap != null ? Math.round(tr.gap) : null;
+  // Warum diese Möglichkeit eher klappt als dein Plan – höchstens drei kurze Gründe
+  const whyOf = a => { const out = [], n = Math.max(0, (a.legs?.length || 1) - 1), g = gapOf(a), w = a.watch;
+    if (a.reach) out.push({ ok: 1, t: esc(a.reach) });
+    if (!n) out.push({ ok: 1, t: lost ? "Ohne Umstieg – direkt ans Ziel" : "Ohne Umstieg – kein Anschluss, der platzen kann" });
+    else if (g != null) out.push(g < Math.max(need, 3) ? { bad: 1, t: `Umstieg auch knapp: ${g} Min.` }
+      : { ok: 1, t: `${g} Min. zum Umsteigen${!lost && pg != null && g > pg ? ` statt ${pg < 0 ? "zu spät" : `nur ${pg} Min.`}` : ""}` });
+    if (w?.cancelled) out.push({ bad: 1, t: "Fällt aus" });
+    else if (w?.live && w.ok && !w.legs?.some(l => l.delay >= 3)) out.push({ ok: 1, t: "Live geprüft: pünktlich" });
+    else if (w?.live && w.ok) { const dl = Math.max(0, ...(w.legs || []).map(l => l.delay || 0)); out.push({ bad: 1, t: n ? `Live: ${dl} Min. verspätet, Umstieg passt trotzdem` : `Live: ${dl} Min. verspätet` }); }
+    else out.push({ muted: 1, t: "Nur Fahrplan – noch ohne Live-Daten" });
+    if (zbOn && a.zb) out.push({ bad: 1, t: "Sparpreis gilt hier evtl. nicht" });
+    return out.slice(0, 3); };
+  const ref = Date.parse(lost ? t.planArr || t.plan.arr : t.plan.arr);
+  const arrNote = a => { const d = Math.round((Date.parse(a.arr || a.dep) - ref) / MIN);
+    return Math.abs(d) < 2 ? "gleich am Ziel" : d < 0 ? `<b class="ok-t">${fmtSpan(-d)} früher am Ziel</b>` : `${fmtSpan(d)} später${lost ? " als geplant" : ""}`; };
+  const rows = top.map(({ a, ai }) => { const id = `${t.id}:${k}:${ai}`, isOpen = openCmp === id, r = ai === rec;
+    return `<div class="pb-alt${r ? " is-rec" : ""}"><div class="pa-h"><b>${tag(a)}</b>${recTag(r)}</div>
+      <div class="pa-t">ab <b>${hm(a.dep)}</b>${a.from === "start" ? "" : ` ${esc(cleanStop(a.at))}`} → an <b>${esc(dayPre(a.arr || a.dep))}${hm(a.arr || a.dep)}</b> <span class="muted">· ${arrNote(a)}</span></div>
+      <ul class="pa-why">${whyOf(a).map(w => `<li class="${w.bad ? "bad" : w.muted ? "mut" : "ok"}">${w.t}</li>`).join("")}</ul>
+      <div class="pa-act"><button class="btn ${r ? "small-btn" : "sec mini"}" data-adopt="${t.id}|${k}|${ai}" data-zb="${a.zb !== false && a.zb ? "1" : ""}" data-adopt-text="${esc(`${tag(a)}: ab ${hm(a.dep)}, an ${hm(a.arr || a.dep)}\n${a.label}`)}">Diese nehmen</button>
+        <button class="link small" data-cmp="${id}" aria-expanded="${isOpen}">${isOpen ? "Züge ausblenden" : "Züge zeigen"}</button></div>
+      ${isOpen ? stepsHtml(altSteps(a)) : ""}</div>`; }).join("")
+    + (cand.length > 3 ? `<button class="link small pb-more" data-pball="${t.id}">${all ? "Weniger zeigen" : `${cand.length - 3} weitere Möglichkeit${cand.length - 3 > 1 ? "en" : ""}`}</button>` : "")
+    || `<p class="small muted" style="margin:0">Gerade keine Möglichkeit, die sicherer ist. Ich prüfe weiter.</p>`;
   const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn tile-note"><b>Sparpreis:</b> Wo „Sparpreis gilt hier evtl. nicht“ steht, fährst du mit einem anderen Fernzug. Das ist erst erlaubt, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge darfst du immer frei wählen.</p>` : "";
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
@@ -779,10 +798,10 @@ function planBCard(t) {
     const n = tr.alt.length, good = tr.alt.filter(a => a.watch?.ok && a.watch.live && !a.watch.legs.some(l => l.delay >= 3)).length, liveN = tr.alt.filter(a => a.watch?.live).length, open = openCmp === `calm:${t.id}`;
     const sum = tr.alt.some(a => a.watch) ? `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} im Blick – ${!liveN ? "noch ohne Live-Daten" : good === n ? (n > 1 ? "alle pünktlich" : "pünktlich") : `${good} davon pünktlich`}.` : `${n} Ausweichmöglichkeit${n > 1 ? "en" : ""} gefunden. Live prüfe ich sie, sobald es eng wird.`;
     return `<section class="card calm"><div class="k">Falls es knapp wird</div><p class="small" style="margin:0">Dein Umstieg in ${esc(cleanStop(tr.at))} ist mit ${tr.planGap} Min. knapp geplant. ${esc(sum)}</p>
-      <button class="btn sec small-btn" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="tiles">${zb}${curRow}${rows}</div>` : ""}`;
+      <button class="btn sec mini" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="pb-list">${zb}${rows}</div>` : ""}`;
   }
   // im Rahmen wie Plan B, mit ✕ zum Ausblenden (kommt von selbst wieder, wenn es schlimmer wird)
-  return `<h3 class="sec-h" style="margin-top:6px">${lost ? "So kommst du jetzt weiter" : "Deine Möglichkeiten"}</h3><div class="tiles">${zb}${curRow}${rows}</div>${lost ? "" : SPECIAL}`;
+  return `${curRow}<div class="pb-sub">${lost ? "So kommst du jetzt weiter" : `${top.length > 1 ? "Diese Möglichkeiten klappen eher" : "Diese Möglichkeit klappt eher"}`}</div><div class="pb-list">${zb}${rows}</div>`;
 }
 // Kurz: Umstiege und Übernachtung in einer Zeile, die Züge erst auf Antippen
 function altSummary(a, id, isOpen) {
@@ -948,7 +967,7 @@ function sosCard(t) {
 }
 
 // Möglichkeiten ab dem eigenen Standort (nur auf Knopfdruck)
-let hereBusy = null;
+let hereBusy = null, SELF_OPEN = null, PB_ALL = null;
 // Drei gleich große Knöpfe nebeneinander: ab Start (zur Reisezeit) · mein Standort zur Reisezeit · mein Standort jetzt
 function searchSeg(t, cur) {
   const enroute = t.phase === "enroute", ns = nextStop(t);
@@ -963,7 +982,8 @@ function searchSeg(t, cur) {
 function hereCard(t) {
   if (t.phase === "done") return "";
   if (hereBusy === t.id) return `<section class="card"><div class="k">Andere Verbindungen</div><div class="spinner"></div></section>`;
-  if (!t.here) return `<div class="self-search"><div class="k">Selbst suchen</div>${searchSeg(t, null)}</div>`;
+  if (!t.here) return SELF_OPEN === t.id ? `<div class="self-search"><div class="k">Selbst suchen</div>${searchSeg(t, null)}</div>`
+    : `<div class="self-search"><button class="btn sec mini" data-selfopen="${t.id}">🔎 Selbst suchen</button></div>`;
   const ref = Date.parse(t.plan.arr), zb0 = t.ticket === "spar" && !t.zbLifted;
   const span = m => (m >= 120 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${m} Min.`);
   const mode = t.here.mode || "trip";
@@ -1112,6 +1132,8 @@ function renderTrip(t, many) {
     <button class="btn sec mini center" data-go="add">＋ Weitere Fahrt hinzufügen</button>`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
+  $app.querySelectorAll("[data-selfopen]").forEach(b => b.onclick = () => { SELF_OPEN = b.dataset.selfopen; render(); });
+  $app.querySelectorAll("[data-pball]").forEach(b => b.onclick = () => { PB_ALL = PB_ALL === b.dataset.pball ? null : b.dataset.pball; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
   $app.querySelector("[data-sheet]").onclick = () => { sheetId = sheet ? null : t.id; render(); };
   $app.querySelector("[data-tlopen]")?.addEventListener("click", () => { TL_OPEN = !TL_OPEN; render(); });
