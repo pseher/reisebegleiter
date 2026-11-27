@@ -73,7 +73,9 @@ export function evaluate(trip, now = Date.now()) {
     // Vom Fahrplan so geplante Umstiege gelten als machbar: höchstens die geplante Zeit verlangen (mind. 2 Min.)
     // Eigene Mindest-Umstiegszeit des Reisenden (Einstellung) gilt immer
     const own = +trip.legs[i].minT || 0;
-    const usual = walk ? Math.max(walk + 1, 3) : transferMinutes(a.eva, a.platform, d.eva, d.platform);
+    // Zu einem Fernzug oder zu einer anderen Haltestelle braucht man mehr Luft (Wagen suchen, Weg finden)
+    const fv = isFV(legs[i]) || isFV(legs[i + 1]);
+    const usual = walk ? Math.max(walk + (fv ? 4 : 2), 4) : Math.max(transferMinutes(a.eva, a.platform, d.eva, d.platform), fv ? 5 : 0);
     const need = Math.max(2, own, Math.min(usual, planGap));
     const tightPlan = own > 0 ? planGap < own : planGap < usual + 3;   // schon im Fahrplan knapp → Ausweichmöglichkeiten bereithalten (mit eigener Umstiegszeit: erst darunter)
     const until = Math.max(0, Math.round((a.rt - now) / MIN)), growth = growthBuffer(until, a.delay), spare = gap - need;

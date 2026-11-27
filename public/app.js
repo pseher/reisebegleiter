@@ -169,7 +169,9 @@ function headerBack() {
 }
 document.getElementById("hdrBack")?.addEventListener("click", () => { if (guard) history.back(); else { const bk = document.getElementById("wBack"); if (view === "add" && bk) bk.click(); else { openId = null; sheetId = null; go("home"); } } });
 const flashBox = () => offlineBox() + flashBox0();
-const flashBox0 = () => pushBox() + (() => { if (!flash) return ""; const f = flash; flash = ""; return `<div class="banner ok small" role="status">${esc(f)}</div>`; })();
+let SHARE_AFTER = null;   // Fahrt gerade geändert: neue Ankunft gleich teilen können
+const flashBox0 = () => pushBox() + (() => { if (!flash) return ""; const f = flash, sh = SHARE_AFTER && openId === SHARE_AFTER ? SHARE_AFTER : null; flash = ""; SHARE_AFTER = null;
+  return `<div class="banner ok small" role="status">${esc(f)}${sh ? ` <button class="btn sec small-btn share-after" data-share="${esc(sh)}">↗ Neue Ankunft teilen</button>` : ""}</div>`; })();
 // Meldung, während die App offen ist: hier oben statt als Benachrichtigung (bleibt 2 Min. oder bis ✕)
 let PUSH_NOTE = null;
 const pushBox = () => { const n = PUSH_NOTE; if (!n || Date.now() - n.at > 120e3) return "";
@@ -660,7 +662,9 @@ function bindRoutineForm(t) {
   $("rfHol")?.addEventListener("change", e => { RF.hol = e.target.checked; });
   $("rfSave")?.addEventListener("click", async () => {
     if (!RF.days.length) return alert("Bitte mindestens einen Tag wählen.");
-    if (!(await ask(`Regelmäßig überwachen?\n\n${daysText(RF.days)} um ${hm(t.legs[0].dep.plan)}: Ich lege die Fahrt an jedem dieser Tage ein paar Stunden vorher selbst an.`, { ok: "Ja, regelmäßig", cancel: "Abbrechen" }))) return;
+    const tpl = t.legs.map(l => `${nice(l)} ${hm(l.dep.plan)}`).join(" → ");
+    const tight = (t.transfers || []).filter(x => x.status === "WATCH" || x.status === "RISK" || x.tightPlan).map(x => `${cleanStop(x.at || "")} (${Math.round(x.gap)} Min.)`);
+    if (!(await ask(`Regelmäßig überwachen?\n\n${daysText(RF.days)} um ${hm(t.legs[0].dep.plan)} gilt diese Verbindung als Muster:\n${tpl}${tight.length ? `\n\nAchtung: Umstieg in ${tight.join(", ")} ist knapp. Wenn du sonst anders fährst, ändere die Fahrt vorher.` : ""}\n\nIch lege die Fahrt an jedem dieser Tage ein paar Stunden vorher selbst an.`, { ok: "Ja, so jeden Tag", cancel: "Vorher ändern" }))) return;
     const r = await rCall("/api/routines", { method: "POST", body: { tripId: t.id, name: RF.name.trim(), days: RF.days, holidays: RF.hol } });
     if (!r) return;
     Object.assign(RF, { days: [1, 2, 3, 4, 5], name: "", hol: true });
@@ -1514,6 +1518,7 @@ function bindCommon() {
 // ---------- Fahrt ändern als Bausteine: jede Teilstrecke einzeln früher oder später, auch andere Linien ----------
 // Geladen wird erst beim ersten Tippen auf ‹ oder › (Abfahrts- und Ankunftstafel), danach wird nur noch geblättert.
 let BLK = null;
+let REGIONAL = false; try { REGIONAL = localStorage.getItem("rb_regional") === "1"; } catch {}   // „Nur Nahverkehr“ (gemerkt)
 // Verlassen: gewählte Änderungen nicht stillschweigend verwerfen
 async function blkLeave() {
   if (!BLK) return true;
@@ -1617,6 +1622,7 @@ function renderBlocks(t) {
     const b = btn; b.disabled = true; b.textContent = "Wird geändert …";
     try {
       await api(`/api/trips/${t.id}`, { method: "PUT", body: { replace: Object.fromEntries(ch.map(i => [i, BLK.lists[i][BLK.sel[i]]])), ticket: t.ticket } });
+      SHARE_AFTER = t.id;
       flash = t.routine ? "Nur heute geändert – deine regelmäßige Fahrt bleibt, wie sie ist. Ich überwache jetzt die neue Verbindung." : "Fahrt geändert. Ich überwache jetzt die neue Verbindung.";
       BLK = null; await loadTrips().catch(() => {}); render(); scrollTo(0, 0);
     } catch (err) { alert(err.message); b.disabled = false; b.textContent = "So übernehmen"; }
@@ -1676,6 +1682,8 @@ function whenPicker(key) {
 function bindWhen(key, changed) {
   const set = ms => { W[key] = ms; changed(); render(); };
   $app.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { W.cal = null; W.timeNote = ""; set(Date.now() + +b.dataset.q * MIN); });
+  $app.querySelectorAll("[data-tmode]").forEach(b => b.onclick = () => { W.byArr = b.dataset.tmode === "arr"; W.conns = null; render(); });
+  const reg = document.getElementById("onlyReg"); if (reg) reg.onchange = () => { REGIONAL = reg.checked; try { localStorage.setItem("rb_regional", REGIONAL ? "1" : "0"); } catch {} W.conns = null; };
   $app.querySelector("[data-cal]")?.addEventListener("click", () => { W.cal = W.cal === key ? null : key; W.calM = startOfDay(W[key]); render(); });
   const own = sel => [...$app.querySelectorAll(sel)].filter(b => !b.closest(".fav-days"));   // Kalender der Favoriten hat eigene Knöpfe
   own("[data-calm]").forEach(b => b.onclick = () => { const d = new Date(W.calM); d.setDate(1); d.setMonth(d.getMonth() + +b.dataset.calm); W.calM = d.getTime(); render(); });
@@ -1961,7 +1969,8 @@ function renderWizard() {
       ${W.regIntent && W.reg ? `<div class="reg-sum"><span>↻ <b>${esc(W.reg.name || "Neue regelmäßige Fahrt")}</b> · ${esc(daysText(W.reg.days))} · ${W.reg.kind === "win" ? `${esc(W.reg.from)}–${esc(W.reg.to)}` : `ab ${esc(W.reg.at)}`}</span><button class="link" id="regEdit">ändern</button></div>` : ""}
       ${W.retNote ? `<p class="small warn-t" style="margin:6px 2px 0">${esc(W.retNote)}</p>` : ""}
       ${stationField("rf", "Von", W.rFrom)}${W.rFrom && W.rTo ? `<button class="chip swap-chip" data-swap aria-label="Start und Ziel tauschen">⇅ Tauschen (Rückfahrt)</button>` : ""}${stationField("rt", "Nach", W.rTo)}
-      ${(W.regIntent && W.reg) || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Abfahrt</p>${whenPicker("when")}`}
+      ${(W.regIntent && W.reg) || W.quick ? "" : `<div class="seg tmode" role="group" aria-label="Zeit gilt für" style="margin:14px 0 6px;grid-template-columns:1fr 1fr"><button data-tmode="dep" aria-pressed="${!W.byArr}"><b>Abfahrt ab</b></button><button data-tmode="arr" aria-pressed="${!!W.byArr}"><b>Ankunft bis</b></button></div>${whenPicker("when")}
+      <label class="small chk" style="margin-top:8px"><input type="checkbox" id="onlyReg" ${REGIONAL ? "checked" : ""}> Nur Nahverkehr (z. B. mit Deutschlandticket – ohne ICE/IC)</label>`}
       ${W.editId || W.quick ? "" : `<p class="small muted" style="margin:14px 0 4px">Zeit, die ich mindestens zum Umsteigen brauche</p>${minTChips()}`}
       ${err}<button class="btn" id="go" ${W.rFrom && W.rTo ? "" : "disabled"}>${W.regIntent && W.reg?.kind === "win" ? "Speichern" : W.regIntent ? "Verbindung wählen" : "Verbindungen suchen"}</button>
       ${W.regIntent || W.quick ? "" : `<button class="btn quiet" id="byTrain">Direkt aus der Abfahrtstafel wählen</button>`}
@@ -2029,7 +2038,7 @@ function renderWizard() {
     const fullDate = ms => new Date(ms).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
     // Was wird gesucht? ganze Fahrt · bis zum ersten festen Zug · ab dem letzten festen Zug
     const sFrom = ph === "post" ? K.last.arrAt : W.rFrom, sTo = ph === "pre" ? K.first.at : W.rTo;
-    const sub = !K ? `ab ${fullDate(W.when)}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
+    const sub = !K ? `${W.byArr ? "an bis" : "ab"} ${fullDate(W.when)}${REGIONAL ? " · nur Nahverkehr" : ""}` : ph === "pre" ? `zum ${esc(K.first.label)} um ${hm(K.first.dep)}` : ph === "post" ? `ab ${fullDate(W.postWhen || K.earliest)}` : "";
     const stepNote = K && K.pre && K.post ? `<p class="small" style="margin:0 2px 6px"><b>${ph === "pre" ? "Teil 1 von 2" : "Teil 2 von 2"}:</b> ${ph === "pre" ? `bis ${esc(cleanStop(K.first.at.name))}` : `ab ${esc(cleanStop(K.last.to || ""))}`}</p>` : "";
     const title = ph === "none" ? `${esc(W.rFrom.name)} → ${esc(W.rTo.name)}` : `${esc(sFrom.name)} → ${esc(sTo.name)}`;
     $app.innerHTML = `${head}<h1>${title}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${sub}</p>
@@ -2037,15 +2046,17 @@ function renderWizard() {
       ${ph === "none" ? "" : `${err}${W.conns && (ph === "pre" ? true : !K && W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
       ${W.conns && !W.editId ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
         ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
-      <div>${!W.conns ? `<div class="spinner"></div>` : ph === "pre" && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(K.first.label)} um ${hm(K.first.dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : !W.conns.length ? `<p class="muted">Keine passende Verbindung gefunden.</p>` : connList(W.conns)}</div>
+      <div>${!W.conns ? `<div class="spinner"></div>` : ph === "pre" && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(K.first.label)} um ${hm(K.first.dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : !W.conns.length ? `<p class="muted">Keine passende Verbindung gefunden.${REGIONAL ? " „Nur Nahverkehr“ ist an – vielleicht fährt hier nur ein Fernzug." : W.byArr ? " Probier eine spätere Ankunftszeit." : ""}</p>` : connList(W.conns)}</div>
       ${W.conns && (W.conns.length || K) ? `${ph === "pre" && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : ph === "pre" && !W.conns.length ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}` : ""}`}
       ${ph === "post" && K.pre ? `<button class="btn quiet" id="backPre">Zurück zu Teil 1</button>` : ""}
       ${W.conns || ph === "none" ? (W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL) : ""}${back}`;
     if (!W.conns && ph !== "none") api(ph === "pre" && W.depMin ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.depMin).toISOString())}`
       : ph === "pre" ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
-      : `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(ph === "post" ? (W.postWhen || Date.parse(K.last.arr) - MIN) : W.when).toISOString())}`)
+      : `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}${!K && W.byArr ? "&arrive=1" : ""}${REGIONAL ? "&regional=1" : ""}&time=${encodeURIComponent(new Date(ph === "post" ? (W.postWhen || Date.parse(K.last.arr) - MIN) : W.when).toISOString())}`)
       .then(c => { if (ph === "pre" && W.depMin) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) >= W.depMin).slice(0, 4);   // spätere, die den festen Zug noch erreichen
-        else if (ph === "pre") {   // alle, die den festen Zug noch erreichen – früher UND später als bisher, die nächstgelegenen zur bisherigen Abfahrt
+        else if (!K && W.byArr) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= W.when + MIN && Date.parse(x.legs[0].from.plan) > Date.now() - MIN).slice(-6);   // Ankunft bis: die spätesten passenden
+        if (REGIONAL) c = c.filter(x => !x.legs.some(l => isFVc(l)));
+        if (ph === "pre" && !W.depMin) {   // alle, die den festen Zug noch erreichen – früher UND später als bisher, die nächstgelegenen zur bisherigen Abfahrt
           const ref = Date.parse(W.ref.dep), max = W.depMax || Infinity;
           c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max && Date.parse(x.legs[0].from.plan) > Date.now())
             .sort((a, b) => Math.abs(Date.parse(a.legs[0].from.plan) - ref) - Math.abs(Date.parse(b.legs[0].from.plan) - ref)).slice(0, 6)
@@ -2383,7 +2394,7 @@ async function saveTrip(ticket) {
       const K = keepInfo();
       await api(`/api/trips/${id}`, { method: "PUT", body: K ? { keep: { a: K.a, b: K.b }, pre: (W.preLegs || []).map(l => ({ ...l, minT })), post: (W.postLegs || []).map(l => ({ ...l, minT })), minT, ticket }
         : { legs: W.legs.map(l => ({ ...l, minT })), minT, ticket } });
-      flash = "Fahrt geändert. Ich überwache jetzt die neue Verbindung.";
+      flash = "Fahrt geändert. Ich überwache jetzt die neue Verbindung."; SHARE_AFTER = id;
       W = null; await loadTrips(); openId = id; sheetId = null; return go("home");
     } catch (e) { if (!W) return; W.busy = null; W.error = e.message; return render(); }
   }

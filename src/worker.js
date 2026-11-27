@@ -344,7 +344,9 @@ async function api(req, env, url) {
     const from = pt(url.searchParams.get("from")), to = pt(url.searchParams.get("to"));
     if (!from || !to) return fail(400, "Start oder Ziel fehlt");
     const t = Date.parse((url.searchParams.get("time") || "").replace(" ", "+")) || Date.now();
-    return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0, url.searchParams.get("arrive") === "1"));
+    const regional = url.searchParams.get("regional") === "1";   // nur Nahverkehr (Deutschlandticket)
+    return json(await connections(env, from, to, t, +url.searchParams.get("min") || 0, url.searchParams.get("arrive") === "1", { regional })
+      .catch(e => { if (!regional) throw e; return connections(env, from, to, t, +url.searchParams.get("min") || 0, url.searchParams.get("arrive") === "1", { regional: true, noModes: true }); }));
   }
   // Gewählte Verbindung → Teilstrecken mit DB-Fahrtkennungen
   if (p === "/api/resolve" && method === "POST") {

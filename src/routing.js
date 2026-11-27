@@ -64,15 +64,18 @@ export function simplify(data) {
 
 // from/to: DB-Bahnhofsnummer oder ein Ort { eva?, lat, lon } (z. B. Bus-Haltestelle ohne DB-Nummer)
 const pointOf = x => (x && typeof x === "object" ? (x.eva && byEva(x.eva)) || (x.lat != null && x.lon != null ? { eva: "", lat: +x.lat, lon: +x.lon } : null) : byEva(x));
-export async function connections(env, from, to, timeMs, minT = 0, arriveBy = false) {
+const FV_LABEL = /^(ICE|IC|EC|ECE|ICD|RJX?|NJ|EN|TGV|EST|FLX|D)\s?\d/i;
+export const isFVConn = c => c.legs.some(l => FV_MODES.has(l.mode) || FV_LABEL.test(String(l.label || "")));
+export async function connections(env, from, to, timeMs, minT = 0, arriveBy = false, opts = {}) {
   const a = pointOf(from), b = pointOf(to);
   if (!a || !b) throw new Error("Bahnhof unbekannt");
   const fromEva = a.eva || "", toEva = b.eva || "";
   const search = async mt => {
     const data = await motis(env, { fromPlace: `${a.lat},${a.lon}`, toPlace: `${b.lat},${b.lon}`, time: new Date(timeMs).toISOString(),
-      numItineraries: arriveBy ? "10" : "6", searchWindow: arriveBy ? "2700" : "5400", minTransferTime: String(Math.max(0, Math.min(30, mt | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
+      numItineraries: arriveBy ? "10" : opts.regional ? "10" : "6", searchWindow: arriveBy ? "2700" : "5400",
+      ...(opts.regional && !opts.noModes ? { transitModes: "TRAM,SUBWAY,FERRY,BUS,RAIL,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,ODM" } : {}), minTransferTime: String(Math.max(0, Math.min(30, mt | 0))), ...(arriveBy ? { arriveBy: "true" } : {}), detailedTransfers: "false", joinInterlinedLegs: "true", language: "de", fromEva, toEva });
     const seen = new Set();
-    const l = simplify(data).filter(c => !c.legs.some(x => x.mode === "COACH" || x.mode === "AIRPLANE"))   // Fernbus/Flug passen nicht zum Bahnticket
+    const l = simplify(data).filter(c => !c.legs.some(x => x.mode === "COACH" || x.mode === "AIRPLANE") && !(opts.regional && isFVConn(c)))   // Fernbus/Flug passen nicht zum Bahnticket
       .filter(c => { const k = c.legs.map(x => `${x.label}@${x.from.plan}`).join("|"); if (seen.has(k)) return false; seen.add(k); return true; })
       .sort((x, y) => Date.parse(x.legs[0].from.plan) - Date.parse(y.legs[0].from.plan));   // nach der angezeigten Planzeit
     // „Ankunft bis“: die Verbindungen kurz vor der Zeit sind die interessanten, nicht die frühesten im Suchfenster
