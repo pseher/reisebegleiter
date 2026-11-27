@@ -22,7 +22,7 @@ async function post(env, kind, body) {
   for (let attempt = 0; ; attempt++) {
     await slot();
     const r = await fetch(`${OB}/${kind === "arr" ? "arrivals" : "departures"}`, {
-      method: "POST", body: JSON.stringify(body),
+      method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(8000),
       headers: { "DB-Client-Id": env.DB_CLIENT_ID, "DB-Api-Key": env.DB_API_KEY, "Content-Type": "application/json", Accept: "application/json" },
     }).catch(e => { throw new BoardError(`Netzwerk: ${e.message}`); });
     if (r.status === 429) count("db429");

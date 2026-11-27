@@ -753,7 +753,7 @@ function planBCard(t) {
   const delta = a => { const d = Math.round((Date.parse(a.arr) - curArr) / MIN); return lost ? "" : d < -1 ? ` · <b class="ok-t">${-d} Min. früher</b>` : d > 1 ? ` · ${d} Min. später` : " · gleich"; };
   const firstPlan = Date.parse(t.legs[0].dep.plan);
   // Titel = was du tust; die Wirkung steht in der Zeile darunter
-  const tag = a => a.from === "start" && Date.parse(a.depPlan || a.dep) < firstPlan - MIN && a.kind !== "later" ? "Früher losfahren" : a.kind === "stay" || (a.legs?.length === 1 && a.label === curLeg.label) ? (a.from === "start" || t.phase === "before" ? `Mit ${esc(a.legs?.[0]?.label || a.label || curLeg.label)} direkt ans Ziel` : `Im ${esc(a.legs?.[0]?.label || a.label || curLeg.label)} sitzen bleiben`) : ({ safer: "Mehr Zeit zum Umsteigen", faster: "Schneller da", later: a.transfers ? "Später, mit Luft" : "Später, direkt ans Ziel", must: "Rechtzeitig zum festen Zug", next: a.transfers ? "Nächste Möglichkeit" : "Nächster Zug direkt ans Ziel" }[a.kind] || "Andere Verbindung");
+  const tag = a => a.from === "start" && Date.parse(a.depPlan || a.dep) < firstPlan - MIN && a.kind !== "later" ? "Früher losfahren" : a.kind === "stay" || (a.legs?.length === 1 && a.label === curLeg.label) ? (a.from === "start" || t.phase === "before" ? `Mit ${esc(a.legs?.[0]?.label || a.label || curLeg.label)} direkt ans Ziel` : `Im ${esc(a.legs?.[0]?.label || a.label || curLeg.label)} sitzen bleiben`) : ({ safer: "Mehr Zeit zum Umsteigen", faster: "Schneller da", later: (a.legs?.length || 1) > 1 ? "Spätere Verbindung" : "Später, direkt ans Ziel", must: "Rechtzeitig zum festen Zug", next: a.transfers ? "Nächste Möglichkeit" : "Nächster Zug direkt ans Ziel" }[a.kind] || "Andere Verbindung");
   const rec = bestIdx(tr.alt, t.plan.dep);
   // Dein Plan: der knappste offene Umstieg mit Echtzeit
   const cur = t.transfers.filter(x => x.status !== "DONE").sort((a, b) => a.gap - b.gap)[0];
@@ -763,7 +763,8 @@ function planBCard(t) {
   const curRow = lost ? "" : `<div class="pb-plan"><span class="muted">Dein Plan:</span> an <b>${hm(t.plan.arr)}</b>${curState ? ` · ${curState}` : ""}</div>`;
   const hide = dupAlts(tr.alt, rec);
   // Kandidaten: machbar, keine Doppelten; die empfohlene zuerst, dann früh am Ziel mit genug Zeit zum Umsteigen
-  const cand = tr.alt.map((a, ai) => ({ a, ai })).filter(x => !hide.has(x.ai) && !infeasible(x.a) && x.a.kind !== "asplanned");
+  const better = a => betterAlt(a, tr, t);
+  const cand = tr.alt.map((a, ai) => ({ a, ai })).filter(x => !hide.has(x.ai) && !infeasible(x.a) && x.a.kind !== "asplanned" && better(x.a));
   const score = x => (x.ai === rec ? -1e15 : 0) + Date.parse(x.a.arr || x.a.dep) - Math.min(gapOf(x.a) ?? 15, 15) * MIN;
   cand.sort((x, y) => score(x) - score(y));
   const all = PB_ALL === t.id, top = all ? cand : cand.slice(0, 3);
@@ -791,7 +792,7 @@ function planBCard(t) {
         <button class="link small" data-cmp="${id}" aria-expanded="${isOpen}">${isOpen ? "Züge ausblenden" : "Züge zeigen"}</button></div>
       ${isOpen ? stepsHtml(altSteps(a)) : ""}</div>`; }).join("")
     + (cand.length > 3 ? `<button class="link small pb-more" data-pball="${t.id}">${all ? "Weniger zeigen" : `${cand.length - 3} weitere Möglichkeit${cand.length - 3 > 1 ? "en" : ""}`}</button>` : "")
-    || `<p class="small muted" style="margin:0">Gerade keine Möglichkeit, die sicherer ist. Ich prüfe weiter.</p>`;
+    || `<p class="small" style="margin:0">Dein Plan ist gerade die beste Möglichkeit – keine andere Verbindung gibt dir mehr Zeit zum Umsteigen. Ich prüfe weiter und melde mich, wenn es nicht mehr reicht.</p>`;
   const zb = zbOn && tr.alt.some(a => a.zb !== false) ? `<p class="small zb-warn tile-note"><b>Sparpreis:</b> Wo „Sparpreis gilt hier evtl. nicht“ steht, fährst du mit einem anderen Fernzug. Das ist erst erlaubt, wenn die Zugbindung aufgehoben ist. Bus, S-/U-Bahn und Regionalzüge darfst du immer frei wählen.</p>` : "";
   const here = `<button class="chip here-chip" data-here="${t.id}">${PIN} Ab meinem Standort suchen</button>`;
   if (calm) {
@@ -802,7 +803,7 @@ function planBCard(t) {
       <button class="btn sec mini" data-cmp="calm:${t.id}">${open ? "Möglichkeiten zuklappen" : "Möglichkeiten zeigen"}</button></section>${open ? `<div class="pb-list">${zb}${rows}</div>` : ""}`;
   }
   // im Rahmen wie Plan B, mit ✕ zum Ausblenden (kommt von selbst wieder, wenn es schlimmer wird)
-  return `${curRow}<div class="pb-sub">${lost ? "So kommst du jetzt weiter" : `${top.length > 1 ? "Diese Möglichkeiten klappen eher" : "Diese Möglichkeit klappt eher"}`}</div><div class="pb-list">${zb}${rows}</div>`;
+  return `${curRow}${top.length ? `<div class="pb-sub">${lost ? "So kommst du jetzt weiter" : top.length > 1 ? "Diese Möglichkeiten klappen eher" : "Diese Möglichkeit klappt eher"}</div>` : ""}<div class="pb-list">${zb}${rows}</div>`;
 }
 // Kurz: Umstiege und Übernachtung in einer Zeile, die Züge erst auf Antippen
 function altSummary(a, id, isOpen) {
@@ -915,13 +916,18 @@ let sosBusy = null;
 // Plan B: ein zentraler Knopf. Beim Öffnen der Fahrt immer zu; farbig, wenn Plan B gebraucht wird. Ein Tipp öffnet den Kasten.
 let OPT_OPEN = null;
 const RANK = { OK: 0, PLAN: 0, WATCH: 1, RISK: 2, LOST: 3 };
+// „klappt eher“ als dein Plan: ohne Umstieg, mehr Zeit zum Umsteigen, früher am Ziel oder rechtzeitig zum festen Zug – sonst nicht anbieten
+function betterAlt(a, tr, t) {
+  const pg = tr.gap != null ? Math.round(tr.gap) : null;
+  return tr.status === "LOST" || pg == null || pg < 0 || !!a.reach || (a.legs?.length || 1) <= 1 || (gapOf(a) ?? 99) > pg + 1 || Date.parse(a.arr || a.dep) < Date.parse(t.plan.arr) - 2 * MIN;
+}
 function optionsBlock(t) {
   if (t.phase === "done") return "";
   const busy = t.missed != null || t.sos || sosBusy === t.id || t.here || hereBusy === t.id;
   if (t.win && !t.win.picked && t.phase === "before") return `${sosButton(t)}${windowCard(t)}`;
   // Plan B erst, wenn es live Abweichungen gibt (knapp, gefährdet, verpasst) – vorher passt man die Fahrt über „Ändern“ an
   if (!busy && OPT_OPEN !== t.id && (planOnly(t) || !["WATCH", "RISK", "LOST"].includes(t.status))) return "";
-  const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? t.transfers[k].alt.length - dupAlts(t.transfers[k].alt, bestIdx(t.transfers[k].alt, t.plan.dep)).size : 0;
+  const st = planOnly(t) ? "OK" : t.status, k = t.transfers.findIndex(x => x.status !== "DONE" && x.alt?.length), nAlt = k >= 0 ? (() => { const L = t.transfers[k].alt, h = dupAlts(L, bestIdx(L, t.plan.dep)); return L.filter((a, i) => !h.has(i) && !infeasible(a) && a.kind !== "asplanned" && betterAlt(a, t.transfers[k], t)).length; })() : 0;
   const tone = st === "LOST" ? "bad" : st === "RISK" ? "risk" : st === "WATCH" ? "watch" : "calm";
   const sub = st === "LOST" ? "Anschluss weg – so kommst du weiter" : st === "RISK" ? "Anschluss gefährdet – Möglichkeiten ansehen" : st === "WATCH" ? (t.transfers.some(x => x.status === "WATCH") ? "Umstieg knapp – Möglichkeiten ansehen" : "Verspätung – Möglichkeiten ansehen") : "Andere Verbindung suchen";
   if (!busy && OPT_OPEN !== t.id) return `<button class="planb-btn ${tone}" data-optopen="${t.id}"><span class="pb-ic">⇄</span><span class="pb-tx"><b>Plan B</b><span>${nAlt && tone !== "calm" && st !== "LOST" ? `${sub.replace(" – Möglichkeiten ansehen", "")} · ${nAlt} ${nAlt > 1 ? "Möglichkeiten" : "Möglichkeit"} ansehen` : sub}</span></span><span class="chev">›</span></button>`;

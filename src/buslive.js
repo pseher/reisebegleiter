@@ -39,14 +39,14 @@ async function vbbOne(env, s, label, kind, cache) {
   const key = `vbbstop|${s.lat.toFixed(4)},${s.lon.toFixed(4)}`;
   let stopId = cache?.get(key) || STOPS.get(key);   // Haltestellen-ID bleibt gleich: über Läufe hinweg merken (spart Abrufe)
   if (!stopId) {
-    count("vbb"); const r = await fetch(`${base}/locations/nearby?latitude=${s.lat}&longitude=${s.lon}&results=3&distance=400`, { headers: h }).catch(() => null);
+    count("vbb"); const r = await fetch(`${base}/locations/nearby?latitude=${s.lat}&longitude=${s.lon}&results=3&distance=400`, { headers: h, signal: AbortSignal.timeout(6000) }).catch(() => null);
     const list = r?.ok ? await r.json().catch(() => []) : [];
     stopId = (list.find(x => fold(x.name).includes(fold(s.name).slice(0, 8))) || list[0])?.id;
     if (!stopId) return null;
     cache?.set(key, stopId); if (STOPS.size > 2000) STOPS.clear(); STOPS.set(key, stopId);
   }
   const plan = Date.parse(s.plan), when = new Date(plan - 5 * MIN).toISOString();
-  count("vbb"); const r = await fetch(`${base}/stops/${encodeURIComponent(stopId)}/${kind === "dep" ? "departures" : "arrivals"}?when=${encodeURIComponent(when)}&duration=20&results=60`, { headers: h }).catch(() => null);
+  count("vbb"); const r = await fetch(`${base}/stops/${encodeURIComponent(stopId)}/${kind === "dep" ? "departures" : "arrivals"}?when=${encodeURIComponent(when)}&duration=20&results=60`, { headers: h, signal: AbortSignal.timeout(6000) }).catch(() => null);
   if (!r?.ok) { count("err_vbb"); count(r ? `err_vbb_${r.status === 429 ? "429" : r.status >= 500 ? "5xx" : "4xx"}` : "err_vbb_net"); return null; }
   const d = await r.json().catch(() => ({}));
   const list = d.departures || d.arrivals || (Array.isArray(d) ? d : []);

@@ -17,7 +17,7 @@ async function motis(env, params) {
   const { fromEva, toEva, ...rest } = params;
   const qs = new URLSearchParams(rest).toString();
   for (const v of VER.plan ? [VER.plan] : ["v6", "v5", "v4"]) {
-    count("motis"); count("mt_plan"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } });
+    count("motis"); count("mt_plan"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } });
     if (r.status === 404 && !VER.plan) continue;
     if (!r.ok) { count("err_motis"); throw new Error(`Verbindungssuche: HTTP ${r.status}`); }
     VER.plan = v; return r.json();
@@ -170,7 +170,7 @@ export async function searchStops(env, q, limit = 6) {
   if (env.MOCK === "1") return /halt|platz|str/i.test(q) ? [{ eva: "", id: "mock_mommsen", name: "Mommsenstraße", area: "Berlin", lat: 52.5045, lon: 13.3066, stop: true }] : [];
   const base = env.TRANSITOUS_URL || "https://api.transitous.org";
   const qs = new URLSearchParams({ text: q.trim(), type: "STOP", numResults: String(limit + 4), language: "de" });
-  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
   if (!r || !r.ok) return [];
   const list = await r.json().catch(() => []);
   const seen = new Set();
@@ -190,7 +190,7 @@ async function motisGet(env, path, params) {
   const p = (async () => {
     const vs = VER[path] ? [VER[path]] : ["v5", "v4", "v3", "v2", "v1"];
     for (const v of vs) {
-      count("motis"); count(`mt_${path}`); const r = await fetch(`${base}/api/${v}/${path}?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+      count("motis"); count(`mt_${path}`); const r = await fetch(`${base}/api/${v}/${path}?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
       if (!r) continue;
       if (r.status === 404 && !VER[path]) continue;
       if (!r.ok) throw new Error(`Haltestelle: HTTP ${r.status}`);
@@ -243,7 +243,7 @@ export async function geocodeStop(env, name, near) {
   const base = env.TRANSITOUS_URL || "https://api.transitous.org";
   const q = new URLSearchParams({ text: String(name).replace(/\s*\((Berlin|tief)\)/g, ""), type: "STOP", numResults: "5", language: "de",
     ...(near ? { place: `${near.lat},${near.lon}`, placeBias: "8" } : {}) });
-  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${q}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${q}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
   if (!r || !r.ok) return null;
   const list = await r.json().catch(() => []);
   const dist = m => near ? Math.hypot((m.lat - near.lat) * 111, (m.lon - near.lon) * 68) : 0;
@@ -270,7 +270,7 @@ export async function searchPlaces(env, q, limit = 8) {
   if (env.MOCK === "1") return [{ eva: "", name: `${q.trim()} 12`, area: "Berlin", lat: 52.4876, lon: 13.2851, addr: true }];
   const base = env.TRANSITOUS_URL || "https://api.transitous.org";
   const qs = new URLSearchParams({ text: q.trim(), numResults: String(limit + 4), language: "de" });
-  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${qs}`, { headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+  count("motis"); const r = await fetch(`${base}/api/v1/geocode?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/0.1 (kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
   if (!r || !r.ok) return [];
   const list = await r.json().catch(() => []), seen = new Set();
   return (Array.isArray(list) ? list : []).filter(m => m.lat != null && m.lon != null).map(m => {
