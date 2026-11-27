@@ -10,6 +10,9 @@ export const LEAD = 3 * 3600e3;   // so lange vor der Abfahrt wird die Reise ang
 export const LEAD_NV = 60 * 60e3;   // nur Nahverkehr: erst 1 Std. vorher – früher warnen bringt dort kaum etwas, spart Abfragen
 export const leadOf = r => { const tpl = r.tpl || [];
   if (tpl.length === 1 && !tpl[0].label && tpl[0].fv === false) return LEAD_NV;   // Zeitfenster, beim Anlegen ohne Fernzug gewählt
+  // Zeitfenster ohne Angabe: kurze Strecke (unter 50 km Luftlinie, z. B. Arbeitsweg in der Stadt) fährt man nicht mit dem Fernzug
+  if (tpl.length === 1 && !tpl[0].label && tpl[0].fv == null) { const a = tpl[0].from || {}, b = tpl[0].to || {};
+    if (a.lat != null && b.lat != null && Math.hypot((a.lat - b.lat) * 111, (a.lon - b.lon) * 68) < 50) return LEAD_NV; }
   return !tpl.length || tpl.some(l => !l.label) || tpl.some(isFV) || tpl.some(l => l.fv) ? LEAD : LEAD_NV; };   // unbekannt: lieber früh
 const TZ = "Europe/Berlin";
 
