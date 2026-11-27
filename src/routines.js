@@ -8,7 +8,9 @@ import { hm, changesFV, isFV } from "./engine.js";
 const MIN = 60e3, DAY = 864e5;
 export const LEAD = 3 * 3600e3;   // so lange vor der Abfahrt wird die Reise angelegt (mit Fernzug)
 export const LEAD_NV = 60 * 60e3;   // nur Nahverkehr: erst 1 Std. vorher – früher warnen bringt dort kaum etwas, spart Abfragen
-export const leadOf = r => { const tpl = r.tpl || []; return !tpl.length || tpl.some(l => !l.label) || tpl.some(isFV) ? LEAD : LEAD_NV; };   // unbekannt (z. B. Zeitfenster): lieber früh
+export const leadOf = r => { const tpl = r.tpl || [];
+  if (tpl.length === 1 && !tpl[0].label && tpl[0].fv === false) return LEAD_NV;   // Zeitfenster, beim Anlegen ohne Fernzug gewählt
+  return !tpl.length || tpl.some(l => !l.label) || tpl.some(isFV) || tpl.some(l => l.fv) ? LEAD : LEAD_NV; };   // unbekannt: lieber früh
 const TZ = "Europe/Berlin";
 
 // „2026-11-24“ in Berliner Zeit

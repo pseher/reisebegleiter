@@ -2439,8 +2439,8 @@ async function saveTrip(ticket) {
       // gleich regelmäßig: genaue Abfahrt (aus dieser Reise) oder Zeitfenster (Start/Ziel dieser Reise)
       const R = W.reg, f = W.legs[0].from, t = W.legs[W.legs.length - 1].to;
       const r = await api("/api/routines", { method: "POST", body: R.kind === "win"
-        ? { tripId: newId, from: f, to: t, name: R.name.trim(), days: R.days, winFrom: R.from, winTo: R.to, ticket, holidays: R.hol, minT: MINT, replace: W.replaceR || undefined }
-        : { tripId: newId, name: R.name.trim(), days: R.days, holidays: R.hol, replace: W.replaceR || undefined } }).catch(e => { alert(`Die Fahrt ist angelegt, aber regelmäßig ging nicht: ${e.message}`); return null; });
+        ? { tripId: newId, from: f, to: t, name: R.name.trim(), days: R.days, winFrom: R.from, winTo: R.to, ticket, holidays: R.hol, minT: MINT, replace: W.replaceR || undefined, fresh: !!W.regIntent }
+        : { tripId: newId, name: R.name.trim(), days: R.days, holidays: R.hol, replace: W.replaceR || undefined, fresh: !!W.regIntent } }).catch(e => { alert(`Die Fahrt ist angelegt, aber regelmäßig ging nicht: ${e.message}`); return null; });
       if (r) {
         ROUTINES = await api("/api/routines").catch(() => ROUTINES);
         flash = `Gespeichert: „${r.name}“, ${daysText(r.days)} ${r.win ? `${r.win[0]}–${r.win[1]}` : r.dep}. Die Fahrt erscheint jeweils ein paar Stunden vorher hier.`;

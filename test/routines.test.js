@@ -130,4 +130,6 @@ test("Nur Nahverkehr: erst 1 Std. vorher anlegen, mit Fernzug 3 Std.", async () 
   assert.equal(leadOf({ tpl: [{ label: "Bus M19" }, { label: "S 41" }] }), 3600e3);
   assert.equal(leadOf({ tpl: [{ label: "S 41" }, { label: "ICE 509" }] }), 3 * 3600e3);
   assert.equal(leadOf({ tpl: [{ label: "" }] }), 3 * 3600e3);
+  assert.equal(leadOf({ tpl: [{ label: "", fv: false }] }), 3600e3, "Zeitfenster ohne Fernzug");
+  assert.equal(leadOf({ tpl: [{ label: "", fv: true }] }), 3 * 3600e3, "Zeitfenster mit Fernzug");
 });

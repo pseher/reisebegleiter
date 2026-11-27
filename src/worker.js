@@ -10,7 +10,7 @@ import { evaluate, changesFV, isFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
 import { sos } from "./sos.js";
 import { vapid, b64u } from "./push.js";
-import { routineView, berlinDate, wallTime, offReason } from "./routines.js";
+import { routineView, berlinDate, wallTime, offReason, leadOf } from "./routines.js";
 
 const MIN = 60e3;
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
@@ -765,8 +765,9 @@ async function api(req, env, url) {
       // aus einer gerade angelegten Reise: deren Tag gilt als erledigt, die Reise gehört dazu
       const t0 = b.tripId ? await ownTrip(env, dev, String(b.tripId)) : null, made = t0 ? [berlinDate(Date.parse(t0.legs[0].from.plan))] : [];
       const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${to.name}`, days, dep: wf, win_from: wf, win_to: wt,
-        tpl: [{ jid: "", label: "", from, to }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made });
-      if (t0) await db.update(env, "rb_trips", t0.id, { state: { ...(t0.state || {}), routine: r.id, rname: r.name } });
+        tpl: [{ jid: "", label: "", from, to, ...(t0 ? { fv: t0.legs.some(isFV) } : {}) }], ticket: ["spar", "flex", "dticket", "bc100"].includes(b.ticket) ? b.ticket : "flex", min_t: Math.min(30, Math.max(0, +b.minT || 0)), holidays: b.holidays !== false, paused: false, skip: [], made });
+      if (t0 && b.fresh && Date.parse(t0.legs[0].from.plan) - Date.now() > leadOf(r)) { await db.remove(env, "rb_trips", t0.id); await db.update(env, "rb_routines", r.id, { made: [] }); r.made = []; }
+      else if (t0) await db.update(env, "rb_trips", t0.id, { state: { ...(t0.state || {}), routine: r.id, rname: r.name } });
       await retire();
       return json(routineView(r), 201);
     }
@@ -776,7 +777,9 @@ async function api(req, env, url) {
     { const d = dupOf(legs[0].from.name, legs[legs.length - 1].to.name, wallTime(dep0)); if (d) return fail(409, dupMsg(d)); }
     const r = await db.insert(env, "rb_routines", { account_id: dev.account_id, name: cleanName(b.name) || `Nach ${legs[legs.length - 1].to.name}`, days, dep: wallTime(dep0),
       tpl: legs.map(({ jid, tid, ...l }) => ({ ...l, jid: "" })), ticket: t.ticket, min_t: +legs[0].minT || 0, holidays: b.holidays !== false, paused: false, skip: [], made: [berlinDate(dep0)] });
-    await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
+    // gerade erst für diese regelmäßige Fahrt angelegt und noch weit weg: wieder weg – sie erscheint zur üblichen Zeit (1 bzw. 3 Std. vorher)
+    if (b.fresh && dep0 - Date.now() > leadOf(r)) { await db.remove(env, "rb_trips", t.id); await db.update(env, "rb_routines", r.id, { made: [] }); r.made = []; }
+    else await db.update(env, "rb_trips", t.id, { state: { ...(t.state || {}), routine: r.id, rname: r.name } });
     await retire();
     return json(routineView(r), 201);
   }
