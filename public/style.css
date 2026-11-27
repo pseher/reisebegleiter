@@ -565,3 +565,7 @@ span.blk-a { border: 0; background: none; cursor: default; }
 .blk [aria-disabled="true"] { opacity: .55; }
 .blk-full { display: block; margin: 12px auto 0; }
 .spinner.sm { width: 18px; height: 18px; border-width: 2px; margin: 0; }
+/* Geplant, noch ohne Live-Daten: kleine, ruhige Karte */
+.hero.compact { padding-top: 12px; padding-bottom: 12px; }
+.hero.compact h2 { font-size: 19px; margin: 2px 0 4px; }
+.hero.compact p { font-size: 14px; margin: 0 0 2px; }
