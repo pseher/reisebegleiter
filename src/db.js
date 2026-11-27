@@ -39,6 +39,11 @@ export async function tripsOf(env, accountId) {
   if (mem(env)) return [...MEM.rb_trips.values()].filter(t => (t.account_id || t.device_id) === accountId && t.active).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
   return rest(env, `rb_trips?account_id=eq.${accountId}&active=eq.true&order=created_at.desc&limit=20`);
 }
+// Auch beendete Fahrten (z. B. Zeitfenster vorbei) – damit eine regelmäßige Fahrt nicht ein zweites Mal angelegt wird
+export async function tripsAnyOf(env, accountId) {
+  if (mem(env)) return [...MEM.rb_trips.values()].filter(t => (t.account_id || t.device_id) === accountId);
+  return rest(env, `rb_trips?account_id=eq.${accountId}&select=id,legs,state,active&order=created_at.desc&limit=40`);
+}
 // Regelmäßige Fahrten
 export async function routinesOf(env, accountId) {
   if (mem(env)) return [...MEM.rb_routines.values()].filter(r => r.account_id === accountId).sort((a, b) => a.dep < b.dep ? -1 : 1);

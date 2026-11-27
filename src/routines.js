@@ -81,14 +81,16 @@ const asOption = (c, toName) => ({ kind: "window", from: "start", label: c.legs.
 export async function windowConns(env, r, date, fromMs) {
   const a = wallToMs(date, r.win_from || r.dep), b = wallToMs(date, r.win_to), start = Math.max(a, fromMs || a), tpl = r.tpl;
   const seen = new Set(), out = [];
+  let err = null;
   for (let t = start - 2 * MIN, k = 0; t <= b && k < 3; k++) {   // Fenster ggf. in mehreren Suchen abdecken
-    const list = await connections(env, tpl[0].from, tpl[tpl.length - 1].to, t, r.min_t || 0).catch(() => []);
+    const list = await connections(env, tpl[0].from, tpl[tpl.length - 1].to, t, r.min_t || 0).catch(e => { err = e; return []; });
     for (const c of list) { const d = Date.parse(c.legs[0].from.plan), key = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
       if (d >= start - MIN && d <= b && !seen.has(key)) { seen.add(key); out.push(c); } }
     const last = list.length ? Date.parse(list[list.length - 1].legs[0].from.plan) : b;
     if (!list.length || last >= b) break;
     t = last + MIN;
   }
+  if (!out.length && err) throw err;   // gestört statt „keine Verbindung“
   // je Abfahrtszeit nur die schnellste Verbindung, höchstens 6
   return out.sort((x, y) => Date.parse(x.legs[0].from.plan) - Date.parse(y.legs[0].from.plan) || Date.parse(x.arr) - Date.parse(y.arr))
     .filter((c, i, arr) => i === 0 || c.legs[0].from.plan !== arr[i - 1].legs[0].from.plan).slice(0, 6);
@@ -121,7 +123,7 @@ export async function refreshWindow(env, t, now, watch) {
 // gleiche Strecke? („S Halensee (Berlin)“ = „Halensee“)
 const plain = n => String(n || "").replace(/\s*\([^)]*\)\s*$/, "").replace(/^(S\+U|S|U)\s+/i, "").replace(/[^a-zäöüß0-9]/gi, "").toLowerCase();
 export async function makeDue(env, now = Date.now(), watch = null) {
-  const list = await db.activeRoutines(env).catch(() => []), msgs = [], tripsCache = new Map();
+  const list = await db.activeRoutines(env).catch(() => []), msgs = [], tripsCache = new Map(), anyCache = new Map();
   for (const r of list) {
     for (const date of [berlinDate(now), berlinDate(now + DAY)]) {
       if (offReason(r, date)) continue;
@@ -130,7 +132,9 @@ export async function makeDue(env, now = Date.now(), watch = null) {
       if (now < at - LEAD || now > until) continue;
       if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
       // Schon angelegt? Normalerweise ja – fehlt die Fahrt aber (z. B. Fehler beim Anlegen), einmal neu anlegen
-      const made = r.made || [], hasTrip = tripsCache.get(r.account_id).some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs?.[0]?.from?.plan)) === date);
+      if (!anyCache.has(r.account_id)) anyCache.set(r.account_id, await db.tripsAnyOf(env, r.account_id).catch(() => null));
+      const all = anyCache.get(r.account_id) || tripsCache.get(r.account_id);   // auch schon beendete Fahrten zählen (Zeitfenster vorbei ≠ fehlt)
+      const made = r.made || [], hasTrip = all.some(t => t.state?.routine === r.id && berlinDate(Date.parse(t.legs?.[0]?.from?.plan)) === date);
       if (made.includes(date) && (hasTrip || made.includes(`${date}!`))) continue;
       r.made = [...made.filter(d => d !== date), made.includes(date) ? `${date}!` : date].slice(-14);
       if (made.includes(date)) r.made.push(date);
@@ -142,7 +146,11 @@ export async function makeDue(env, now = Date.now(), watch = null) {
         && Date.parse(t.legs[0].from.plan) >= start - 5 * MIN && Date.parse(t.legs[0].from.plan) <= end + 5 * MIN);
       if (own) { if (!own.state?.routine) await db.update(env, "rb_trips", own.id, { state: { ...(own.state || {}), routine: r.id, rname: r.name } }); continue; }
       if (r.win_to) {   // Zeitfenster: erste Fahrt im Fenster überwachen, die übrigen zur Auswahl
-        const list = await windowConns(env, r, date, now - MIN).catch(e => { console.log("Zeitfenster:", e.message); return []; });
+        let failed = false;
+        const list = await windowConns(env, r, date, now - MIN).catch(e => { console.log("Zeitfenster:", e.message); failed = true; return []; });
+        // Suche gestört: nichts melden, beim nächsten Lauf noch einmal versuchen. Fenster schon angefangen: auch nichts melden.
+        if (failed) { r.made = made; await db.update(env, "rb_routines", r.id, { made }); continue; }
+        if (!list.length && now > at) continue;
         if (!list.length) { msgs.push({ acc: r.account_id, title: `↻ ${r.name}: keine Verbindung`, body: `Zwischen ${r.win_from} und ${r.win_to} habe ich keine Verbindung gefunden. Bitte selbst prüfen.`, tag: `r-${r.id}` }); continue; }
         const legs = await toLegs(env, list[0], r.min_t), toName = legs[legs.length - 1].to.name, opts = list.slice(1, 6).map(c => asOption(c, toName));
         if (watch) await watch(opts, r.min_t).catch(() => {});
@@ -151,7 +159,9 @@ export async function makeDue(env, now = Date.now(), watch = null) {
             list: opts } } }));
         continue;
       }
-      const hit = await findForDay(env, r, date).catch(e => { console.log("Regelmäßig:", e.message); return null; });
+      let failed = false;
+      const hit = await findForDay(env, r, date).catch(e => { console.log("Regelmäßig:", e.message); failed = true; return null; });
+      if (failed) { r.made = made; await db.update(env, "rb_routines", r.id, { made }); continue; }   // Suche gestört: später noch einmal, ohne Meldung
       if (!hit) { msgs.push({ acc: r.account_id, title: `↻ ${r.name}: keine Verbindung gefunden`, body: `Für heute ${r.dep} habe ich keine passende Verbindung gefunden. Bitte selbst prüfen.`, tag: `r-${r.id}` }); continue; }
       const legs = (await resolveConnection(env, hit.c.legs)).map(({ live, ...l }) => ({ ...l, minT: r.min_t || 0 }));
       const dep = Date.parse(legs[0].from.plan), label = legs.map(l => l.label).join(" → ");
