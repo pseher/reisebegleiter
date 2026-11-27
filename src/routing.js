@@ -303,6 +303,8 @@ export async function segmentOptions(env, legs, i, now = Date.now()) {
   let t = t0;
   for (let k = 0; k < 2 && t <= tEnd; k++) {   // höchstens zwei Suchen: deckt etwa 40 Min. davor bis 100 Min. danach ab
     const list = await connections(env, from, to, t, 0);
+    { const ds = list.map(c => Math.round((Date.parse(c.legs[0].from.plan) - dep0) / MIN));   // Diagnose (vorübergehend): was liefert die Suche?
+      count(`segdbg_k${k}_n${list.length}_min${ds.length ? Math.min(...ds) : "x"}_max${ds.length ? Math.max(...ds) : "x"}`); }
     for (const c of list) { const d = Date.parse(c.legs[0].from.plan), kk = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
       if (d < t0 - MIN || d > tEnd || seen.has(kk) || c.legs.some(l => l.cancelled)) continue;
       seen.add(kk); all.push(c); }
@@ -314,7 +316,7 @@ export async function segmentOptions(env, legs, i, now = Date.now()) {
     return { mode: l0.mode, rail: !!l0.rail, label: c.legs.map(l => l.label).join(" → "), tripId: l0.tripId || "", walk: N ? walkMin(lz.to, tgt) : 0,
       from: l0.from, to: lz.to, legs: c.legs };
   });
-  count("seg");
+  count("seg"); count(`segdbg_out${out.length}_after${out.filter(o => Date.parse(o.from.plan) > dep0 + MIN).length}`);
   if (SEG.size > 300) SEG.clear();
   SEG.set(key, { t: now, v: out.slice(0, 30) });
   return out.slice(0, 30);
