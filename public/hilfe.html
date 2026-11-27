@@ -7,82 +7,233 @@
   <meta name="theme-color" content="#0f2a3d">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
-  <style>main.legal { max-width: 720px; margin: 0 auto; padding: 16px 18px 40px; line-height: 1.55; } main.legal h2 { font-size: 18px; margin: 22px 0 6px; } main.legal p, main.legal li { color: var(--ink); } main.legal ul { padding-left: 20px; } main.legal a { color: var(--accent); } main.legal details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; margin: 8px 0; } main.legal summary { cursor: pointer; font-weight: 600; padding: 10px 0; } main.legal .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 13px; font-weight: 600; } .t-ok { background: var(--ok-bg); color: var(--ok); } .t-w { background: var(--watch-bg); color: var(--watch); } .t-r { background: var(--risk-bg); color: var(--risk); } .t-l { background: var(--lost-bg); color: var(--lost); } #q { width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); margin: 6px 0 4px; } main.legal figure.vid { margin: 16px auto 20px; max-width: 340px; text-align: center; } main.legal figure.vid video { width: 100%; aspect-ratio: 9 / 16; border-radius: 18px; background: #0f2a3d; display: block; } main.legal figure.vid figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }</style>
+  <style>main.legal { max-width: 720px; margin: 0 auto; padding: 16px 18px 40px; line-height: 1.55; } main.legal h2 { font-size: 18px; margin: 26px 0 6px; } main.legal p, main.legal li { color: var(--ink); } main.legal ul, main.legal ol { padding-left: 20px; } main.legal a { color: var(--accent); }
+    main.legal details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; margin: 8px 0; } main.legal summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
+    main.legal .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 13px; font-weight: 600; } .t-ok { background: var(--ok-bg); color: var(--ok); } .t-w { background: var(--watch-bg); color: var(--watch); } .t-r { background: var(--risk-bg); color: var(--risk); } .t-l { background: var(--lost-bg); color: var(--lost); }
+    #q { width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); margin: 6px 0 4px; }
+    main.legal figure.vid { margin: 16px auto 20px; max-width: 340px; text-align: center; } main.legal figure.vid video { width: 100%; aspect-ratio: 9 / 16; border-radius: 18px; background: #0f2a3d; display: block; } main.legal figure.vid figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .ask { background: var(--card); border: 1.5px solid var(--accent); border-radius: 16px; padding: 14px; margin: 14px 0 6px; }
+    .ask h2 { margin: 0 0 4px !important; } .ask p.small { margin: 0 0 8px; color: var(--muted); }
+    .ask textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; min-height: 64px; }
+    .ask .ex { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; } .ask .ex button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+    .ask .ans { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--bg); white-space: pre-wrap; } .ask .ans.err { color: var(--lost); }
+    .ask .rate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 15px; }
+    .ask .sent { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--ok-bg); }
+    main.legal .faq-h { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 2px; }</style>
   <script>try { const t = localStorage.getItem("rb_theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch {}</script>
 </head>
 <body>
   <header class="top"><a class="hdr-back" href="/" style="text-decoration:none">‹ Zur App</a><a class="brand" href="/" style="text-decoration:none"><img src="/icon.svg" alt="" width="28" height="28"><span>Umstiegsheld</span></a></header>
   <main class="legal">
     <h1>Hilfe</h1>
-    <p>Umstiegsheld passt auf deine Fahrt mit Zug, S-Bahn, U-Bahn, Tram und Bus auf. Wird es knapp oder fällt etwas aus, sagt dir die App sofort Bescheid – und zeigt dir, wie du trotzdem ankommst.</p>
+    <p>Umstiegsheld passt auf deine Fahrt mit Zug, S-Bahn, U-Bahn, Tram und Bus auf. Wird es knapp oder fällt etwas aus, sagt dir die App sofort Bescheid – und zeigt dir, wie du trotzdem ankommst. Tickets verkauft sie nicht, gebucht wird nichts.</p>
+
+    <section class="ask" id="ask" aria-labelledby="askH">
+      <h2 id="askH">Frag Umstiegsheld</h2>
+      <p class="small">Stell deine Frage einfach in eigenen Worten. Die Antwort kommt aus dieser Hilfe.</p>
+      <textarea id="askQ" maxlength="500" placeholder="z. B. „Kann ich nur den zweiten Zug meiner Verbindung verschieben?“" aria-label="Deine Frage"></textarea>
+      <div class="ex" id="askEx">
+        <button type="button">Warum bekomme ich keine Mitteilungen?</button>
+        <button type="button">Warum soll ich die App installieren?</button>
+        <button type="button">Wie verschiebe ich nur einen Zug?</button>
+        <button type="button">Was tun, wenn ich den Anschluss verpasse?</button>
+      </div>
+      <button class="btn" id="askGo" style="margin-top:10px">Frage stellen</button>
+      <div id="askOut"></div>
+    </section>
+
+    <input id="q" type="search" placeholder="Oder die Themen durchsuchen, z. B. „Sparpreis“ oder „Gerät“" aria-label="Hilfe durchsuchen">
+
     <figure class="vid"><video controls playsinline preload="none" poster="/video/poster.jpg" src="/video/umstiegsheld.mp4" aria-label="Umstiegsheld in 48 Sekunden"></video>
       <figcaption>Umstiegsheld in 48 Sekunden</figcaption></figure>
-    <input id="q" type="search" placeholder="Hilfe durchsuchen, z. B. „Sparpreis“ oder „Gerät“" aria-label="Hilfe durchsuchen">
+
+    <h2>Häufige Fragen</h2>
+    <details><summary>Warum bekomme ich keine Mitteilungen?</summary>
+      <ol><li>Einstellungen (Zahnrad oben rechts) → „Mitteilungen einschalten“ tippen und im Fenster des Handys erlauben.</li>
+        <li>Auf dem iPhone geht das nur, wenn Umstiegsheld als App auf dem Home-Bildschirm liegt: in Safari „Teilen → Zum Home-Bildschirm“, dann die App von dort öffnen und Mitteilungen einschalten.</li>
+        <li>Steht „Mitteilungen sind blockiert“: in den Einstellungen des Handys (bzw. des Browsers) Mitteilungen für Umstiegsheld bzw. umstiegsheld.de wieder erlauben.</li>
+        <li>Ist die App gerade offen, kommt keine Mitteilung von außen – die Meldung erscheint dann direkt in der App.</li>
+        <li>Mitteilungen gelten pro Gerät: Auf jedem Handy und PC einmal einschalten.</li></ol>
+      <p>Die App meldet sich nur, wenn etwas zu tun ist (siehe „Wann meldet sich die App?“). Ist alles in Ordnung, bleibt sie still.</p></details>
+    <details><summary>Warum soll ich Umstiegsheld als App installieren?</summary>
+      <p>Umstiegsheld läuft im Browser, als App ist es aber zuverlässiger: Mitteilungen kommen sicherer an, die App liegt mit eigenem Symbol auf dem Startbildschirm und startet auch bei schlechtem Netz mit dem letzten Stand. Auf dem iPhone bekommst du Mitteilungen überhaupt nur als App.</p>
+      <ul><li><b>iPhone:</b> in Safari unten auf „Teilen“ → „Zum Home-Bildschirm“.</li>
+        <li><b>Android:</b> in Chrome oben rechts auf ⋮ → „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.</li></ul>
+      <p>Deine Fahrten nimmst du mit: Hast du schon im Browser Fahrten angelegt, in der App unter Einstellungen „Code eingeben“ (siehe „Mehrere Geräte“).</p></details>
+    <details><summary>Kann ich nur einen Zug meiner Verbindung verschieben?</summary>
+      <p>Ja. Fahrt öffnen → „✎ Ändern“. Jede Teilstrecke ist ein eigener Baustein mit ‹ und ›: damit nimmst du genau dieses Stück früher oder später, auch mit einer anderen Linie. Der Rest bleibt, wie er ist.</p>
+      <ul><li>Bei jedem Umstieg steht, wie viel Zeit bleibt und wie viel davon Fußweg ist. Wird es knapper als deine Umstiegszeit, siehst du einen Hinweis.</li>
+        <li>Erreichst du mit deiner Wahl den nächsten Zug nicht mehr, steht dort „Anschluss verpasst – so nicht möglich“ – dann den nächsten Baustein auch verschieben.</li>
+        <li>„So übernehmen“ speichert. Bei einem knappen Umstieg oder Sparpreis fragt die App vorher nach.</li>
+        <li>„📍 Ich starte woanders“: anderer Startort, das Ziel bleibt. „Ganz neu suchen“: anderer Tag oder anderes Ziel.</li>
+        <li>Bei einer regelmäßigen Fahrt gilt die Änderung nur für diesen Tag.</li></ul></details>
+    <details><summary>Ich habe meinen Anschluss verpasst – was jetzt?</summary>
+      <p>Die Fahrt wird rot und oben steht „Empfohlen:“ mit der besten Möglichkeit und dem Knopf „Die nehme ich“. Unter „Plan B“ findest du bis zu drei Möglichkeiten mit Begründung. Tippst du „Diese nehmen“, überwacht die App ab sofort die neue Verbindung – gebucht wird nichts.</p>
+      <p>Bist du gar nicht erst eingestiegen: „Doch nicht eingestiegen? Neu suchen“ in der Einsteigen-Karte. Hast du ihn doch noch erwischt: „Doch erwischt – zurück zum Plan“.</p></details>
+    <details><summary>Warum sehe ich meine regelmäßige Fahrt noch nicht auf der Startseite?</summary>
+      <p>Regelmäßige Fahrten legt die App am Fahrtag selbst an: nur mit Bus, Tram, S-/U-Bahn und Regionalzügen etwa 1 Stunde vor der Abfahrt, mit Fernzug (ICE, IC, EC …) oder als Zeitfenster etwa 3 Stunden vorher. Bis dahin steht sie unten unter „Regelmäßige Fahrten demnächst“ mit „Überwachung ab …“.</p></details>
+    <details><summary>Warum fehlt bei manchen Fahrten der Knopf „Ticket kaufen“?</summary>
+      <p>Er erscheint nur, wenn du wahrscheinlich noch kein Ticket hast: bei „Flexpreis / weiß nicht“ und wenn ein Zug dabei ist. Bei Sparpreis, Deutschlandticket oder BahnCard 100 fehlt er – das Ticket ist dann schon da. Beim Einlesen eines Tickets erkennt die App den Sparpreis meist selbst. Ändern kannst du das unter „Einstellungen dieser Fahrt“ → Ticket.</p></details>
+    <details><summary>Wie früh prüft die App meine Fahrt?</summary>
+      <p>Schon einige Stunden vor der Abfahrt, dann immer häufiger: anfangs alle 15–30 Minuten, in der letzten Stunde alle paar Minuten und bei Verspätung oder knappem Umstieg jede Minute. Live-Daten gibt es bei Zügen oft erst einige Zeit vor der Abfahrt, bei Bussen meist erst kurz vorher. Bis dahin steht „Geplant – laut Fahrplan passt alles“.</p></details>
+    <details><summary>Brauche ich ein Konto?</summary>
+      <p>Nein – keine E-Mail, kein Passwort. Deine Fahrten hängen an deinem Gerät. Damit sie nicht verloren gehen (neues Handy, Browserdaten gelöscht), erstell in den Einstellungen einen Wiederherstellungscode und heb ihn gut auf.</p></details>
+    <details><summary>Funktioniert Umstiegsheld auch außerhalb von Berlin?</summary>
+      <p>Ja, Züge in ganz Deutschland mit Echtzeit der Deutschen Bahn. Bus, Tram und U-Bahn gibt es live derzeit nur in Berlin und Brandenburg (VBB), anderswo nach Fahrplan. Ins Ausland fehlen manchmal Züge – dann hilft „Bei der Bahn gegenprüfen“.</p></details>
 
     <h2>Die Startseite</h2>
-    <details open><summary>＋ Neue Fahrt</summary>
-      <p>Von wo nach wo, wann – und welche Verbindung. Danach überwacht die App die Fahrt bis zur Ankunft. Du kannst auch „Direkt aus der Abfahrtstafel wählen“, wenn du schon am Bahnhof stehst und den Zug kennst.</p></details>
-    <details><summary>↻ Regelmäßige Fahrten</summary>
-      <p>Für Schulweg, Arbeitsweg oder Training: Titel, Tage und Uhrzeit festlegen, dann Start und Ziel. An jedem Fahrtag legt die App die Fahrt ein paar Stunden vorher selbst an und meldet sich nur, wenn etwas nicht passt.</p>
-      <ul><li><b>Feste Abfahrt:</b> immer dieselbe Verbindung, z. B. 07:40.</li>
-        <li><b>Zeitfenster:</b> z. B. „zwischen 7 und 8“. Die App überwacht die nächste Fahrt im Fenster und zeigt die späteren zur Auswahl. Nimmst du eine andere, tipp sie an. Ist eine abgefahren, während du schon drin sitzt: „Ich sitze in der …“.</li>
-        <li>Einzelne Tage aussetzen („Heute nicht fahren“), ganz pausieren (Urlaub) oder beenden – alles unter „Regelmäßige Fahrten“. An Feiertagen (Berlin) fährt die App auf Wunsch nicht mit.</li></ul></details>
-    <details><summary>🎫 Gebuchte Reise überwachen</summary>
-      <p>Ticket (PDF), Screenshot aus dem DB Navigator oder geteilten Link/Text einfügen. Eine KI liest die Verbindung heraus, du prüfst kurz und legst sie an. Auf dem Android-Handy geht auch „Teilen → Umstiegsheld“. Pro Tag sind 10 Einlesungen möglich.</p></details>
+    <details><summary>Was steht ganz oben?</summary>
+      <p>Die nächste Fahrt als große Kachel mit Abfahrt, Linie, Gleis bzw. Steig und Ankunft. Die Farbe zeigt auf einen Blick, wie es aussieht (siehe „Was die Farben bedeuten“). Darunter: „Demnächst“ (heute, morgen), „Später“ (eingeklappt), „Regelmäßige Fahrten demnächst“ und „Erledigt“.</p></details>
+    <details><summary>＋ Neue Fahrt</summary>
+      <ul><li><b>Von / Nach:</b> Bahnhof oder Haltestelle eintippen oder „📍 Mein Standort“. „⇅ Tauschen“ dreht Start und Ziel (z. B. für die Rückfahrt).</li>
+        <li><b>„Abfahrt ab“ oder „Ankunft bis“:</b> ab einer Uhrzeit losfahren – oder spätestens dann ankommen. Schnellwahl: Jetzt, +30 Min., +1 Std., +2 Std., oder Tag und Uhrzeit wählen.</li>
+        <li><b>„Nur Nahverkehr“:</b> ohne ICE/IC – z. B. mit Deutschlandticket.</li>
+        <li><b>Umstiegszeit:</b> wie viel Zeit du mindestens zum Umsteigen brauchst. Die Suche zeigt dann nur Verbindungen, die dazu passen.</li>
+        <li>In der Liste: „↑ Frühere“ bzw. „↓ Spätere Verbindungen“ und „⏱ Mehr Puffer beim Umsteigen“.</li>
+        <li>Verbindung antippen → „Passt das so?“ → „Weiter“ → welches Ticket du hast. Danach überwacht die App die Fahrt bis zur Ankunft. Auf Wunsch schlägt sie gleich die Rückfahrt vor.</li>
+        <li>„Direkt aus der Abfahrtstafel wählen“, wenn du schon am Bahnhof stehst und den Zug kennst.</li></ul></details>
+    <details><summary>🎫 Gebuchte Fahrt überwachen</summary>
+      <p>Ticket (PDF), Screenshot aus dem DB Navigator oder geteilten Link/Text einfügen. Eine KI liest die Verbindung heraus, du prüfst kurz und legst sie an. Auf dem Android-Handy geht auch „Teilen → Umstiegsheld“. Pro Tag sind 10 Einlesungen möglich. Mehrere Fahrten in einem Ticket (z. B. Hin- und Rückfahrt) legst du nacheinander an.</p></details>
     <details><summary>⌖ Schnell weg</summary>
       <p>Ab deinem Standort, ab jetzt – nur noch das Ziel antippen. Ideal, wenn du spontan los musst.</p></details>
-    <details><summary>⇄ Verspätung? Plan B suchen · SOS</summary>
-      <p>Erscheint, sobald du unterwegs bist und noch umsteigen musst. Die App zeigt, wo du aussteigen kannst, ob du sitzen bleibst und wie du am schnellsten ans Ziel kommst. Rot wird die Kachel nur, wenn dein Anschluss wirklich in Gefahr ist.</p></details>
+    <details><summary>SOS / „Anschluss wird knapp“</summary>
+      <p>Sitzt du im Zug und dein Anschluss ist in Gefahr, wird die vierte Kachel zu „SOS: Anschluss in Gefahr“ (bei knappem Umstieg: „Anschluss wird knapp“). Ein Tipp öffnet die Fahrt mit deinen Möglichkeiten.</p></details>
 
-    <h2>Was die Farben und Worte bedeuten</h2>
-    <details open><summary>Von grün bis rot</summary>
-      <ul><li><span class="tag t-ok">Alles gut</span> – läuft nach Plan.</li>
+    <h2>Eine Fahrt ansehen</h2>
+    <details><summary>Die Knöpfe oben: Favorit, Teilen, Ticket kaufen, Ändern, Löschen</summary>
+      <ul><li><b>☆ Favorit:</b> merken. Unter „Neue Fahrt“ findest du deine Favoriten wieder, mit Kalender, um sie an einem anderen Tag schnell anzulegen.</li>
+        <li><b>↗ Teilen:</b> „Ankunft & Live-Link“ – kurze Nachricht mit deiner Ankunftszeit, über den Link sieht man jederzeit den aktuellen Stand (gut fürs Abholen). Oder „Verbindung zum Übernehmen“ – andere legen genau diese Fahrt in ihrem Umstiegsheld an.</li>
+        <li><b>🛒 Ticket kaufen:</b> öffnet die Verbindung bei der Bahn (siehe „Häufige Fragen“).</li>
+        <li><b>✎ Ändern:</b> einzelne Teilstrecken verschieben (siehe „Kann ich nur einen Zug … verschieben?“).</li>
+        <li><b>🗑 Löschen:</b> Fahrt wird nicht mehr überwacht und verschwindet.</li></ul></details>
+    <details><summary>Einsteigen, Umsteigen, „Wann muss ich los?“</summary>
+      <p>Die Karte darunter zeigt immer den nächsten Schritt: Einsteigen, Umsteigen, nächster Halt oder Ankunft – mit Gleis bzw. Steig und Verspätung. Gibt es einen Fußweg zwischen zwei Haltestellen, führt „Weg zeigen“ dich in der Karten-App hin.</p>
+      <p>In den letzten 2 Stunden vor der Abfahrt: „Wann muss ich los?“ – „🚶 Zu Fuß“ oder „🚗 Mit dem Auto“ ab deinem Standort zum Einstieg.</p></details>
+    <details><summary>Verlauf</summary>
+      <p>Alle Teilstrecken mit Plan- und aktueller Zeit (durchgestrichen = geplant, farbig = aktuell), dazwischen jeder Umstieg mit Zeit, Fußweg und Gleis. „noch ohne Live-Zeit“ heißt: Es gibt noch keine Echtzeit, die Zeit ist laut Fahrplan.</p></details>
+    <details><summary>Einstellungen dieser Fahrt</summary>
+      <p>Ganz unten in der Fahrt: eigene Umstiegszeit nur für diese Fahrt, Ticket (Sparpreis, Flexpreis / weiß nicht, Deutschlandticket, BahnCard 100 – wichtig für die Hinweise zur Zugbindung), „Regelmäßig überwachen“ (z. B. Mo–Fr) und „Fahrt löschen“. Bei regelmäßigen Fahrten auch „Heute nicht fahren“, „Pausieren“ und „Regelmäßig beenden“.</p></details>
+    <details><summary>Geteilte Fahrt mitverfolgen</summary>
+      <p>Hat dir jemand seine Ankunft mit Live-Link geteilt, kannst du dort „In Umstiegsheld mitverfolgen“ tippen (👀). Du bekommst dann die Mitteilungen aus Sicht der abholenden Person. Nimmt die reisende Person unterwegs eine andere Verbindung, zieht deine Ansicht automatisch nach. „Nicht mehr mitverfolgen“ beendet das.</p></details>
+
+    <h2>Plan B – wenn es knapp wird</h2>
+    <details><summary>Wann erscheint Plan B?</summary>
+      <p>Sobald es Live-Abweichungen gibt: knapper Umstieg, gefährdeter oder verpasster Anschluss, Ausfall. Vorher passt du die Fahrt über „Ändern“ an. Die Plan-B-Kachel ist gelb bei „knapp“, orange bei „gefährdet“ und rot bei „Anschluss weg“; ein Tipp klappt sie auf.</p></details>
+    <details><summary>Was zeigt Plan B?</summary>
+      <ul><li>„Dein Plan“ in einer Zeile – Ankunft und was gerade los ist.</li>
+        <li>„Diese Möglichkeiten klappen eher“: höchstens drei, die empfohlene oben mit blauem Rahmen. Bei jeder steht, wann du ankommst und warum sie eher klappt – z. B. „23 Min. zum Umsteigen statt nur 4 Min.“, „Ohne Umstieg“, „Live geprüft: pünktlich“, oder als Warnung „Sparpreis gilt hier evtl. nicht“.</li>
+        <li>„Diese nehmen“ stellt um (gebucht wird nichts). „Züge zeigen“ zeigt alle Teilstrecken. Weitere Möglichkeiten lassen sich aufklappen.</li>
+        <li>Gibt es nichts Besseres, steht das ehrlich da: „Dein Plan ist gerade die beste Möglichkeit“.</li>
+        <li>„Zurück zum alten Plan“ macht einen Wechsel rückgängig.</li></ul></details>
+    <details><summary>🔎 Selbst suchen</summary>
+      <p>Unten in Plan B. Vor der Abfahrt: ab deinem Start zur Reisezeit, ab deinem Standort zur Reisezeit oder ab deinem Standort jetzt. Unterwegs: „Woanders aussteigen“ (Ausstiege entlang deines Zuges), ab dem nächsten Halt oder ab deinem Standort.</p></details>
+    <details><summary>Heute kommst du nicht mehr ans Ziel</summary>
+      <p>Führt die beste Möglichkeit über Nacht, sagt die App das klar: „Heute kommst du nicht mehr nach …“, mit frühester Ankunft und wo du übernachten müsstest. Du kannst wählen: morgen früh weiter, heute noch so weit wie möglich – oder, wenn du erst kurz unterwegs bist, zurück nach Hause. „Bei der Bahn gegenprüfen“ öffnet die Verbindung bei der Bahn. Hotel: Bei durchgehend gebuchtem Ticket zahlt meist die Bahn – frag im Reisezentrum.</p></details>
+
+    <h2>Regelmäßige Fahrten</h2>
+    <details><summary>Anlegen: feste Abfahrt oder Zeitfenster</summary>
+      <p>„↻ Regelmäßige Fahrten“ → „＋ Neue regelmäßige Fahrt“: Name (z. B. Schule, Arbeit), Tage, Uhrzeit, dann Start und Ziel. Oder bei einer Fahrt unter „Einstellungen dieser Fahrt“ → „Regelmäßig überwachen“.</p>
+      <ul><li><b>Feste Abfahrt:</b> immer dieselbe Verbindung, z. B. 07:40.</li>
+        <li><b>Zeitfenster:</b> z. B. „zwischen 7 und 8“. Die App überwacht die erste Fahrt im Fenster und zeigt die späteren zur Auswahl – die erste nimmt sie, wenn du nichts wählst.</li>
+        <li>Nach dem Speichern bietet die App „Rückweg anlegen“ an.</li></ul></details>
+    <details><summary>Aussetzen, pausieren, ändern</summary>
+      <ul><li>„Heute nicht fahren“ bzw. „Diese Tage aussetzen“ (z. B. Urlaub, Ferien), „Pausieren“ (bis auf Weiteres), „Löschen“.</li>
+        <li>„An Feiertagen (Berlin) nicht fahren“ lässt sich an- und abschalten.</li>
+        <li>„Zeit oder Strecke ändern“, „Umbenennen“, „↗ Teilen“.</li>
+        <li>Ändert sich der Fahrplan, nimmt die App die nächstpassende Verbindung und sagt dir Bescheid.</li></ul></details>
+
+    <h2>Was die Farben bedeuten</h2>
+    <details><summary>Von grün bis rot</summary>
+      <ul><li><span class="tag t-ok">Alles gut</span> – läuft nach Plan. Auch „Geplant – laut Fahrplan passt alles“, solange es noch keine Live-Daten gibt.</li>
+        <li>Neutral mit blauem Rand – schon laut Fahrplan knapp geplant. Über „Ändern“ kannst du mehr Puffer wählen.</li>
         <li><span class="tag t-w">Knapp</span> – der Umstieg wird enger oder die Fahrt etwas später. Noch nichts zu tun.</li>
-        <li><span class="tag t-r">Anschluss gefährdet</span> – es kann knapp werden. Die App sucht schon Ausweichmöglichkeiten.</li>
-        <li><span class="tag t-r">Anschluss klappt wohl nicht</span> – nach der aktuellen Verspätung kommst du zu spät. Kann sich noch ändern.</li>
-        <li><span class="tag t-l">Anschluss klappt nicht – Plan B</span> – Zug fällt aus oder ist weg. Unter „So kommst du jetzt weiter“ stehen deine Möglichkeiten, die empfohlene ist markiert.</li></ul></details>
-    <details><summary>Deine Möglichkeiten, „empfohlen“ und „Diese Verbindung nehmen“</summary>
-      <p>Bei jeder Möglichkeit steht, wann du losfährst, wann du ankommst und ob die Züge gerade pünktlich sind. „Dein Plan“ steht zum Vergleich obendrüber. Tippst du „Diese Verbindung nehmen“, überwacht die App ab sofort die neue Verbindung – gebucht wird nichts. Mit „Zurück zum alten Plan“ kannst du es rückgängig machen.</p></details>
-    <details><summary>Meine Umstiegszeit</summary>
-      <p>In den Einstellungen legst du fest, wie viele Minuten du mindestens zum Umsteigen brauchst. Genau diese Zeit reicht – „knapp“ wird es erst darunter. Die Verbindungssuche zeigt dann nur Verbindungen, die dazu passen.</p></details>
+        <li><span class="tag t-r">Anschluss gefährdet</span> – es kann knapp werden. Die App sucht schon Möglichkeiten (Plan B).</li>
+        <li><span class="tag t-l">Anschluss weg</span> – Zug fällt aus oder ist weg. Oben steht die empfohlene Möglichkeit.</li></ul></details>
     <details><summary>Gleis oder Steig?</summary>
       <p>Züge halten an Gleisen, Busse und Trams an Steigen. Ändert sich ein Gleis, siehst du „Gleiswechsel“ und bekommst eine Mitteilung.</p></details>
 
     <h2>Mitteilungen</h2>
     <details><summary>Wann meldet sich die App?</summary>
-      <p>Bei Ausfällen, gefährdeten oder verpassten Anschlüssen, Gleiswechseln, deutlich späterer Abfahrt und kurz vor dem Aussteigen. Mehrere Meldungen zur selben Fahrt kommen zusammen in einer Mitteilung. Tippst du darauf, öffnet sich genau diese Fahrt.</p>
-      <p>Einschalten: Einstellungen → Mitteilungen erlauben. Auf dem iPhone geht das nur, wenn du die App vorher über „Teilen → Zum Home-Bildschirm“ installiert hast.</p></details>
+      <p>Bei Ausfällen, gefährdeten oder verpassten Anschlüssen, Gleiswechseln, deutlich späterer Abfahrt und kurz vor dem Aussteigen. Mehrere Meldungen zur selben Fahrt kommen zusammen in einer Mitteilung. Tippst du darauf, öffnet sich genau diese Fahrt. Ist die App gerade offen, erscheint die Meldung direkt in der App.</p></details>
 
-    <h2>Sparpreis und Zugbindung</h2>
+    <h2>Sparpreis und Tickets</h2>
     <details><summary>Darf ich einen anderen Zug nehmen?</summary>
-      <p>Mit Sparpreis bist du an deine Fernzüge gebunden. Die App zeigt dir, wann die Zugbindung nach den DB-Regeln voraussichtlich aufgehoben ist – z. B. bei Ausfall, absehbar verpasstem Anschluss oder mindestens 20 Minuten Verspätung. Wo „Sparpreis gilt hier evtl. nicht“ steht, wäre es ein anderer Fernzug. Die Zugbindung gilt nur für Fernzüge wie ICE, IC und EC. Maßgeblich sind immer die Bedingungen deines Tickets – alle Angaben ohne Gewähr.</p></details>
+      <p>Mit Sparpreis bist du an deine Fernzüge gebunden. Die App zeigt dir, wann die Zugbindung nach den DB-Regeln voraussichtlich aufgehoben ist – z. B. bei Ausfall, absehbar verpasstem Anschluss oder mindestens 20 Minuten Verspätung. Wo „Sparpreis gilt hier evtl. nicht“ steht, wäre es ein anderer Fernzug. Die Zugbindung gilt nur für Fernzüge wie ICE, IC und EC; Bus, S-/U-Bahn und Regionalzüge darfst du frei wählen. Maßgeblich sind immer die Bedingungen deines Tickets – alle Angaben ohne Gewähr.</p></details>
+    <details><summary>Deutschlandticket im ICE?</summary>
+      <p>Das Deutschlandticket gilt nicht im Fernverkehr (ICE, IC, EC). Wählst du es für eine Verbindung mit Fernzug, weist die App darauf hin. Mit „Nur Nahverkehr“ in der Suche bekommst du nur passende Verbindungen; Plan B schlägt dir dann keine Fernzüge vor.</p></details>
 
-    <h2>Mehrere Geräte</h2>
+    <h2>Einstellungen und Geräte</h2>
+    <details><summary>Darstellung und übliche Umstiegszeit</summary>
+      <p>Zahnrad oben rechts: Darstellung (Automatisch, Hell, Dunkel) und „Meine übliche Umstiegszeit“ für neue Fahrten. Bei einer einzelnen Fahrt änderst du sie unter „Einstellungen dieser Fahrt“.</p></details>
     <details><summary>Handy und PC verbinden</summary>
-      <p>Einstellungen → „Gerät hinzufügen“ → Code anzeigen. Auf dem anderen Gerät unter Einstellungen „Code eingeben“. Danach siehst du überall dieselben Fahrten, regelmäßigen Fahrten und Favoriten. Ein Konto mit E-Mail oder Passwort brauchst du nicht.</p></details>
-    <details><summary>Favoriten</summary>
-      <p>In einer Fahrt auf ☆ Favorit tippen. Unter „Neue Fahrt“ findest du sie wieder – mit Kalender, um sie an einem anderen Tag schnell anzulegen.</p></details>
+      <p>Einstellungen → „Gerät hinzufügen“ → Code anzeigen. Auf dem anderen Gerät unter Einstellungen „Code eingeben“. Danach siehst du überall dieselben Fahrten, regelmäßigen Fahrten und Favoriten. Mitteilungen schaltest du auf jedem Gerät selbst ein.</p></details>
+    <details><summary>Wiederherstellungscode</summary>
+      <p>Einstellungen → „Wiederherstellungscode erstellen“. Damit holst du alles zurück, wenn das Handy weg ist oder die Browserdaten gelöscht wurden: unter „Deine Geräte“ → „Code eingeben“. Heb den Code gut auf – ohne ihn sind die Fahrten dann nicht mehr erreichbar.</p></details>
 
     <h2>Gut zu wissen</h2>
     <details><summary>Wann verschwinden Fahrten?</summary>
       <p>Eine halbe Stunde nach der Ankunft ist die Fahrt erledigt und verschwindet von der Startseite (spätestens 4 Stunden nach der geplanten Ankunft). Spätestens etwa 5 Stunden nach der Ankunft wird sie ganz gelöscht. Selbst löschen: Fahrt öffnen → 🗑 Löschen.</p></details>
     <details><summary>Ohne Netz</summary>
-      <p>Im Funkloch zeigt die App den letzten bekannten Stand mit Uhrzeit. Sobald wieder Netz da ist, aktualisiert sie sich.</p></details>
+      <p>Im Funkloch zeigt die App den letzten bekannten Stand mit Uhrzeit. Sobald wieder Netz da ist, aktualisiert sie sich. Dauert eine Anfrage zu lange, sagt die App das, statt endlos zu laden – dann einfach noch einmal tippen.</p></details>
     <details><summary>Woher kommen die Daten?</summary>
-      <p>Züge: Echtzeit der Deutschen Bahn. Bus, Tram und U-Bahn: in Berlin und Brandenburg live über die VBB-Auskunft, sonst nach Fahrplan. Verbindungssuche: Transitous. Live wird je nach Nähe zur Abfahrt jede Minute bis alle 15 Minuten geprüft.</p></details>
+      <p>Züge: Echtzeit der Deutschen Bahn. Bus, Tram und U-Bahn: in Berlin und Brandenburg live über die VBB-Auskunft, sonst nach Fahrplan. Verbindungssuche: Transitous. Tickets und Screenshots werden mit KI (Claude) ausgelesen, Fragen in „Frag Umstiegsheld“ ebenso beantwortet.</p></details>
     <details><summary>Fahrrad, Rollstuhl, Kinderwagen, großes Gepäck</summary>
-      <p>Das berücksichtigt Umstiegsheld (noch) nicht: Die vorgeschlagenen Verbindungen und Ausweichmöglichkeiten sagen nichts darüber, ob ein Fahrrad mitfahren darf, ob es Aufzüge oder einen stufenlosen Einstieg gibt oder ob Platz für Sondergepäck ist. Bitte prüfe das vor der Fahrt bei der Bahn (bahn.de bzw. DB Navigator) oder deinem Verkehrsverbund. Für Hilfe beim Ein-, Um- und Aussteigen ist der Mobilitätsservice der Bahn zuständig. Gut möglich, dass das später dazukommt.</p></details>
+      <p>Das berücksichtigt Umstiegsheld (noch) nicht: Die vorgeschlagenen Verbindungen und Möglichkeiten sagen nichts darüber, ob ein Fahrrad mitfahren darf, ob es Aufzüge oder einen stufenlosen Einstieg gibt oder ob Platz für Sondergepäck ist. Bitte prüfe das vor der Fahrt bei der Bahn (bahn.de bzw. DB Navigator) oder deinem Verkehrsverbund. Für Hilfe beim Ein-, Um- und Aussteigen ist der Mobilitätsservice der Bahn zuständig.</p></details>
     <details><summary>Was die App nicht kann</summary>
       <p>Sie verkauft keine Tickets, bucht nichts und ersetzt nicht die Anzeige am Bahnsteig. Alle Angaben ohne Gewähr.</p></details>
 
     <h2>Noch Fragen?</h2>
-    <p>Schreib an <a href="mailto:kontakt@umstiegsheld.de">kontakt@umstiegsheld.de</a> – Lob, Kritik und Ideen sind willkommen. Mehr darüber, warum es Umstiegsheld gibt: <a href="/ueber.html">Über Umstiegsheld</a>.</p>
+    <p>Frag oben bei „Frag Umstiegsheld“. Hat die Antwort nicht geholfen, kannst du deine Frage dort direkt an Umstiegsheld schicken – sie fließt in die nächsten Updates ein. Mehr darüber, warum es Umstiegsheld gibt: <a href="/ueber.html">Über Umstiegsheld</a>.</p>
     <script>
       // Suche: nur passende Abschnitte zeigen und öffnen
-      const q = document.getElementById("q"), ds = [...document.querySelectorAll("details")];
+      const q = document.getElementById("q"), ds = [...document.querySelectorAll("main.legal details")];
       q.oninput = () => { const v = q.value.trim().toLowerCase();
         ds.forEach(d => { const hit = !v || d.textContent.toLowerCase().includes(v); d.hidden = !hit; if (v) d.open = hit; });
-        document.querySelectorAll("main.legal h2").forEach(h => { let n = h.nextElementSibling, any = false; while (n && n.tagName === "DETAILS") { any ||= !n.hidden; n = n.nextElementSibling; } h.hidden = !!v && !any; }); };
+        document.querySelectorAll("main.legal > h2").forEach(h => { let n = h.nextElementSibling, any = false; while (n && n.tagName === "DETAILS") { any ||= !n.hidden; n = n.nextElementSibling; } h.hidden = !!v && !any; }); };
+
+      // Frag Umstiegsheld: gleiche Geräte-Anmeldung wie die App
+      const $ = id => document.getElementById(id), out = $("askOut"), esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      let AUTH = null; try { AUTH = JSON.parse(localStorage.getItem("rb_auth") || "null"); } catch {}
+      async function call(path, body) {
+        if (!AUTH) { const r = await fetch("/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Gerät" }) });
+          if (!r.ok) throw new Error("Das hat gerade nicht geklappt. Bitte gleich noch einmal versuchen."); AUTH = await r.json(); try { localStorage.setItem("rb_auth", JSON.stringify(AUTH)); } catch {} }
+        const ac = new AbortController(), to = setTimeout(() => ac.abort(), 35000);
+        const r = await fetch(path, { method: "POST", signal: ac.signal, headers: { "Content-Type": "application/json", Authorization: `Bearer ${AUTH.id}.${AUTH.token}` }, body: JSON.stringify(body) })
+          .catch(e => { throw new Error(e.name === "AbortError" ? "Das hat zu lange gedauert. Bitte noch einmal versuchen." : "Keine Verbindung zum Internet."); });
+        clearTimeout(to); const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "Das hat gerade nicht geklappt."); return d;
+      }
+      let cur = null;
+      const sendBox = () => `<div id="sendBox" style="margin-top:10px"><p class="small" style="margin:0 0 6px">Dann schick die Frage an Umstiegsheld – sie wird für die nächsten Updates berücksichtigt.</p>
+        <textarea id="sendNote" maxlength="1000" placeholder="Was fehlt dir noch? (freiwillig, z. B. was du vorhattest)"></textarea>
+        <button class="btn sec" id="sendGo" style="margin-top:8px">An Umstiegsheld senden</button></div>`;
+      function showAnswer(d) {
+        cur = d;
+        out.innerHTML = `<div class="ans">${esc(d.a)}</div>${d.id ? `<div class="rate" id="rate"><span>Hat das geholfen?</span><button class="btn sec mini" data-r="1">👍 Ja</button><button class="btn sec mini" data-r="0">Nein</button></div>${d.unsure ? sendBox() : ""}` : ""}`;
+        bind();
+      }
+      function bind() {
+        out.querySelectorAll("[data-r]").forEach(b => b.onclick = async () => {
+          const yes = b.dataset.r === "1"; call(`/api/help/${cur.id}/rate`, { helpful: yes }).catch(() => {});
+          $("rate").innerHTML = yes ? "<span>Danke! 🙂</span>" : "<span>Schade.</span>";
+          if (!yes && !$("sendBox")) { out.insertAdjacentHTML("beforeend", sendBox()); bind(); $("sendNote").focus(); }
+        });
+        const sg = $("sendGo"); if (sg) sg.onclick = async () => {
+          sg.disabled = true; sg.textContent = "Wird gesendet …";
+          try { await call(`/api/help/${cur.id}/send`, { note: $("sendNote").value });
+            $("sendBox").outerHTML = `<div class="sent">Danke, ist angekommen! Deine Frage wird für ein kommendes Update berücksichtigt.</div>`; }
+          catch (e) { sg.disabled = false; sg.textContent = "An Umstiegsheld senden"; alert(e.message); }
+        };
+      }
+      $("askGo").onclick = async () => {
+        const v = $("askQ").value.trim(); if (v.length < 3) { $("askQ").focus(); return; }
+        const b = $("askGo"); b.disabled = true; b.textContent = "Einen Moment …"; out.innerHTML = `<div class="ans" style="color:var(--muted)">Ich schaue in der Hilfe nach …</div>`;
+        try { showAnswer(await call("/api/help/ask", { q: v, ver: "web" })); }
+        catch (e) { out.innerHTML = `<div class="ans err">${esc(e.message)}</div>`; }
+        b.disabled = false; b.textContent = "Frage stellen";
+      };
+      $("askEx").querySelectorAll("button").forEach(x => x.onclick = () => { $("askQ").value = x.textContent; $("askGo").click(); });
+      $("askQ").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("askGo").click(); } });
     </script>
   </main>
 </body>

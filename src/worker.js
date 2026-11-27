@@ -4,6 +4,7 @@ import * as db from "./db.js";
 import { searchStations, byEva, nearby } from "./stations.js";
 import { connections, resolveConnection, segmentOptions, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime, searchPlaces } from "./routing.js";
 import { importTrip, onlyBahnLink } from "./importer.js";
+import { answer as helpAnswer, mailOwner } from "./help.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
@@ -283,6 +284,30 @@ async function api(req, env, url) {
   if (!dev) return fail(401, "Gerät unbekannt");
   // Wer etwas anlegt oder speichert, nutzt die App wirklich (für die Zahl „echte Nutzer“)
   if (method !== "GET" && /^\/api\/(trips|routines|favs|places|push|import|follow|recovery|devices\/join)/.test(p)) await db.markUsed(env, dev.account_id);
+
+  // Hilfe: Frage in eigenen Worten → Antwort aus dem Hilfetext; nicht geholfen → an Umstiegsheld schicken
+  if (p === "/api/help/ask" && method === "POST") {
+    const b = await req.json().catch(() => ({})), q = String(b.q || "").trim().slice(0, 500);
+    if (q.length < 3) return fail(400, "Bitte stell deine Frage in ein paar Worten.");
+    if (!(await db.guard(env, `help:${dev.account_id}`, 86400, 30)) || !(await db.guard(env, "help-all", 86400, 1500))) return fail(429, "Heute sind schon viele Fragen gestellt worden. Schau unten in die Themen – oder morgen wieder.");
+    const r = await helpAnswer(env, url.origin, q);
+    const row = await db.insert(env, "rb_help", { account_id: dev.account_id, q, a: r.a, unsure: r.unsure, ver: String(b.ver || "").slice(0, 20) }).catch(() => null);
+    return json({ id: row?.id || null, a: r.a, unsure: r.unsure });
+  }
+  const mhelp = /^\/api\/help\/([0-9a-f-]{36})\/(rate|send)$/i.exec(p);
+  if (mhelp && method === "POST") {
+    const h = await db.get(env, "rb_help", mhelp[1]);
+    if (!h || h.account_id !== dev.account_id) return fail(404, "Frage nicht gefunden");
+    const b = await req.json().catch(() => ({}));
+    if (mhelp[2] === "rate") { await db.update(env, "rb_help", h.id, { helpful: !!b.helpful }); count(b.helpful ? "help_yes" : "help_no"); return json({ ok: true }); }
+    if (h.sent_at) return json({ ok: true, mailed: !!h.mailed });
+    if (!(await db.guard(env, `helpsend:${dev.account_id}`, 86400, 10))) return fail(429, "Du hast heute schon einiges geschickt – danke! Morgen geht wieder mehr.");
+    const note = String(b.note || "").trim().slice(0, 1000);
+    const mailed = await mailOwner(env, `Hilfe-Frage: ${h.q.slice(0, 60)}`, `Frage:\n${h.q}\n\nAntwort der Hilfe:\n${h.a || "–"}\n\nErgänzung:\n${note || "–"}\n\n${h.unsure ? "Die Hilfe war sich unsicher." : ""}\nVersion: ${h.ver || "?"} · ${new Date().toISOString()}\nKonto: ${String(dev.account_id).slice(0, 8)}`).catch(e => { console.log("Mail:", e.message); return false; });
+    await db.update(env, "rb_help", h.id, { sent_at: new Date().toISOString(), note: note || null, mailed, helpful: false });
+    count("help_sent");
+    return json({ ok: true, mailed });
+  }
 
   if (p === "/api/stations") {
     const q = url.searchParams.get("q") || "", st = await searchStations(env, q);
@@ -954,8 +979,8 @@ async function adminStats(req, env) {
   let diff = key.length ^ want.length; for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ (key.charCodeAt(i) || 0);
   if (want.length < 16 || diff) { await new Promise(r => setTimeout(r, 400)); return fail(403, "Kein Zugriff"); }
   await flush(env).catch(() => {});
-  const [rows, ov] = await Promise.all([db.statsSince(env, new Date(Date.now() - 28 * 864e5).toISOString()), db.overview(env).catch(() => null)]);
-  return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  const [rows, ov, help] = await Promise.all([db.statsSince(env, new Date(Date.now() - 28 * 864e5).toISOString()), db.overview(env).catch(() => null), db.helpSent(env).catch(() => [])]);
+  return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov, help }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
 export default {

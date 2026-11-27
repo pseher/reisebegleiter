@@ -56,7 +56,7 @@
       $m.innerHTML = `<div class="spinner"></div>`;
       const r = await fetch("/api/admin/stats", { headers: { "X-Admin-Key": key() } }).catch(() => null);
       if (!r || r.status === 403) { localStorage.removeItem("rb_admin"); return login(r ? "Schlüssel stimmt nicht." : "Keine Verbindung."); }
-      const { rows, ov } = await r.json(), o = ov || {}, now = Date.now();
+      const { rows, ov, help } = await r.json(), o = ov || {}, now = Date.now();
       // ---- Zahlen aus den Stunden-Zeilen: Spalten (db, vbb …) und Ereignisse (ev)
       const val = (x, k) => (k in x ? +x[k] || 0 : +(x.ev?.[k]) || 0);
       const inDays = (a, b) => rows.filter(x => { const t = Date.parse(x.hour); return t > now - a * 864e5 && t <= now - b * 864e5; });
@@ -130,6 +130,17 @@
           ${kpi("Kosten", usd(cost(W)), `7 Tage · Monat bisher ${usd(costMonth)} (geschätzt)`)}
         </div>`;
 
+      // ---- Hilfe: Fragen und an dich geschickte Anliegen
+      const hl = help || [];
+      const helpSec = `<h2 class="sec">Hilfe</h2><p class="sec-sub">„Frag Umstiegsheld“ (letzte 7 Tage) und Fragen, die an dich geschickt wurden – die Antwort hat nicht gereicht.</p>
+        <div class="kpis">
+          ${wk("Fragen", ["help_ask"], "")}
+          ${kpi("Hat geholfen", `${S(W, "help_yes")} · ${S(W, "help_no")}`, "Ja · Nein")}
+          ${kpi("An dich geschickt", String(S(W, "help_sent")), hl.some(x => x.sent_at && !x.mailed) ? "Mail ist noch nicht eingerichtet – nur hier zu sehen" : "auch per Mail")}
+        </div>
+        ${hl.length ? `<div class="card flat">${hl.slice(0, 30).map(x => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div class="small muted">${hh(x.sent_at)}${x.mailed ? " · per Mail" : ""}</div>
+          <div><b>${esc(x.q)}</b></div>${x.note ? `<div class="small">Ergänzung: ${esc(x.note)}</div>` : ""}<details><summary class="small">Antwort der Hilfe</summary><p class="small" style="white-space:pre-wrap">${esc(x.a || "–")}</p></details></div>`).join("")}</div>` : `<p class="small muted">Noch nichts eingeschickt.</p>`}`;
+
       // ---- 7. Technik (eingeklappt)
       const runs = S(W, "runs"), runMs = runs ? Math.round(S(W, "run_ms") / runs) : 0;
       const dayRows = days.slice().reverse().map(d => { const l = rows.filter(x => berlin(Date.parse(x.hour)) === d);
@@ -144,11 +155,11 @@
         <h3 class="sec-h">Je Tag (14 Tage)</h3><div class="card flat wrap"><table><tr><th>Tag</th><th>DB</th><th>429</th><th>Transitous</th><th>VBB</th><th>KI</th><th>Fehler</th><th>Fahrten max.</th></tr>${dayRows}</table></div>
         <h3 class="sec-h">Gebremste Versuche (24 Std.)</h3><p class="sec-sub">Schutz gegen Durchprobieren: zu viele Versuche von einem Anschluss werden kurz gesperrt.</p>
         <div class="card flat wrap"><table><tr><th>Was</th><th>Versuche</th><th>Seit</th></tr>
-          ${(o.guard || []).map(g => `<tr><td>${esc(String(g.key).startsWith("join-ip") ? "Gerät verbinden: Code von einem Anschluss" : g.key === "join-all" ? "Gerät verbinden: alle zusammen" : String(g.key).startsWith("reg-ip") ? "Neue Geräte von einem Anschluss" : g.key)}</td><td>${g.n}</td><td>${hh(g.t)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nichts Auffälliges</td></tr>`}</table></div>
+          ${(o.guard || []).map(g => `<tr><td>${esc(String(g.key).startsWith("join-ip") ? "Gerät verbinden: Code von einem Anschluss" : g.key === "join-all" ? "Gerät verbinden: alle zusammen" : String(g.key).startsWith("reg-ip") ? "Neue Geräte von einem Anschluss" : String(g.key).startsWith("helpsend:") ? "Hilfe: an dich geschickt (ein Konto)" : String(g.key).startsWith("help:") ? "Hilfe-Fragen (ein Konto)" : g.key === "help-all" ? "Hilfe-Fragen: alle zusammen" : g.key)}</td><td>${g.n}</td><td>${hh(g.t)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nichts Auffälliges</td></tr>`}</table></div>
       </details>`;
 
       $m.innerHTML = `<h1>Betrieb</h1><p class="muted small">Stand ${hh(new Date().toISOString())} · nur Summen, keine Angaben zu einzelnen Personen, Strecken oder Orten. Neue Zähler (Nutzen, Import, Quellen) laufen seit 25.11.2026.</p>
-        ${lights}${users}${benefit}${imp}${tech}
+        ${lights}${users}${benefit}${imp}${helpSec}${tech}
         <button class="btn quiet" id="out" style="margin-top:18px">Schlüssel auf diesem Gerät vergessen</button>`;
       document.getElementById("out").onclick = () => { localStorage.removeItem("rb_admin"); login(); };
     }

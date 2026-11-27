@@ -1,7 +1,7 @@
 // Speicher: Supabase (PlanFlink-Projekt, Tabellen rb_devices / rb_trips) über REST mit dem Secret Key.
 // Mit MOCK=1 ein Speicher im Arbeitsspeicher (nur für lokale Tests).
 
-const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map(), rb_guard: new Map(), rb_shares: new Map() };
+const MEM = { rb_devices: new Map(), rb_trips: new Map(), rb_accounts: new Map(), rb_routines: new Map(), rb_stats: new Map(), rb_guard: new Map(), rb_shares: new Map(), rb_help: new Map() };
 
 function hdr(env) {
   const k = env.SUPABASE_SERVICE_KEY;
@@ -161,4 +161,10 @@ export async function overview(env) {
       push: d.filter(x => x.push).length, trips_active: tr.filter(t => t.active).length, trips_all: tr.length, routines: ro.length, routines_active: ro.filter(r => !r.paused).length,
       guard: [...MEM.rb_guard.entries()].filter(([, g]) => g.n > 5).map(([key, g]) => ({ key, n: g.n, t: new Date(g.t).toISOString() })) }; }
   return rest(env, "rpc/rb_overview", { method: "POST", body: "{}" });
+}
+
+// Hilfe-Fragen, die an Umstiegsheld geschickt wurden (für die Betreiber-Seite)
+export async function helpSent(env, limit = 50) {
+  if (mem(env)) return [...MEM.rb_help.values()].filter(r => r.sent_at).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1)).slice(0, limit);
+  return rest(env, `rb_help?sent_at=not.is.null&order=sent_at.desc&limit=${limit}&select=id,created_at,q,a,note,sent_at,mailed,helpful,ver`);
 }
