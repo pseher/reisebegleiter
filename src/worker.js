@@ -672,8 +672,11 @@ async function api(req, env, url) {
         const rep = {};
         for (const i of idx) { const o = b.replace[i];
           if (!o?.from?.plan || !o?.to?.plan || !o.label) return fail(400, "Teilstrecke unvollständig");
-          rep[i] = (await resolveConnection(env, [o]))[0]; }
-        legs = t.legs.map((l, i) => (rep[i] ? (({ live, ...x }) => ({ ...x, minT: l.minT || 0, must: false }))(rep[i]) : l));
+          const parts = Array.isArray(o.legs) && o.legs.length ? o.legs.slice(0, 4) : [o];   // ein Stück kann aus mehreren Fahrten bestehen
+          rep[i] = await resolveConnection(env, parts); }
+        // Fußweg zum nächsten Stück (das Suchziel war dessen Einstieg) an der letzten neuen Fahrt merken
+        legs = t.legs.flatMap((l, i) => (rep[i] ? rep[i].map(({ live, ...x }, j, arr) => ({ ...x, minT: l.minT || 0, must: false,
+          ...(j === arr.length - 1 && Number.isFinite(+b.replace[i].walk) ? { walk: +b.replace[i].walk } : {}) })) : [l]));
       }
       if (b.minT != null && Number.isFinite(+b.minT)) { const m = Math.min(30, Math.max(0, +b.minT)); legs = legs.map(l => ({ ...l, minT: m })); }
       const bad = checkLegs(legs); if (bad) return fail(400, bad === "Anschluss fährt vor der Ankunft ab" && (kf != null || b.keep || b.replace) ? (b.replace ? "Mit dieser Wahl erreichst du den nächsten Anschluss nicht." : "Mit dieser Verbindung erreichst du den festen Zug nicht.") : bad);

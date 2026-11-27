@@ -278,27 +278,9 @@ export async function searchPlaces(env, q, limit = 8) {
 }
 
 // ---------- Bausteine: andere Fahrten für genau eine Teilstrecke (Fahrt ändern) ----------
-// Abfahrtstafel am Start und Ankunftstafel am Ziel abgleichen: jede Fahrt, die auf beiden steht, passt – egal welche Linie.
-// Dazu Ankünfte in Laufweite des nächsten Einstiegs (andere Haltestelle, kürzerer Weg). Etwa 2–4 Abrufe je Teilstrecke.
+// Eine kurze Verbindungssuche nur für dieses Stück (1–2 Abrufe), Ergebnis 5 Min. für alle zwischengespeichert.
 const SEG = new Map(), SEG_MS = 5 * MIN;
 const walkMin = (a, b) => { const d = distM(a, b); return !Number.isFinite(d) ? 0 : d < 120 ? 0 : Math.max(1, Math.round(d * 1.3 / 75)); };
-async function stopTimes(env, stop, ms, arrive, radius) {
-  const q = { stopId: stop.id, time: new Date(ms).toISOString(), n: "150", arriveBy: arrive ? "true" : "false" };
-  const d = await motisGet(env, "stoptimes", radius ? { ...q, radius: String(radius) } : q).catch(() => motisGet(env, "stoptimes", q));
-  return (d.stopTimes || []).map(s => { const p = s.place || {};
-    const plan = arrive ? p.scheduledArrival || p.arrival || p.scheduledDeparture : p.scheduledDeparture || p.departure || p.scheduledArrival;
-    const rt = arrive ? p.arrival || p.scheduledArrival || plan : p.departure || p.scheduledDeparture || plan;
-    return { tripId: s.tripId || "", mode: s.mode || "", label: legLabel({ mode: s.mode, displayName: s.displayName, routeShortName: s.routeShortName, tripShortName: s.tripShortName, category: s.category }),
-      at: Date.parse(plan), stop: { name: p.name || stop.name || "", lat: p.lat, lon: p.lon, stopId: p.stopId || "", track: p.track || p.scheduledTrack || "", plan, rt }, cancelled: !!(s.cancelled || p.cancelled) };
-  }).filter(x => x.tripId && Number.isFinite(x.at));
-}
-async function stopOf(env, s) {
-  const c = s.lat != null ? s : { ...s, ...(byEva(s.eva) || {}) };
-  if (s.stopId) return { id: s.stopId, name: s.name, lat: c.lat, lon: c.lon };
-  if (c.lat == null) return null;
-  const near = await stopsNear(env, c.lat, c.lon).catch(() => []);
-  return near[0] ? { ...near[0], name: near[0].name } : null;
-}
 export async function segmentOptions(env, legs, i, now = Date.now()) {
   const L = legs[i], N = legs[i + 1] || null;
   if (env.MOCK === "1") {   // Testdaten: gleiche Strecke 20/10 Min. früher, 10/20 Min. später, dazu eine andere Linie
@@ -308,29 +290,30 @@ export async function segmentOptions(env, legs, i, now = Date.now()) {
       to: { name: m === 5 ? `${L.to.name} (andere Haltestelle)` : L.to.name, lat: L.to.lat, lon: L.to.lon, plan: sh(L.to.plan, m + (m === 5 ? -1 : 0)), rt: sh(L.to.plan, m + (m === 5 ? -1 : 0)), track: "" } }))
       .filter(o => Date.parse(o.from.plan) > now - MIN);
   }
-  const A = await stopOf(env, L.from), B = await stopOf(env, L.to);
-  if (!A || !B) throw new Error("Für diese Haltestelle kenne ich keine Abfahrten.");
+  // Verbindungssuche nur für dieses Stück: vom Start der Teilstrecke bis zum Einstieg der nächsten (bzw. zum Ziel).
+  // Findet alle Linien und Haltestellen in Laufweite – auch zwei Fahrten hintereinander (z. B. S-Bahn mit Umstieg).
+  const P = s => (s.lat != null ? { eva: s.eva || "", lat: s.lat, lon: s.lon } : s.eva ? s.eva : null);
+  const from = P(L.from), target = N ? (N.from.lat != null || N.from.eva ? N.from : L.to) : L.to, to = P(target);
+  if (!from || !to) throw new Error("Für diese Haltestelle kenne ich keinen Ort.");
   const dep0 = Date.parse(L.from.plan), t0 = Math.max(now - MIN, dep0 - 40 * MIN), tEnd = dep0 + 100 * MIN;
-  const key = `${A.id}|${B.id}|${N?.from?.name || ""}|${Math.floor(t0 / (10 * MIN))}`, hit = SEG.get(key);
+  const key = `${JSON.stringify(from)}|${JSON.stringify(to)}|${Math.floor(t0 / (10 * MIN))}`, hit = SEG.get(key);
   if (hit && now - hit.t < SEG_MS) { count("seg_memo"); return hit.v; }
-  const NP = N ? (N.from.lat != null ? N.from : { ...N.from, ...(byEva(N.from.eva) || {}) }) : null;
-  const tg = [{ s: B, r: 150 }];
-  if (NP?.lat != null && distM(NP, B) > 80) {
-    const ns = N.from.stopId ? { id: N.from.stopId, name: N.from.name, lat: NP.lat, lon: NP.lon } : (await stopsNear(env, NP.lat, NP.lon).catch(() => []))[0];
-    if (ns && ns.id !== B.id) tg.push({ s: ns, r: 400 });
+  const tgt = target.lat != null ? target : { ...target, ...(byEva(target.eva) || {}) };
+  const all = [], seen = new Set();
+  let t = t0;
+  for (let k = 0; k < 2 && t <= tEnd; k++) {   // höchstens zwei Suchen: deckt etwa 40 Min. davor bis 100 Min. danach ab
+    const list = await connections(env, from, to, t, 0);
+    for (const c of list) { const d = Date.parse(c.legs[0].from.plan), kk = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
+      if (d < t0 - MIN || d > tEnd || seen.has(kk) || c.legs.some(l => l.cancelled)) continue;
+      seen.add(kk); all.push(c); }
+    if (!list.length) break;
+    t = Math.max(...list.map(c => Date.parse(c.legs[0].from.plan))) + MIN;
   }
-  const [deps, ...arrL] = await Promise.all([stopTimes(env, A, t0, false, 150), ...tg.map(g => stopTimes(env, g.s, t0, true, g.r))]);
-  const arrs = arrL.flat(), byTrip = new Map();
-  for (const a of arrs) { if (!byTrip.has(a.tripId)) byTrip.set(a.tripId, []); byTrip.get(a.tripId).push(a); }
-  const reach = a => a.at + (NP ? walkMin(a.stop, NP) : 0) * MIN, seen = new Set(), out = [];
-  for (const d of deps.sort((x, y) => x.at - y.at)) {
-    if (d.at < t0 || d.at > tEnd || seen.has(d.tripId) || d.cancelled) continue;
-    const c = (byTrip.get(d.tripId) || []).filter(a => a.at > d.at && a.at - d.at < 3 * 3600e3 && distM(a.stop, d.stop) > 100 && !a.cancelled);
-    if (!c.length) continue;
-    const a = c.sort((x, y) => reach(x) - reach(y))[0];
-    seen.add(d.tripId);
-    out.push({ mode: d.mode, rail: RAIL.has(d.mode), label: d.label, tripId: d.tripId, walk: NP ? walkMin(a.stop, NP) : 0, from: d.stop, to: a.stop });
-  }
+  const out = all.sort((x, y) => Date.parse(x.legs[0].from.plan) - Date.parse(y.legs[0].from.plan)).map(c => {
+    const l0 = c.legs[0], lz = c.legs[c.legs.length - 1];
+    return { mode: l0.mode, rail: !!l0.rail, label: c.legs.map(l => l.label).join(" → "), tripId: l0.tripId || "", walk: N ? walkMin(lz.to, tgt) : 0,
+      from: l0.from, to: lz.to, legs: c.legs };
+  });
   count("seg");
   if (SEG.size > 300) SEG.clear();
   SEG.set(key, { t: now, v: out.slice(0, 30) });
