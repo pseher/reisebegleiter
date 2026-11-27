@@ -11,7 +11,9 @@ import { makeDue, refreshWindow } from "./routines.js";
 
 const MIN = 60e3;
 // Wie oft ein Halt geprüft wird – je näher, desto öfter (Minuten)
-export const intervalFor = dist => (dist <= 45 * MIN ? 1 : dist <= 150 * MIN ? 4 : dist <= 6 * 3600e3 ? 15 : null);
+// Grundtakt nach Abstand. 6–3 Std. vorher: alle 30 Min. – die Züge sind dann meist noch gar nicht losgefahren (keine Prognose),
+// nur Ausfälle/Gleiswechsel stehen schon drin.
+export const intervalFor = dist => (dist <= 45 * MIN ? 1 : dist <= 150 * MIN ? 4 : dist <= 3 * 3600e3 ? 15 : dist <= 6 * 3600e3 ? 30 : null);
 
 // Wie oft prüfen? Jede Minute nur, wenn es darauf ankommt (Verspätung oder knapper Umstieg) – sonst seltener.
 // Ankunft am Ziel ohne weiteren Anschluss: nur grob (dort entscheidet nichts mehr).
@@ -29,7 +31,7 @@ export function checkEvery(trip, i, side, dist) {
   const hot = late >= 3 || tight || (ob.dep?.c || ob.arr?.c);
   if (side === "arr" && i === legs.length - 1) return Math.max(base, dist <= 45 * MIN ? 5 : 15);   // Ziel
   if (hot) return base;
-  return dist <= 45 * MIN ? 3 : dist <= 150 * MIN ? 8 : 15;
+  return Math.max(base, dist <= 45 * MIN ? 3 : dist <= 150 * MIN ? 8 : 15);
 }
 
 // Fällige Abfragen einer Reise
@@ -37,15 +39,16 @@ export function dueChecks(trip, now, force = false) {
   const out = [];
   trip.legs.forEach((leg, i) => {
     if (!leg.jid) {
-      // Bus/Tram/U-Bahn: über Transitous (tid) bzw. in Berlin/Brandenburg über die VBB-Auskunft, ab 2 Std. vorher
+      // Bus/Tram/U-Bahn: über Transitous (tid) bzw. in Berlin/Brandenburg über die VBB-Auskunft, ab 60 Min. vorher
+      // (Live-Positionen gibt es meist erst, wenn das Fahrzeug losfährt). Takt wie bei Zügen: jede Minute nur, wenn es darauf ankommt.
       const inVBB = s => s?.lat != null && s.lat > 51.3 && s.lat < 53.6 && s.lon > 11.2 && s.lon < 14.8;
       if (!leg.tid && !inVBB(leg.from)) return;
       const o = trip.obs?.[i] || {}, effOf = (s, ob) => (ob?.rt ? Date.parse(ob.rt) : Date.parse(s.plan));
       const dEff = effOf(leg.from, o.dep), aEff = effOf(leg.to, o.arr);
       if (aEff < now - 3 * MIN) return;
       const dist = Math.max(0, (dEff > now ? dEff : aEff) - now);
-      if (dist > 2 * 3600e3) return;
-      const iv = intervalFor(dist) || 15;
+      if (dist > 60 * MIN) return;
+      const iv = checkEvery(trip, i, dEff > now ? "dep" : "arr", dist) || 15;
       if (!force && o.bt && now - o.bt < iv * MIN - 20e3) return;
       out.push({ trip, i, side: "bus", leg, dist });
       return;

@@ -177,6 +177,15 @@ test("Prüfhäufigkeit: pünktlich seltener, bei Verspätung jede Minute, ein Pr
   assert.equal(checkEvery(t, 1, "arr", 20 * 60e3), 5);                  // Ziel: grob
   const sides = dueChecks(t, T0 - 20 * 60e3).map(c => `${c.i}${c.side}`);
   assert.deepEqual(sides, ["0dep", "1dep"]);                             // vor der Abfahrt keine Ankunftsabfrage
+  assert.equal(checkEvery(t, 0, "dep", 4 * 3600e3), 30);                // 6–3 Std. vorher: alle 30 Min.
+  assert.equal(checkEvery(t, 0, "dep", 2.75 * 3600e3), 15);
+  // Bus: erst ab 60 Min. vorher, dann im ruhigen Takt
+  const T = Date.now(), iso = m => new Date(T + m * 60e3).toISOString();
+  const bus = m => ({ id: "b", legs: [{ jid: "", tid: "t1", label: "Bus M29", mode: "BUS", from: { name: "S Halensee", plan: iso(m), lat: 52.49, lon: 13.29 }, to: { name: "Lehniner Platz", plan: iso(m + 4), lat: 52.5, lon: 13.3 } }], obs: [] });
+  assert.equal(dueChecks(bus(90), T).length, 0);
+  assert.equal(dueChecks(bus(30), T).length, 1);
+  const b2 = bus(30); b2.obs = [{ bt: T - 2 * 60e3 }];
+  assert.equal(dueChecks(b2, T).length, 0);                               // pünktlich: nicht jede Minute
 });
 
 test("Zug ins Ausland: nach der Abfahrt kommt die Ankunft über Transitous (live), vorher nur die Abfahrt bei der DB", async () => {
