@@ -624,3 +624,6 @@ span.blk-a { border: 0; background: none; cursor: default; }
 .pb-more { display: block; margin: 2px auto 0; }
 .pb-alt .steps-l { margin-top: 8px; }
 .pa-act .link { font-size: 14px; }
+/* Alles passt (auch nur laut Fahrplan): leicht grün – auf einen Blick „gut“. Schon laut Fahrplan knapp: neutral mit blauem Rand */
+.hero.s-PLAN { background: var(--ok-bg); border-color: var(--ok); } .s-PLAN .k { color: var(--ok); }
+.hero.s-PLAN.tight { background: var(--card); border-color: var(--accent); } .s-PLAN.tight .k { color: var(--accent); }

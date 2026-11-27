@@ -358,7 +358,7 @@ function followHero(t) {
   const state = t.phase === "done" ? `Angekommen um ${hm(z.rt)}.` : t.status === "LOST" ? "Ein Anschluss klappt nicht – die Ankunft ändert sich noch. Ich sage Bescheid, sobald die neue Verbindung steht."
     : planOnly(t) ? "Laut Fahrplan – Live-Zeiten kommen kurz vor der Abfahrt."
     : `${d >= 3 ? `ca. ${d} Min. später als geplant (${hm(z.plan)})` : d <= -3 ? `ca. ${-d} Min. früher als geplant` : "Alles läuft nach Plan"}${tr ? `, Umstieg in ${esc(cleanStop(tr.at))} ist ${tr.status === "RISK" ? "gefährdet" : "knapp"}` : ""}.`;
-  const cls = planOnly(t) ? "PLAN" : t.status;
+  const cls = planOnly(t) ? `PLAN${planTight(t) ? " tight" : ""}` : t.status;
   return `<section class="hero s-${cls}"><div class="k">${t.phase === "before" ? `Abfahrt ${wd(Date.parse(a.rt))} ${hm(a.rt)} ab ${esc(cleanStop(a.name))}` : t.phase === "done" ? "Angekommen" : "Unterwegs"}</div>
     <h2>Ankunft ${esc(dest)}: ${hm(z.rt)}</h2>
     <p><b>${wd(Date.parse(z.rt))}${z.platform ? ` · Gleis ${esc(z.platform)}` : ""}</b></p><p>${state}</p>
@@ -366,12 +366,12 @@ function followHero(t) {
 }
 function jetztCard(t, slim = false) {
   if (t.follow === true) { const z = t.legs[t.legs.length - 1].arr;   // mitverfolgt: Ankunft statt eigener Schritte
-    return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? "PLAN" : t.status}" data-open="${t.id}"><div class="jk"><span>👀 Mitverfolgt · ${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(z.name))}</span><span>${esc(listState(t))}</span></div>
+    return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? `PLAN${planTight(t) ? " tight" : ""}` : t.status}" data-open="${t.id}"><div class="jk"><span>👀 Mitverfolgt · ${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(z.name))}</span><span>${esc(listState(t))}</span></div>
       <div class="jt"><b>${hm(z.rt)}</b> <span>Ankunft${z.platform ? ` · Gleis ${esc(z.platform)}` : ""}</span></div></button>`; }
   const n = t.next, lbl = n ? (/^\d/.test(n.label) && n.mode && MODE[n.mode] ? `${MODE[n.mode][0]} ${n.label}` : n.label) : "";
   const when = t.phase === "enroute" ? "unterwegs" : inMin(t.legs[0].dep.rt);
   const what = !n ? "" : n.cancelled ? `<span class="late">${esc(lbl)} fällt aus</span>` : `${esc(lbl)}${n.platform ? ` · ${esc(platWord(n, n.platform))}` : ""}`;
-  return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? "PLAN" : t.status}" data-open="${t.id}">
+  return `<button class="hero jetzt${slim ? " slim" : ""} s-${planOnly(t) ? `PLAN${planTight(t) ? " tight" : ""}` : t.status}" data-open="${t.id}">
     <div class="jk"><span>${t.rname ? `↻ ${esc(t.rname)}` : `${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[t.legs.length - 1].arr.name))}`} · ${esc(when)}</span><span>${esc(listState(t))}</span></div>
     ${n ? `<div class="jt"><b>${hm(n.at)}</b> <span>${what}</span></div>` : ""}
     <div class="js">${esc(t.status === "OK" ? (n?.then && !n.then.lost ? `Umstieg ${cleanStop(n.then.station || "")} klappt · ${n.then.gap} Min.` : `${t.phase === "enroute" ? "an" : "Ankunft"} ${hm(t.legs[t.legs.length - 1].arr.rt)} ${cleanStop(t.legs[t.legs.length - 1].arr.name)}`) : t.status === "WATCH" && /^Noch läuft/.test(t.title || "") ? knappLine(t) : t.title === listState(t) ? String(t.sub || "").split(/(?<=\.) /)[0] : t.title)}${t.status === "LOST" ? " – antippen" : ""}</div></button>`;
@@ -916,6 +916,8 @@ let sosBusy = null;
 // Plan B: ein zentraler Knopf. Beim Öffnen der Fahrt immer zu; farbig, wenn Plan B gebraucht wird. Ein Tipp öffnet den Kasten.
 let OPT_OPEN = null;
 const RANK = { OK: 0, PLAN: 0, WATCH: 1, RISK: 2, LOST: 3 };
+// Laut Fahrplan schon knapp geplant? (dann die Plan-Kachel nicht grün)
+const planTight = t => { const own = +t.minT || 0; return (t.transfers || []).some(x => Math.round(x.gap) < Math.max(own, 5)); };
 // „klappt eher“ als dein Plan: ohne Umstieg, mehr Zeit zum Umsteigen, früher am Ziel oder rechtzeitig zum festen Zug – sonst nicht anbieten
 function betterAlt(a, tr, t) {
   const pg = tr.gap != null ? Math.round(tr.gap) : null;
@@ -1114,7 +1116,7 @@ function renderTrip(t, many) {
       <div class="th-act">${t.follow === true ? `<button class="chip del-chip" data-del="${t.id}">Nicht mehr mitverfolgen</button></div>` : `<button class="act fav-btn" data-favt="${t.id}" aria-pressed="${isFav(t)}" title="${isFav(t) ? "Favorit entfernen" : "Als Favorit merken"}"><i>${isFav(t) ? "★" : "☆"}</i>Favorit</button>${t.phase !== "done" ? `<button class="act" data-share="${t.id}" title="Ankunft oder Verbindung an andere schicken"><i>↗</i>Teilen</button>` : ""}${showBahn(t) ? `<button class="act" data-bahn="${t.id}" title="Ticket bei der Bahn kaufen"><i>🛒</i>Ticket kaufen</button>` : ""}${t.phase === "before" ? `<button class="act" data-edit="${t.id}"><i>✎</i>Ändern</button>` : ""}${t.phase !== "enroute" ? `<button class="act del-chip" data-del="${t.id}" aria-label="Fahrt löschen"><i>🗑</i>Löschen</button>` : ""}</div>`}<p class="muted small">${day(t.legs[0].dep.plan)} · ${hm(t.legs[0].dep.rt)} – ${t.status === "LOST" ? `<span class="late">Ankunft ${hm(t.planArr || t.plan.arr)} nicht mehr erreichbar</span>` : `${hm(t.legs[t.legs.length - 1].arr.rt)}${sameDay(Date.parse(t.legs[t.legs.length - 1].arr.rt), Date.parse(t.legs[0].dep.plan)) ? "" : ` (${new Date(t.legs[t.legs.length - 1].arr.rt).toLocaleDateString("de-DE", { weekday: "short", timeZone: "Europe/Berlin" })})`}`}${t.legs.length > 1 ? ` · ${t.legs.length - 1} Umstieg${t.legs.length > 2 ? "e" : ""}` : ""}${ticketNote(t)}</p></div>
     ${t.follow === true ? `<p class="small explain">👀 <b>Mitverfolgt.</b> Diese Fahrt hat dir jemand geteilt. Nimmt die reisende Person unterwegs eine andere Verbindung, ziehe ich hier automatisch nach. Die Hinweise sind aus ihrer Sicht geschrieben.</p>`
       : t.follow === "gone" ? `<p class="small explain">👀 Die geteilte Fahrt wurde beim Absender gelöscht – ich überwache diese Verbindung hier einfach weiter.</p>` : ""}
-    ${SK ? stuckView(t, SK) : t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? "PLAN compact" : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – laut Fahrplan passt alles" : esc(t.title)}</h2>
+    ${SK ? stuckView(t, SK) : t.follow === true ? followHero(t) : `<section class="hero s-${planOnly(t) ? `PLAN compact${planTight(t) ? " tight" : ""}` : t.status}"><div class="k">${heroKicker(t)}</div><h2>${planOnly(t) ? "Geplant – laut Fahrplan passt alles" : esc(t.title)}</h2>
       ${!planOnly(t) && t.status === "OK" && t.transfers?.some(x => x.status !== "DONE") ? `<p>${t.transfers.filter(x => x.status !== "DONE").length > 1 ? "Alle Umstiege klappen" : "Dein Umstieg klappt"}: ${t.transfers.filter(x => x.status !== "DONE").map(x => `${esc(cleanStop(x.at || ""))} ${Math.round(x.gap)} Min.`).join(" · ")}</p>` : ""}
       ${planOnly(t) ? (() => { const own = +t.minT || 0, tight = (t.transfers || []).filter(x => Math.round(x.gap) < Math.max(own, 5));
         return `<p>Live-Daten gibt es meist erst kurz vor der Abfahrt. Ich melde mich, wenn etwas nicht passt.</p>${tight.length ? `<p class="small warn-t">Umstieg in ${tight.map(x => `${esc(cleanStop(x.at || ""))} (${Math.round(x.gap)} Min.)`).join(", ")} ist schon laut Fahrplan knapp – über „Ändern“ kannst du mehr Puffer wählen.</p>` : ""}`; })() : t.status === "OK" || t.status === "DONE" ? "" : `<p>${esc(t.sub.replace(/ (Plan B|Vorschlag):.*$/, "").replace(" Ich behalte das im Blick.", ""))}</p>`}${heroRec(t)}</section>`}
