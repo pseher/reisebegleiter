@@ -1524,6 +1524,21 @@ async function bStep(t, i, dir) {
   if (p >= 0) j = p + dir;
   else j = dir > 0 ? L.findIndex(o => Date.parse(o.from.plan) >= d) : L.map(o => Date.parse(o.from.plan) <= d).lastIndexOf(true);
   BLK.note[i] = "";
+  if ((j < 0 || j >= L.length) && !BLK.more?.[`${i}${dir}`]) {   // am Rand: eine weitere Seite holen (einmal je Richtung und Stück)
+    BLK.more = { ...(BLK.more || {}), [`${i}${dir}`]: true };
+    const edge = dir > 0 ? Math.max(...L.map(o => Date.parse(o.from.plan)), d) + MIN : Math.min(...L.map(o => Date.parse(o.from.plan)), d) - 45 * MIN;
+    const keep = BLK.sel[i] != null ? L[BLK.sel[i]] : null;
+    BLK.loading = i; render();
+    try { const add = (await api(`/api/trips/${t.id}/segment`, { method: "POST", body: { i, at: edge } })).list || [];
+      const k = o => `${o.label}@${o.from.plan}`, seen = new Set(L.map(k));
+      const fresh = add.filter(o => !seen.has(k(o)) && (dir > 0 ? Date.parse(o.from.plan) > d : Date.parse(o.from.plan) < d));
+      BLK.lists[i] = [...L, ...fresh].sort((a, b) => Date.parse(a.from.plan) - Date.parse(b.from.plan));
+      if (keep) BLK.sel[i] = BLK.lists[i].findIndex(o => k(o) === k(keep));
+      BLK.more[`${i}${dir}`] = fresh.length === 0;   // nichts Neues in dieser Richtung: nicht noch einmal fragen
+    } catch (e) { BLK.err[i] = e.message; }
+    if (!BLK) return; BLK.loading = null;
+    return bStep(t, i, dir);
+  }
   if (j < 0 || j >= L.length) BLK.note[i] = dir > 0 ? "Später finde ich hier gerade keine Fahrt." : "Früher finde ich hier keine Fahrt mehr.";
   else BLK.sel[i] = isOrig(t, i, L[j]) ? null : j;
   render();

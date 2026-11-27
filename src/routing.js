@@ -281,7 +281,7 @@ export async function searchPlaces(env, q, limit = 8) {
 // Eine kurze Verbindungssuche nur für dieses Stück (1–2 Abrufe), Ergebnis 5 Min. für alle zwischengespeichert.
 const SEG = new Map(), SEG_MS = 5 * MIN;
 const walkMin = (a, b) => { const d = distM(a, b); return !Number.isFinite(d) ? 0 : d < 120 ? 0 : Math.max(1, Math.round(d * 1.3 / 75)); };
-export async function segmentOptions(env, legs, i, now = Date.now()) {
+export async function segmentOptions(env, legs, i, now = Date.now(), at = null) {
   const L = legs[i], N = legs[i + 1] || null;
   if (env.MOCK === "1") {   // Testdaten: gleiche Strecke 20/10 Min. früher, 10/20 Min. später, dazu eine andere Linie
     const sh = (iso, m) => new Date(Date.parse(iso) + m * MIN).toISOString();
@@ -295,28 +295,23 @@ export async function segmentOptions(env, legs, i, now = Date.now()) {
   const P = s => (s.lat != null ? { eva: s.eva || "", lat: s.lat, lon: s.lon } : s.eva ? s.eva : null);
   const from = P(L.from), target = N ? (N.from.lat != null || N.from.eva ? N.from : L.to) : L.to, to = P(target);
   if (!from || !to) throw new Error("Für diese Haltestelle kenne ich keinen Ort.");
-  const dep0 = Date.parse(L.from.plan), t0 = Math.max(now - MIN, dep0 - 40 * MIN), tEnd = dep0 + 100 * MIN;
-  const key = `${JSON.stringify(from)}|${JSON.stringify(to)}|${Math.floor(t0 / (10 * MIN))}`, hit = SEG.get(key);
+  // Dichter Takt (Bus + S-Bahn alle paar Minuten): eine Suche liefert nur ~8 Fahrten. Darum eine Suche kurz davor und eine ab der
+  // bisherigen Abfahrt; blättert man darüber hinaus, holt die App gezielt eine weitere Seite (at = Zeitpunkt).
+  const dep0 = Date.parse(L.from.plan), times = at != null ? [Math.max(now - MIN, +at)] : [Math.max(now - MIN, dep0 - 20 * MIN), Math.max(now - MIN, dep0 + MIN)];
+  const key = `${JSON.stringify(from)}|${JSON.stringify(to)}|${times.map(x => Math.floor(x / (5 * MIN))).join(",")}`, hit = SEG.get(key);
   if (hit && now - hit.t < SEG_MS) { count("seg_memo"); return hit.v; }
   const tgt = target.lat != null ? target : { ...target, ...(byEva(target.eva) || {}) };
   const all = [], seen = new Set();
-  let t = t0;
-  for (let k = 0; k < 2 && t <= tEnd; k++) {   // höchstens zwei Suchen: deckt etwa 40 Min. davor bis 100 Min. danach ab
-    const list = await connections(env, from, to, t, 0);
-    { const ds = list.map(c => Math.round((Date.parse(c.legs[0].from.plan) - dep0) / MIN));   // Diagnose (vorübergehend): was liefert die Suche?
-      count(`segdbg_k${k}_n${list.length}_min${ds.length ? Math.min(...ds) : "x"}_max${ds.length ? Math.max(...ds) : "x"}`); }
-    for (const c of list) { const d = Date.parse(c.legs[0].from.plan), kk = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
-      if (d < t0 - MIN || d > tEnd || seen.has(kk) || c.legs.some(l => l.cancelled)) continue;
-      seen.add(kk); all.push(c); }
-    if (!list.length) break;
-    t = Math.max(...list.map(c => Date.parse(c.legs[0].from.plan))) + MIN;
-  }
+  const lists = await Promise.all([...new Set(times)].map(t => connections(env, from, to, t, 0)));
+  for (const c of lists.flat()) { const kk = c.legs.map(l => `${l.label}@${l.from.plan}`).join("|");
+    if (Date.parse(c.legs[0].from.plan) < now - MIN || seen.has(kk) || c.legs.some(l => l.cancelled)) continue;
+    seen.add(kk); all.push(c); }
   const out = all.sort((x, y) => Date.parse(x.legs[0].from.plan) - Date.parse(y.legs[0].from.plan)).map(c => {
     const l0 = c.legs[0], lz = c.legs[c.legs.length - 1];
     return { mode: l0.mode, rail: !!l0.rail, label: c.legs.map(l => l.label).join(" → "), tripId: l0.tripId || "", walk: N ? walkMin(lz.to, tgt) : 0,
       from: l0.from, to: lz.to, legs: c.legs };
   });
-  count("seg"); count(`segdbg_out${out.length}_after${out.filter(o => Date.parse(o.from.plan) > dep0 + MIN).length}`);
+  count("seg");
   if (SEG.size > 300) SEG.clear();
   SEG.set(key, { t: now, v: out.slice(0, 30) });
   return out.slice(0, 30);

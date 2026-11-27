@@ -548,7 +548,8 @@ async function api(req, env, url) {
     const b = await req.json().catch(() => ({})), i = +b.i;
     if (!Number.isInteger(i) || i < 0 || i >= t.legs.length) return fail(400, "Teilstrecke unbekannt");
     const legs = t.legs.map(l => ({ ...l, from: withCoords(l.from), to: withCoords(l.to) }));
-    try { return json({ i, list: await segmentOptions(env, legs, i) }); }
+    const at = Number.isFinite(+b.at) && +b.at > 0 ? +b.at : null;   // weitere Seite (früher/später)
+    try { return json({ i, list: await segmentOptions(env, legs, i, Date.now(), at) }); }
     catch (e) { return fail(502, e.message || "Abfahrten gerade nicht abrufbar. Versuch es gleich noch einmal."); }
   }
 
