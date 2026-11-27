@@ -572,3 +572,34 @@ span.blk-a { border: 0; background: none; cursor: default; }
 .blk-s.bad { border: 1.5px solid #d64545; }
 .blk-s.bad b { color: var(--bad, #b42318); }
 .blk-start { margin: 10px 0 6px; }
+
+/* ---------- Ruhige Knopf-Hierarchie (Nov 2026) ----------
+   gefüllt = der eine nächste Schritt · Umriss = zweite Wahl · klein (.mini) = Seltenes, Abbrechen, Löschen */
+.btn.mini { display: inline-flex; width: auto; min-height: 40px; padding: 7px 14px; margin: 6px 0 0; font-size: 15px; font-weight: 500; border-radius: 10px; white-space: nowrap; }
+.btn.mini.sec { border-width: 1px; }
+.btn.mini.quiet { border: 1px solid transparent; color: var(--muted); }
+.btn.mini.danger { border-width: 1px; border-color: color-mix(in srgb, var(--lost) 45%, var(--line)); }
+.btn.mini.center { display: flex; margin-left: auto; margin-right: auto; }
+.mini-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.mini-row .btn.mini { margin: 0; }
+.mini-row.center { justify-content: center; margin-top: 12px; }
+.buf-chip.sm-chip { display: inline-flex; width: auto; font-size: 14px; min-height: 38px; margin: 0 0 10px; }
+/* Gewählte Zustände: Rahmen + helle Fläche + fett – nicht vollflächig wie ein Hauptknopf */
+.seg button[aria-pressed=true], .chips.days .chip[aria-pressed=true], .chip[aria-pressed=true] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card)); color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.seg button[aria-pressed=true] { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.seg button[aria-pressed=true] span { color: var(--accent); opacity: .8; }
+.chips.days .chip[aria-pressed=true], .chip[aria-pressed=true] { box-shadow: inset 0 0 0 1px var(--accent); }
+.fav-btn[aria-pressed=true] { background: var(--card); color: #d49a00; border-color: #d49a00; box-shadow: none; }
+/* Gesperrter Hauptknopf (z. B. „Noch nichts geändert“) wirkt nicht wie ein Hauptknopf */
+.btn[aria-disabled=true] { background: transparent; color: var(--muted); border: 1px dashed var(--line); opacity: 1; font-weight: 500; }
+/* Rückfragen: Hauptknopf oben, zweite Wahl darunter, Abbrechen klein und grau ganz unten */
+.dlg-btns { grid-template-columns: 1fr; gap: 8px; }
+.dlg-btns [data-yes] { order: -2; } .dlg-btns [data-alt] { order: -1; }
+.dlg-btns .btn.mini { min-height: 40px; justify-self: center; margin-top: 2px; }
+/* Leiste der Fahrt: Breite nach Inhalt, kein Zeilenumbruch in „Ticket kaufen“ */
+.trip-head .th-act { display: flex; }
+.trip-head .th-act .act { flex: 1 1 auto; min-width: 0; padding: 6px 4px; white-space: nowrap; font-size: 12.5px; }
+@media (max-width: 370px) { .trip-head .th-act { gap: 4px; } .trip-head .th-act .act { font-size: 11.5px; padding: 6px 2px; } }
+/* Startseite ohne Fahrten: „Neue Fahrt“ über die ganze Breite */
+.tiles4 .tile.wide { grid-column: 1 / -1; }

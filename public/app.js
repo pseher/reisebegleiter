@@ -17,7 +17,7 @@ function ask(text, { ok = "OK", cancel = "Abbrechen", danger = false, input = nu
     wrap.innerHTML = `<div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgT"${body ? ' aria-describedby="dlgB"' : ""}>
       <h2 id="dlgT">${esc(title)}</h2>${body ? `<p id="dlgB">${esc(body).replace(/\n/g, "<br>")}</p>` : ""}
       ${input != null ? `<input type="text" class="dlg-in" maxlength="40" value="${esc(input)}" aria-label="${esc(title)}">` : ""}
-      <div class="dlg-btns${alt ? " three" : ""}">${cancel ? `<button class="btn sec" data-no>${esc(cancel)}</button>` : ""}${alt ? `<button class="btn sec" data-alt>${esc(alt)}</button>` : ""}<button class="btn ${danger ? "danger-fill" : ""}" data-yes>${esc(ok)}</button></div></div>`;
+      <div class="dlg-btns${alt ? " three" : ""}">${cancel ? `<button class="btn mini quiet" data-no>${esc(cancel)}</button>` : ""}${alt ? `<button class="btn sec" data-alt>${esc(alt)}</button>` : ""}<button class="btn ${danger ? "danger-fill" : ""}" data-yes>${esc(ok)}</button></div></div>`;
     const inp = wrap.querySelector(".dlg-in");
     const done = v => { wrap.remove(); SCREEN_AT = Date.now(); document.removeEventListener("keydown", key, true); removeEventListener("popstate", pop); prev?.focus?.(); res(input != null ? (v ? inp.value.trim() : null) : v); };
     const key = e => {
@@ -272,7 +272,7 @@ function renderList(active) {
     ${fresh ? `<h1 class="hero-h">Dein Weg. Ich pass auf.</h1><p class="lead">Fällt dein Bus oder Zug aus oder wird der Umstieg knapp, sag ich dir sofort Bescheid – mit Plan B.</p>` : ""}
     ${nowShown.map((t, i) => jetztCard(t, i > 0 || nowList.length > 1)).join("")}
     ${nowList.length > 3 ? `<button class="link small now-more" data-nowmore>${NOW_MORE ? "Weniger zeigen" : `+ ${nowList.length - 3} weitere jetzt`}</button>` : ""}
-    ${tiles(cur)}
+    ${tiles(cur, nowShown)}
     ${fresh && isIOS ? iosFirst() : ""}
     ${soon.length ? `<div class="sec-row"><span>Demnächst</span></div><ul class="trips compact">${grouped(soon)}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
@@ -300,7 +300,7 @@ function renderRoutines() {
   $app.innerHTML = `${flashBox()}<h1>Regelmäßige Fahrten</h1>
     <p class="muted small" style="margin-top:0">Z. B. Schulweg oder Arbeitsweg: An jedem Fahrtag lege ich die Fahrt ein paar Stunden vorher an und sag dir Bescheid, wenn etwas nicht klappt.</p>
     ${retCard(RET?.routine)}
-    <button class="btn big-btn" data-regstart>＋ Neue regelmäßige Fahrt</button>
+    <button class="btn ${ROUTINES.length || RET?.routine ? "sec" : "big-btn"}" data-regstart>＋ Neue regelmäßige Fahrt</button>
     ${ROUTINES.length ? `<div class="sec-row"><span>${ROUTINES.some(r => r.paused) ? `Deine regelmäßigen Fahrten · ${ROUTINES.length}${ROUTINES.filter(r => r.paused).length ? ` (${ROUTINES.filter(r => r.paused).length} pausiert)` : ""}` : `Werden überwacht · ${ROUTINES.length}`}</span></div><div class="card flat rlist">${ROUTINES.map(routineRow).join("")}</div>`
       : `<p class="muted small">Noch keine – leg oben deine erste an.</p>`}`;
   bindRoutines(); bindRet();
@@ -380,14 +380,16 @@ function jetztCard(t, slim = false) {
 const pendAt = r => Date.parse(r.next.at) - 3 * 3600e3;
 const pendText = r => (pendAt(r) > Date.now() ? `Überwachung ab ${hm(new Date(pendAt(r)).toISOString())}` : "Überwachung startet gleich");
 // Vier Kacheln: alles, was man starten kann
-function tiles(cur) {
+function tiles(cur, shown = []) {
   const sosTrip = trips.find(t => t.active !== false && sosAvailable(t));
+  const redTop = sosTrip && shown.some(x => x.id === sosTrip.id);   // rote Karte steht schon oben -> Kachel nicht auch noch rot
+  const empty = !trips.length && !ROUTINES.length;
   const tile = (attr, icon, title, sub, cls = "") => `<button class="tile ${cls}" ${attr}><span class="ti-ic" aria-hidden="true">${icon}</span><b>${title}</b><span>${sub}</span></button>`;
   return `<div class="tiles4">
-    ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach")}
+    ${tile('data-go="add"', "＋", "Neue Fahrt", "Von – nach", empty ? "wide" : "")}
     ${tile('data-go="routines"', `↻${ROUTINES.length ? `<em class="cnt">${ROUTINES.length}</em>` : ""}`, "Regelmäßige Fahrten", ROUTINES.length ? `${ROUTINES.length} ${ROUTINES.length === 1 ? "wird" : "werden"} überwacht` : "Schulweg, Arbeitsweg …")}
     ${tile("data-tticket", "🎫", "Gebuchte Fahrt überwachen", "Ticket, Screenshot oder DB-Link")}
-    ${sosTrip && (sosTrip.status === "RISK" || sosTrip.status === "LOST") ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS: Anschluss in Gefahr", "Dein Plan klappt wohl nicht – ich suche sofort eine andere Verbindung", "sos")
+    ${sosTrip && (sosTrip.status === "RISK" || sosTrip.status === "LOST") ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "!", "SOS: Anschluss in Gefahr", "Dein Plan klappt wohl nicht – ich suche sofort eine andere Verbindung", redTop ? "quick" : "sos")
       : sosTrip && sosTrip.status === "WATCH" ? tile(`data-sos="${sosTrip.id}" data-sosopen`, "⇄", "Anschluss wird knapp", "Möglichkeiten ab deinem Zug ansehen", "quick")
       : tile("data-quick", "⌖", "Schnell weg", "Ab hier, jetzt – wohin?", "quick")}
   </div>`;
@@ -570,13 +572,13 @@ function routineRow(r) {
       <label class="small chk"><input type="checkbox" data-rhol="${r.id}" ${r.holidays ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>
       <p class="small muted" style="margin:10px 0 2px">Aussetzen (z. B. Urlaub, Ferien)</p>
       <div class="win-row"><input type="date" id="rsf-${r.id}" min="${t0}" value="${nx ? nx.date : t0}" aria-label="von"><span>bis</span><input type="date" id="rst-${r.id}" min="${t0}" value="${nx ? nx.date : t0}" aria-label="bis"></div>
-      <button class="btn sec small-btn" data-rrange="${r.id}" style="width:100%;margin:4px 0 0">Diese Tage aussetzen</button>
+      <button class="btn sec mini" data-rrange="${r.id}" style="margin:6px 0 0">Diese Tage aussetzen</button>
       ${r.skip.length ? `<p class="small" style="margin:6px 0 0">Ausgesetzt: ${skipChips(r)}</p>` : ""}
-      <div class="rbtns"><button class="btn sec small-btn" data-rchange="${r.id}">Zeit oder Strecke ändern</button>
-        <button class="btn sec small-btn" data-rname="${r.id}">Umbenennen</button>
-        <button class="btn sec small-btn" data-rshare="${r.id}">↗ Teilen</button>
-        <button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Bis auf Weiteres pausieren"}</button>
-        <button class="btn danger small-btn" data-rdel="${r.id}">Löschen</button></div>
+      <button class="btn sec" data-rchange="${r.id}" style="margin:14px 0 8px">Zeit oder Strecke ändern</button>
+      <div class="mini-row"><button class="btn sec mini" data-rname="${r.id}">Umbenennen</button>
+        <button class="btn sec mini" data-rshare="${r.id}">↗ Teilen</button>
+        <button class="btn sec mini" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren"}</button>
+        <button class="btn danger mini" data-rdel="${r.id}">Löschen</button></div>
       </div>` : ""}</div>`;
 }
 // Ausgesetzte Tage: aufeinanderfolgende Tage als Zeitraum zusammenfassen
@@ -635,8 +637,8 @@ function routineForm(t) {
     return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig: ${esc(r.name)}</p>
       <p class="small muted" style="margin:0 0 6px">${daysText(r.days)} · ${r.win ? `${esc(r.win[0])}–${esc(r.win[1])}` : esc(r.dep)} · ${r.paused ? "pausiert" : "wird überwacht"}</p>
       ${t.phase === "before" ? `<button class="btn sec small-btn" data-rskip="${r.id}|${date}">${dw === "heute" || dw === "morgen" ? `${dw[0].toUpperCase()}${dw.slice(1)}` : `Am ${dw}`} nicht fahren</button>` : ""}
-      <button class="btn sec small-btn" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren (z. B. Urlaub)"}</button>
-      <button class="btn danger small-btn" data-rstop="${r.id}">Regelmäßige Überwachung beenden</button></div>`;
+      <div class="mini-row"><button class="btn sec mini" data-rpause="${r.id}">${r.paused ? "Wieder überwachen" : "Pausieren (z. B. Urlaub)"}</button>
+      <button class="btn danger mini" data-rstop="${r.id}">Regelmäßig beenden</button></div></div>`;
   }
   if (t.routine) return "";
   if (t.phase === "done" || t.follow) return "";
@@ -1097,17 +1099,16 @@ function renderTrip(t, many) {
     ${t.follow === true || SK ? "" : optionsBlock(t)}
     ${SK && STUCK_ORIG !== t.id ? "" : `<h3 class="sec-h">${SK ? "Ursprüngliche Fahrt" : t.phase === "enroute" ? "Ganze Fahrt" : "Verlauf"}</h3><div class="card flat">${timeline(t)}</div>`}
     <p class="foot">${fresh ? `Geprüft um ${hm(fresh)}` : "Noch nicht geprüft"}${noLive ? " · nur Fahrplan" : ""} · ohne Gewähr</p>
-    <button class="btn quiet" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
+    <button class="btn sec mini center" data-sheet="${t.id}">${sheet ? "Einstellungen schließen" : "Einstellungen dieser Fahrt"}</button>
     ${sheet ? `<section class="card" id="sheet">
-      ${t.phase === "before" ? `<button class="btn sec" data-edit="${t.id}">Fahrt ändern (Zeiten, Start, Verbindung)</button>` : ""}
       <p class="small muted">Zeit, die ich mindestens zum Umsteigen brauche</p>
       <div class="chips">${MINT_OPTS.map(([m, l]) => `<button class="chip" data-tmt="${m}" aria-pressed="${(t.minT || 0) === m}">${l}</button>`).join("")}</div>
       <p class="small muted">Ticket (nur für den Hinweis zur Zugbindung)</p>
       <div class="chips">${[["spar", "Sparpreis"], ["flex", "Flexpreis / weiß nicht"], ["dticket", "Deutschlandticket"], ["bc100", "BahnCard 100"]].map(([k, l]) => `<button class="chip" data-tk="${k}" aria-pressed="${t.ticket === k}">${l}</button>`).join("")}</div>
       ${routineForm(t)}
-      <div class="danger-zone"><button class="btn danger" data-del="${t.id}">Fahrt löschen</button><p class="small muted" style="margin:4px 0 0">Wird nicht mehr überwacht und verschwindet aus der Liste.</p></div></section>` : ""}
+      <div class="danger-zone"><button class="btn danger mini" data-del="${t.id}">Fahrt löschen</button><p class="small muted" style="margin:4px 0 0">Wird nicht mehr überwacht und verschwindet aus der Liste.</p></div></section>` : ""}
     ${hint}
-    <button class="btn sec" data-go="add">Weitere Fahrt hinzufügen</button>`;
+    <button class="btn sec mini center" data-go="add">＋ Weitere Fahrt hinzufügen</button>`;
   $app.querySelector("[data-list]")?.addEventListener("click", () => { openId = null; sheetId = null; render(); scrollTo(0, 0); });
   $app.querySelectorAll("[data-cmp]").forEach(b => b.onclick = () => { openCmp = openCmp === b.dataset.cmp ? null : b.dataset.cmp; render(); });
   $app.querySelectorAll("[data-leg]").forEach(b => b.onclick = () => { openLeg = openLeg === b.dataset.leg ? null : b.dataset.leg; render(); });
@@ -1201,7 +1202,7 @@ function recoveryCard() {
     ${REC.lost ? `<p class="small warn-t" style="margin:6px 0"><b>Dein bisheriger Code gilt nicht mehr</b>, weil Geräte verbunden wurden. Bitte einen neuen erstellen.</p>` : ""}
     ${REC.has ? `<p class="small" style="margin:6px 0"><b class="ok-t">✓ Code erstellt</b>${REC.at ? ` am ${dayShort(REC.at).replace(/\.$/, "")}` : ""}. Hast du ihn nicht mehr, erstelle einen neuen – der alte gilt dann nicht mehr.</p>
       <button class="btn sec small-btn" id="recNew">Neuen Code erstellen</button>`
-    : `<button class="btn small-btn" id="recNew">Wiederherstellungscode erstellen</button>`}
+    : `<button class="btn sec small-btn" id="recNew">Wiederherstellungscode erstellen</button>`}
     <p class="small muted" style="margin:6px 0 0">Zurückholen: unten bei „Deine Geräte“ → „Code eingeben“.</p></section>`;
 }
 async function makeRecovery() {
@@ -1599,12 +1600,11 @@ function renderBlocks(t) {
     : `<div class="blk-s"><b>Neu: ab ${hm(first.dep)} → an ${hm(last.arr)}</b><span>${da === 0 ? "Ankunft unverändert" : `Ankunft ${Math.abs(da)} Min. ${da < 0 ? "früher" : "später"}`}</span></div>`;
   $app.innerHTML = `${flashBox()}<section class="blk">
     <div class="blk-h"><div><div class="k">Fahrt ändern</div><h2>${esc(cleanStop(t.legs[0].dep.name))} → ${esc(cleanStop(t.legs[n - 1].arr.name))}</h2></div><button class="card-x" data-blkx aria-label="Ändern schließen">✕</button></div>
-    <button class="btn sec blk-start" data-bstart>📍 Ich starte woanders</button>
     <p class="small muted">Oder tippe ‹ oder ›, um ein Stück früher oder später zu nehmen – auch mit einer anderen Linie. Der Rest bleibt, wie er ist.</p>
     <div class="blk-l">${rows}</div>
     ${sum}
     <button class="btn" data-bsave${changed.length && !miss ? "" : ` aria-disabled="true"`}>${!changed.length ? "Noch nichts geändert" : miss ? "Anschluss verpasst – so nicht möglich" : "So übernehmen"}</button>
-    <button class="link small blk-full" data-bfull>Ganz neu suchen (anderer Tag oder Ziel)</button>
+    <div class="mini-row center"><button class="btn sec mini" data-bstart>📍 Ich starte woanders</button><button class="btn sec mini" data-bfull>Ganz neu suchen</button></div>
   </section>`;
   $app.querySelector("[data-blkx]").onclick = async () => { if (await blkLeave()) render(); };
   $app.querySelector("[data-bstart]").onclick = async e => { e.currentTarget.disabled = true; BLK = null; await startEdit(t, "start"); };
@@ -2043,11 +2043,11 @@ function renderWizard() {
     const title = ph === "none" ? `${esc(W.rFrom.name)} → ${esc(W.rTo.name)}` : `${esc(sFrom.name)} → ${esc(sTo.name)}`;
     $app.innerHTML = `${head}<h1>${title}</h1><p class="muted small">${(W.editId ? W.minT : MINT) ? `Umstiege mind. ${W.editId ? W.minT : MINT} Min. · ` : ""}${sub}</p>
       ${ph === "post" && K.pre ? "" : keepPicker()}${stepNote}
-      ${ph === "none" ? "" : `${err}${W.conns && (ph === "pre" ? true : !K && W.when > Date.now() + 5 * MIN) ? `<button class="btn sec" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
-      ${W.conns && !W.editId ? `<button class="chip buf-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
+      ${ph === "none" ? "" : `${err}${W.conns && (ph === "pre" ? true : !K && W.when > Date.now() + 5 * MIN) ? `<button class="btn sec mini" id="earlierC">↑ Frühere Verbindungen</button>` : ""}
+      ${W.conns && !W.editId ? `<button class="chip buf-chip sm-chip" id="bufC" aria-pressed="${!!W.buf}">${W.buf ? `✓ Mehr Puffer (mind. ${searchMin()} Min.)` : "⏱ Mehr Puffer beim Umsteigen"}</button>
         ${W.buf ? `<p class="small muted" style="margin:4px 2px 10px">Oft dieselbe Ankunft, nur früher los. Deine eingestellte Umstiegszeit für die Überwachung bleibt.</p>` : ""}` : ""}
       <div>${!W.conns ? `<div class="spinner"></div>` : ph === "pre" && !W.conns.length ? `<p class="muted">${W.depMin ? `Später erreichst du den ${esc(K.first.label)} um ${hm(K.first.dep)} nicht mehr.` : "Keine passende Verbindung gefunden."}</p>` : !W.conns.length ? `<p class="muted">Keine passende Verbindung gefunden.${REGIONAL ? " „Nur Nahverkehr“ ist an – vielleicht fährt hier nur ein Fernzug." : W.byArr ? " Probier eine spätere Ankunftszeit." : ""}</p>` : connList(W.conns)}</div>
-      ${W.conns && (W.conns.length || K) ? `${ph === "pre" && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : ph === "pre" && !W.conns.length ? "" : `<button class="btn sec" id="laterC">↓ Spätere Verbindungen</button>`}` : ""}`}
+      ${W.conns && (W.conns.length || K) ? `${ph === "pre" && (!W.conns.length || W.conns.length < 4) && W.depMin ? "" : ph === "pre" && !W.conns.length ? "" : `<button class="btn sec mini" id="laterC">↓ Spätere Verbindungen</button>`}` : ""}`}
       ${ph === "post" && K.pre ? `<button class="btn quiet" id="backPre">Zurück zu Teil 1</button>` : ""}
       ${W.conns || ph === "none" ? (W.editId ? `<button class="btn quiet" id="otherRoute">Anderer Tag, Start oder Ziel …</button>` : SPECIAL) : ""}${back}`;
     if (!W.conns && ph !== "none") api(ph === "pre" && W.depMin ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(W.depMin).toISOString())}`
@@ -2260,7 +2260,7 @@ function renderWizard() {
     $app.querySelectorAll("[data-t]").forEach(b => b.onclick = async () => {
       // Deutschlandticket + Fernzug: ehrlich warnen (im ICE/IC gilt es nicht)
       const fv = W.legs.filter(isFVc).map(l => l.label);
-      if (b.dataset.t === "dticket" && fv.length && !(await ask(`Deutschlandticket gilt nicht im ${fv[0]}\n\nIm Fernverkehr (${[...new Set(fv)].join(", ")}) brauchst du ein anderes Ticket. Trotzdem so überwachen?`, { ok: "Trotzdem so", cancel: "Anderes Ticket" }))) return;
+      if (b.dataset.t === "dticket" && fv.length && (await ask(`Deutschlandticket gilt nicht im ${fv[0]}\n\nIm Fernverkehr (${[...new Set(fv)].join(", ")}) brauchst du ein anderes Ticket.`, { ok: "Anderes Ticket wählen", alt: "Trotzdem so überwachen", cancel: null })) !== "alt") return;
       saveTrip(b.dataset.t); });
   }
 
@@ -2506,7 +2506,7 @@ let RET = null;   // { tripId?, routine?, from, to, after, reg? }
 function offerReturn(o) { if (o.from && o.to && plainStop(o.from.name) !== plainStop(o.to.name)) RET = o; }
 const retCard = (match) => !RET || !match ? "" : `<section class="card ret-card"><div class="k">Rückfahrt</div>
   <p style="margin:0 0 8px">${RET.reg ? "Auch den Rückweg regelmäßig überwachen?" : "Auch die Rückfahrt überwachen?"} <span class="muted">${esc(cleanStop(RET.to.name))} → ${esc(cleanStop(RET.from.name))}</span></p>
-  <div class="row"><button class="btn small-btn" data-retgo>${RET.reg ? "Rückweg anlegen" : "Rückfahrt suchen"}</button><button class="btn quiet small-btn" data-retno>Nein danke</button></div></section>`;
+  <div class="row"><button class="btn ${RET.reg ? "" : "sec "}small-btn" data-retgo>${RET.reg ? "Rückweg anlegen" : "Rückfahrt suchen"}</button><button class="btn quiet small-btn" data-retno>Nein danke</button></div></section>`;
 function bindRet() {
   $app.querySelector("[data-retno]")?.addEventListener("click", () => { RET = null; render(); });
   $app.querySelector("[data-retgo]")?.addEventListener("click", () => {
