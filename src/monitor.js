@@ -241,7 +241,9 @@ export async function planFromHere(env, trip, v, here, now, mode = "trip", misse
     return { ...c, legs: c.legs.map((l, j) => (j === c.legs.length - 1 ? { ...l, to: { ...l.to, rt: new Date(Math.max(rtOf(l.to), Date.parse(l.to.plan) + d * MIN)).toISOString() } } : l)) };
   });
   // „Wie geplant“ nur, wenn es genau deine Bahn-Züge sind (Busse/U-Bahn davor dürfen abweichen)
-  const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => l.label.replace(/\s/g, "")).join("|");
+  // (gleicher Zug = gleiche Linie zur gleichen geplanten Abfahrt; ein RE 1 eine Stunde früher ist eine echte Alternative)
+  const depKey = l => Math.round(Date.parse((l.from || l.dep)?.plan) / MIN);
+  const sig = legs => legs.filter(l => l.rail !== false && (l.rail || l.jid)).map(l => `${l.label.replace(/\s/g, "")}@${depKey(l)}`).join("|");
   const fromIdx = mode === "missed" || mode === "cancel" || mode === "morning";   // ab einer bestimmten Teilstrecke ersetzen
   const rest = mode === "next" ? trip.legs.slice(waiting ? ci : ci + 1) : fromIdx ? trip.legs.slice(missedIdx) : trip.legs;     // unterwegs: nur der Rest der Reise zählt
   const planSig = sig(rest);

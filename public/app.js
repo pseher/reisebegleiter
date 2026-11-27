@@ -1915,8 +1915,11 @@ function renderWizard() {
       : ph === "pre" ? `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&arrive=1&time=${encodeURIComponent(new Date(W.arrBy || K.latest).toISOString())}`
       : `/api/connections?from=${placeParam(sFrom)}&to=${placeParam(sTo)}&min=${searchMin()}&time=${encodeURIComponent(new Date(ph === "post" ? (W.postWhen || Date.parse(K.last.arr) - MIN) : W.when).toISOString())}`)
       .then(c => { if (ph === "pre" && W.depMin) c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) >= W.depMin).slice(0, 4);   // spätere, die den festen Zug noch erreichen
-        else if (ph === "pre") { const max = W.depMax || Date.parse(W.ref.dep) + MIN;   // nur ab deiner bisherigen Abfahrt rückwärts, die nächstgelegenen zuerst
-          c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max).slice(-4); }
+        else if (ph === "pre") {   // alle, die den festen Zug noch erreichen – früher UND später als bisher, die nächstgelegenen zur bisherigen Abfahrt
+          const ref = Date.parse(W.ref.dep), max = W.depMax || Infinity;
+          c = c.filter(x => Date.parse(x.legs[x.legs.length - 1].to.plan) <= K.latest + MIN && Date.parse(x.legs[0].from.plan) <= max && Date.parse(x.legs[0].from.plan) > Date.now())
+            .sort((a, b) => Math.abs(Date.parse(a.legs[0].from.plan) - ref) - Math.abs(Date.parse(b.legs[0].from.plan) - ref)).slice(0, 6)
+            .sort((a, b) => Date.parse(a.legs[0].from.plan) - Date.parse(b.legs[0].from.plan)); }
         else if (ph === "post") { const k = s => String(s || "").replace(/\s/g, "").toUpperCase(), sit = x => k(x.legs[0].label) === k(K.last.label);
           c = c.filter(x => sit(x) || Date.parse(x.legs[0].from.plan) >= K.earliest - MIN).sort((a, b) => (sit(b) - sit(a)) || (Date.parse(a.legs[0].from.plan) - Date.parse(b.legs[0].from.plan))); }   // im festen Zug sitzen bleiben zuerst, sonst erst nach Ankunft + Umstiegszeit
         W.conns = W.fav ? [...c.filter(x => sameTrains(x, W.fav)), ...c.filter(x => !sameTrains(x, W.fav))] : c; W.error = ""; }).catch(e => { W.conns = []; W.error = e.message; }).then(render);
