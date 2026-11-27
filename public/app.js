@@ -1544,8 +1544,9 @@ async function bStep(t, i, dir) {
   render();
 }
 function bGap(t, i) {
-  const a = bCur(t, i), b = bCur(t, i + 1), g = Math.round((Date.parse(b.dep) - Date.parse(a.arr)) / MIN) - (a.walk || 0), need = Math.max(+t.minT || 0, 2);
-  return { g, cls: g < 0 ? "bad" : g < need ? "warn" : "ok", a, b };
+  // Puffer = Zeit am Einstieg nach Ankunft und Fußweg. Weniger als deine Umstiegszeit (oder unter 3 Min.): Hinweis
+  const a = bCur(t, i), b = bCur(t, i + 1), g = Math.round((Date.parse(b.dep) - Date.parse(a.arr)) / MIN) - (a.walk || 0), own = +t.minT || 0, need = own || 3;
+  return { g, own, need, cls: g < 0 ? "bad" : g < need ? "warn" : "ok", a, b };
 }
 function renderBlocks(t) {
   const n = t.legs.length, now = Date.now();
@@ -1560,7 +1561,10 @@ function renderBlocks(t) {
     const block = `<div class="blk-b${c.changed ? " ch" : ""}${past ? " past" : ""}">${arrow(-1, "‹", "früher")}<div class="blk-m"><b>${esc(c.label)} · ${hm(c.dep)}</b><span>${esc(cleanStop(c.from))} → ${esc(cleanStop(c.to))} · an ${hm(c.arr)}</span><span class="blk-d">${past ? "schon gefahren" : delta}${other}</span>${fv}${msg}</div>${arrow(1, "›", "später")}</div>`;
     if (i === n - 1) return block;
     const G = bGap(t, i);
-    const txt = G.g < 0 ? `verpasst ${esc(G.b.label)} (${-G.g} Min. zu spät)` : `${G.a.walk ? `zu Fuß ${G.a.walk} Min. · ` : ""}${G.g} Min. Puffer${G.cls === "warn" ? ", knapp" : ""}`;
+    const walk = G.a.walk ? `zu Fuß ${G.a.walk} Min. · ` : "";
+    const txt = G.g < 0 ? `${walk}verpasst ${esc(G.b.label)} (${-G.g} Min. zu spät)`
+      : G.cls === "warn" ? `${walk}nur ${G.g} Min. Puffer – ${G.own ? `weniger als deine Umstiegszeit (${G.own} Min.)` : "sehr knapp"} für ${esc(G.b.label)}`
+      : `${walk}${G.g} Min. Puffer`;
     return `${block}<div class="blk-g ${G.cls}"><i aria-hidden="true"></i>${txt}</div>`;
   }).join("");
   const changed = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null);
@@ -1581,6 +1585,8 @@ function renderBlocks(t) {
     const ch = Object.keys(BLK.sel).filter(i => BLK.sel[i] != null).map(Number);
     if (!ch.length) return;
     if (t.legs.slice(0, -1).some((_, i) => bGap(t, i).g < 0)) return alert("Mit dieser Wahl erreichst du einen Anschluss nicht.\n\nWähl bitte für das rot markierte Stück eine andere Fahrt.");
+    const tight = t.legs.slice(0, -1).map((_, i) => bGap(t, i)).filter(G => G.cls === "warn");
+    if (tight.length && !(await ask(`Knapper Umstieg\n\n${tight.map(G => `Zum ${G.b.label} bleiben nur ${G.g} Min.${G.a.walk ? ` (nach ${G.a.walk} Min. Fußweg)` : ""}${G.own ? ` – deine Umstiegszeit ist ${G.own} Min.` : ""}`).join("\n")}\n\nTrotzdem so übernehmen?`, { ok: "Trotzdem übernehmen", cancel: "Andere Fahrt wählen" }))) return;
     const fv = ch.map(i => bCur(t, i)).filter(c => t.ticket === "spar" && isFVc({ label: c.label, mode: c.mode }));
     if (fv.length && !(await ask(`Achtung Sparpreis\n\nDein Ticket gilt nur für die gebuchten Züge. ${fv.map(c => c.label).join(", ")} geht nur, wenn die Zugbindung aufgehoben ist – sonst brauchst du dafür ein anderes Ticket.`, { ok: "Trotzdem ändern" }))) return;
     const b = e.currentTarget; b.disabled = true; b.textContent = "Wird geändert …";
