@@ -124,3 +124,10 @@ test("Fehlt die Fahrt trotz ‚angelegt‘-Vermerk, wird sie einmal nachgeholt; 
   await makeDue(env, wallToMs("2026-11-24", "19:40"));
   assert.equal((await db.tripsOf(env, acc.id)).filter(t => t.state?.routine === r.id).length, 1, "nicht doppelt");
 });
+
+test("Nur Nahverkehr: erst 1 Std. vorher anlegen, mit Fernzug 3 Std.", async () => {
+  const { leadOf } = await import("../src/routines.js");
+  assert.equal(leadOf({ tpl: [{ label: "Bus M19" }, { label: "S 41" }] }), 3600e3);
+  assert.equal(leadOf({ tpl: [{ label: "S 41" }, { label: "ICE 509" }] }), 3 * 3600e3);
+  assert.equal(leadOf({ tpl: [{ label: "" }] }), 3 * 3600e3);
+});

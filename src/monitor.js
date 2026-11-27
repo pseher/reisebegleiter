@@ -31,6 +31,8 @@ export function checkEvery(trip, i, side, dist) {
   const hot = late >= 3 || tight || (ob.dep?.c || ob.arr?.c);
   if (side === "arr" && i === legs.length - 1) return Math.max(base, dist <= 45 * MIN ? 5 : 15);   // Ziel
   if (hot) return base;
+  // regelmäßige Fahrt mit Fernzug (3 Std. vorher angelegt): bis 1 Std. vorher nur alle 30 Min. – Ausfälle fallen trotzdem auf
+  if (trip.state?.routine && dist > 60 * MIN) return Math.max(base, 30);
   return Math.max(base, dist <= 45 * MIN ? 3 : dist <= 150 * MIN ? 8 : 15);
 }
 

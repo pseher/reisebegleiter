@@ -242,7 +242,7 @@ function renderList(active) {
   // Nach Kalendertag: Heute · Morgen · Später (jeweils nach Abfahrt sortiert)
   const depOf = t => Date.parse(t.legs[0].dep.plan), rest = active.filter(t => !nowList.includes(t)).sort((a, b) => depOf(a) - depOf(b));
   const isToday = ms => sameDay(ms, now), isTomorrow = ms => sameDay(ms, now + 864e5);
-  // Regelmäßige Fahrten, die heute/morgen anstehen, aber erst 3 Std. vorher angelegt werden: schon mal zeigen
+  // Regelmäßige Fahrten, die heute/morgen anstehen, aber erst kurz vorher (1 bzw. 3 Std.) angelegt werden: schon mal zeigen
   const pend = ROUTINES.filter(r => !r.paused && r.next?.at && (isToday(Date.parse(r.next.at)) || isTomorrow(Date.parse(r.next.at)))
       && !active.some(t => t.rname === r.name && sameDay(depOf(t), Date.parse(r.next.at))))
     .map(r => ({ pend: true, r, at: Date.parse(r.next.at) }));
@@ -378,7 +378,8 @@ function jetztCard(t, slim = false) {
 }
 
 // Angekündigte regelmäßige Fahrt: ab wann sie überwacht wird (überall derselbe Begriff)
-const pendAt = r => Date.parse(r.next.at) - 3 * 3600e3;
+const leadMs = r => (r.lead || 180) * MIN, leadTxt = r => ((r.lead || 180) >= 120 ? "ca. 3 Std." : "ca. 1 Std.");
+const pendAt = r => Date.parse(r.next.at) - leadMs(r);
 const pendText = r => (pendAt(r) > Date.now() ? `Überwachung ab ${hm(new Date(pendAt(r)).toISOString())}` : "Überwachung startet gleich");
 // Vier Kacheln: alles, was man starten kann
 function tiles(cur, shown = []) {
@@ -565,7 +566,7 @@ function routineRow(r) {
       <span class="tr-main"><b>↻ ${esc(r.name)}</b><span class="small muted">${daysText(r.days)} · ${esc(tm)} · ${esc(cleanStop(r.from))} → ${esc(cleanStop(r.to))}</span>
       <span class="small">${state}${off}</span></span><span class="chev">${open ? "▴" : "▾"}</span></button>
     ${open ? `<div class="rbody">
-      ${nx && !r.paused ? `<p class="small explain">Am Fahrtag lege ich die Fahrt ca. 3 Std. vorher selbst an – du musst nichts tun. ${Date.parse(nx.at) - 3 * 3600e3 <= Date.now() ? `Die Fahrt ${esc(nextTxt)} ist schon angelegt, du findest sie auf der Startseite.` : `Nächste: ${esc(nextTxt)}, Überwachung ab ${hm(new Date(Date.parse(nx.at) - 3 * 3600e3).toISOString())}.`}${r.win ? " Im Zeitfenster schlage ich dir die passenden Fahrten vor; die erste nehme ich, wenn du nichts wählst." : ""}</p>` : ""}
+      ${nx && !r.paused ? `<p class="small explain">Am Fahrtag lege ich die Fahrt ${leadTxt(r)} vorher selbst an – du musst nichts tun. ${Date.parse(nx.at) - leadMs(r) <= Date.now() ? `Die Fahrt ${esc(nextTxt)} ist schon angelegt, du findest sie auf der Startseite.` : `Nächste: ${esc(nextTxt)}, Überwachung ab ${hm(new Date(Date.parse(nx.at) - leadMs(r)).toISOString())}.`}${r.win ? " Im Zeitfenster schlage ich dir die passenden Fahrten vor; die erste nehme ich, wenn du nichts wählst." : ""}</p>` : ""}
       <p class="small muted" style="margin:0 0 2px">${r.win ? "Zeitfenster (Abfahrt)" : "Verbindung"}</p>
       ${r.win ? `<div class="win-row"><input type="time" id="rwf-${r.id}" data-rwin="${r.id}" value="${esc(r.win[0])}" aria-label="von"><span>bis</span><input type="time" id="rwt-${r.id}" data-rwin="${r.id}" value="${esc(r.win[1])}" aria-label="bis"></div>`
         : `<p class="small" style="margin:0 0 4px">${esc(r.dep)} ab ${esc(cleanStop(r.from))} · ${esc(r.label)}${r.via?.length ? `<br><span class="muted">Umstieg: ${r.via.map(v => `${esc(cleanStop(v.at))}${v.platform ? ` (${esc(platWord(v, v.platform))})` : ""} → ${esc(v.label)}`).join(", ")}</span>` : ""}</p>`}
@@ -647,7 +648,7 @@ function routineForm(t) {
   if (RF.for !== t.id) { const dow = ((new Date(new Date(t.legs[0].dep.plan).toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" }) + "T12:00:00Z").getUTCDay() + 6) % 7) + 1;
     RF.for = t.id; RF.days = dow <= 5 ? [1, 2, 3, 4, 5] : [dow]; }
   return `<div class="rform"><p class="k" style="margin:14px 0 4px">Regelmäßig überwachen</p>
-    <p class="small muted" style="margin:0 0 6px">Z. B. für den Weg zur Arbeit: An jedem Fahrtag lege ich diese Verbindung ca. 3 Std. vorher an und überwache sie.</p>
+    <p class="small muted" style="margin:0 0 6px">Z. B. für den Weg zur Arbeit: An jedem Fahrtag lege ich diese Verbindung vorher an und überwache sie – mit Fernzug ca. 3 Std., sonst ca. 1 Std. vor der Abfahrt.</p>
     <input class="txt" id="rfName" maxlength="40" placeholder="Name, z. B. Schule oder Arbeit" value="${esc(RF.name)}">
     ${dayChips(RF.days, "data-rfd")}
     <label class="small chk"><input type="checkbox" id="rfHol" ${RF.hol ? "checked" : ""}> An Feiertagen (Berlin) nicht fahren</label>

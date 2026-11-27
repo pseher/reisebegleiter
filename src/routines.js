@@ -3,10 +3,12 @@ import { count } from "./stats.js";
 // Fahrplanwechsel: Es wird jeden Tag neu gesucht – gleiche Linien zur gleichen Zeit, sonst die nächstpassende Verbindung (mit Hinweis).
 import * as db from "./db.js";
 import { connections, resolveConnection } from "./routing.js";
-import { hm, changesFV } from "./engine.js";
+import { hm, changesFV, isFV } from "./engine.js";
 
 const MIN = 60e3, DAY = 864e5;
-export const LEAD = 3 * 3600e3;   // so lange vor der Abfahrt wird die Reise angelegt
+export const LEAD = 3 * 3600e3;   // so lange vor der Abfahrt wird die Reise angelegt (mit Fernzug)
+export const LEAD_NV = 60 * 60e3;   // nur Nahverkehr: erst 1 Std. vorher – früher warnen bringt dort kaum etwas, spart Abfragen
+export const leadOf = r => { const tpl = r.tpl || []; return !tpl.length || tpl.some(l => !l.label) || tpl.some(isFV) ? LEAD : LEAD_NV; };   // unbekannt (z. B. Zeitfenster): lieber früh
 const TZ = "Europe/Berlin";
 
 // „2026-11-24“ in Berliner Zeit
@@ -129,7 +131,7 @@ export async function makeDue(env, now = Date.now(), watch = null) {
       if (offReason(r, date)) continue;
       const at = wallToMs(date, r.dep);
       const until = r.win_to ? wallToMs(date, r.win_to) : at + 5 * MIN;   // ein angefangenes Zeitfenster wird trotzdem noch angelegt
-      if (now < at - LEAD || now > until) continue;
+      if (now < at - leadOf(r) || now > until) continue;
       if (!tripsCache.has(r.account_id)) tripsCache.set(r.account_id, await db.tripsOf(env, r.account_id).catch(() => []));
       // Schon angelegt? Normalerweise ja – fehlt die Fahrt aber (z. B. Fehler beim Anlegen), einmal neu anlegen
       if (!anyCache.has(r.account_id)) anyCache.set(r.account_id, await db.tripsAnyOf(env, r.account_id).catch(() => null));
@@ -181,7 +183,7 @@ export function routineView(r, now = Date.now()) {
   const n = nextRun(r, now), today = berlinDate(now);
   return { id: r.id, name: r.name, days: r.days, dep: r.dep, win: r.win_to ? [r.win_from, r.win_to] : null, holidays: r.holidays !== false, paused: !!r.paused, ticket: r.ticket,
     from: r.tpl[0].from.name, to: r.tpl[r.tpl.length - 1].to.name, label: r.win_to ? `alle Fahrten zwischen ${r.win_from} und ${r.win_to}` : r.tpl.map(l => l.label).join(" → "),
-    next: n, today, todayOff: offReason({ ...r, paused: false }, today), skip: (r.skip || []).filter(d => d >= today),
+    next: n, lead: leadOf(r) / 60e3, today, todayOff: offReason({ ...r, paused: false }, today), skip: (r.skip || []).filter(d => d >= today),
     // für „Alle Fahrten ändern“ (Start/Ziel vorbelegen) und die Umstiege in der Übersicht
     fromPl: pl(r.tpl[0].from), toPl: pl(r.tpl[r.tpl.length - 1].to), via: r.win_to ? [] : r.tpl.slice(1).map(l => ({ at: l.from.name, label: l.label, platform: l.from.platform || "" })), minT: r.min_t || 0 };
 }
