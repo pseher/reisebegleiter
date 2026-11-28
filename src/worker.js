@@ -5,6 +5,7 @@ import { searchStations, byEva, nearby } from "./stations.js";
 import { connections, resolveConnection, segmentOptions, geocodeStop, searchStops, stopsNear, stopDepartures, tripStops, accessTime, searchPlaces } from "./routing.js";
 import { importTrip, onlyBahnLink } from "./importer.js";
 import { answer as helpAnswer, mailOwner } from "./help.js";
+import { healthCheck, importReport, opsState } from "./transit.js";
 import { board, findJourney, isoBerlin, rawBoard, normalize, WINDOW_MIN } from "./openboards.js";
 import { evaluate, changesFV, isFV } from "./engine.js";
 import { runMonitor, dueChecks, observe, assess, deliver, adopt, undoAdopt, planFromHere } from "./monitor.js";
@@ -986,19 +987,34 @@ async function api(req, env, url) {
 }
 
 // Nur für den Betreiber: Abfragezähler. Schlüssel ADMIN_KEY (mind. 16 Zeichen) im Cloudflare-Dashboard hinterlegen.
+// Mitteilung an den Betreiber (alle Geräte des Kontos OPS_ACCOUNT mit erlaubten Mitteilungen)
+async function notifyOps(env, title, body) {
+  if (!env.OPS_ACCOUNT) return;
+  for (const d of await db.devicesOf(env, [env.OPS_ACCOUNT], "id,push,account_id").catch(() => [])) if (d.push) await deliver(env, d.push, { url: "/admin", title, body, tag: "ops-motis" }).catch(() => {});
+}
+// Der eigene Server meldet nach jedem Import (Fahrplan nachts, Karte monatlich), ob es geklappt hat
+async function opsImport(req, env) {
+  const b = await req.json().catch(() => ({}));
+  if (!env.OPS_KEY || req.headers.get("X-Ops-Key") !== env.OPS_KEY) return new Response("nein", { status: 403 });
+  const imp = await importReport(env, b);
+  if (!imp.ok) await notifyOps(env, "⚠️ Import auf dem eigenen Server fehlgeschlagen", `${imp.what}: ${imp.msg || "ohne Meldung"}. Der Server läuft mit dem bisherigen Stand weiter.`);
+  return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+}
+
 async function adminStats(req, env) {
   const key = req.headers.get("X-Admin-Key") || "", want = String(env.ADMIN_KEY || "");
   let diff = key.length ^ want.length; for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ (key.charCodeAt(i) || 0);
   if (want.length < 16 || diff) { await new Promise(r => setTimeout(r, 400)); return fail(403, "Kein Zugriff"); }
   await flush(env).catch(() => {});
-  const [rows, ov, help] = await Promise.all([db.statsSince(env, new Date(Date.now() - 28 * 864e5).toISOString()), db.overview(env).catch(() => null), db.helpSent(env).catch(() => [])]);
-  return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov, help }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  const [rows, ov, help, motis] = await Promise.all([db.statsSince(env, new Date(Date.now() - 28 * 864e5).toISOString()), db.overview(env).catch(() => null), db.helpSent(env).catch(() => []), opsState(env)]);
+  return new Response(JSON.stringify({ now: new Date().toISOString(), rows, ov, help, motis: { ...motis, configured: !!env.MOTIS_URL, mode: !env.MOTIS_URL ? "off" : env.MOTIS_MODE === "test" ? "test" : "on" } }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
 
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === "/api/admin/stats") return adminStats(req, env);
+    if (url.pathname === "/api/ops/motis" && req.method === "POST") return opsImport(req, env);
     if (url.pathname.startsWith("/api/")) {
       try { return await api(req, env, url); }
       catch (e) { if (!e.user) count("err_api"); console.log("API-Fehler:", e.stack || e.message); return fail(502, e.user ? e.message : "Da ist gerade etwas schiefgelaufen. Bitte gleich noch einmal versuchen."); }
@@ -1008,5 +1024,6 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(runMonitor(env).then(r => console.log("Lauf:", JSON.stringify(r))).catch(e => console.log("Cron-Fehler:", e.stack || e.message)));
+    ctx.waitUntil(healthCheck(env, (title, body) => notifyOps(env, title, body)).catch(e => console.log("Server-Prüfung:", e.message)));
   },
 };

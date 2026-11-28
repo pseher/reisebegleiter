@@ -1,0 +1,39 @@
+# MOTIS-Konfiguration für Umstiegsheld – wird von update.sh in jeden Daten-Ordner kopiert.
+# Fahrplan + Echtzeit: gtfs.de (aus dem DELFI-Datensatz), Karte: OpenStreetMap Deutschland.
+server:
+  host: 127.0.0.1          # nur lokal – erreichbar ausschließlich über den Cloudflare-Tunnel
+  port: 8080
+  data_attribution_link: https://umstiegsheld.de/impressum.html
+
+osm: /srv/motis/input/germany-latest.osm.pbf
+
+timetable:
+  first_day: TODAY
+  num_days: 120            # rund vier Monate voraus reichen für Umstiegsheld
+  with_shapes: false       # keine Linienverläufe auf Karten nötig – spart Speicher
+  update_interval: 60      # Echtzeit jede Minute
+  http_timeout: 45
+  incremental_rt_update: false
+  datasets:
+    # Echtzeit: einmal pro Minute von gtfs.de geholt (rt-fetch.timer) und hier lokal an alle drei Teile verteilt
+    defv:
+      path: /srv/motis/input/gtfs-fv.zip
+      rt:
+        - url: http://127.0.0.1:8090/realtime.pb
+    derv:
+      path: /srv/motis/input/gtfs-rv.zip
+      rt:
+        - url: http://127.0.0.1:8090/realtime.pb
+    denv:
+      path: /srv/motis/input/gtfs-nv.zip
+      rt:
+        - url: http://127.0.0.1:8090/realtime.pb
+
+street_routing: true       # Fußwege zur Haltestelle und am Ziel
+osr_footpath: true         # Umstiege mit echten Fußwegen statt Fahrplan-Pauschalen
+geocoding: true            # Haltestellen- und Adresssuche
+reverse_geocoding: true    # „Haltestellen in der Nähe“
+
+limits:
+  plan_max_results: 256
+  routing_max_timeout_seconds: 30

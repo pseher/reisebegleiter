@@ -1,6 +1,7 @@
 import { count } from "./stats.js";
+import { transitFetch, PUBLIC } from "./transit.js";
 // Verbindungssuche über MOTIS (Transitous) und Zuordnung der Bahn-Teilstrecken zu OpenBoards-Fahrten.
-// Transitous: ehrenamtlich, Best-Effort, keine kommerzielle Nutzung → für den Familientest. Später eigene MOTIS-Instanz (TRANSITOUS_URL).
+// Verbindungssuche: eigener MOTIS-Server (MOTIS_URL), Transitous nur als Notlösung – siehe transit.js.
 import { board, findJourney, isoBerlin, trainLabel } from "./openboards.js";
 import { nearest, byEva } from "./stations.js";
 import { mockPlan } from "./mock.js";
@@ -13,11 +14,12 @@ const spaced = s => String(s || "").replace(/^([A-Za-z]+)(\d.*)$/, "$1 $2");
 
 async function motis(env, params) {
   if (env.MOCK === "1") return mockPlan(params);
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+
   const { fromEva, toEva, ...rest } = params;
   const qs = new URLSearchParams(rest).toString();
   for (const v of VER.plan ? [VER.plan] : ["v6", "v5", "v4"]) {
-    count("motis"); count("mt_plan"); const r = await fetch(`${base}/api/${v}/plan?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/1.0 (+https://umstiegsheld.de; kontakt@umstiegsheld.de)", Accept: "application/json" } });
+    count("motis"); count("mt_plan"); const r = await transitFetch(env, `/api/${v}/plan?${qs}`);
+    if (!r) { count("err_motis"); throw new Error("Verbindungssuche nicht erreichbar"); }
     if (r.status === 404 && !VER.plan) continue;
     if (!r.ok) { count("err_motis"); throw new Error(`Verbindungssuche: HTTP ${r.status}`); }
     VER.plan = v; return r.json();
@@ -167,13 +169,14 @@ export { trainLabel };
 // Ortssuche (Haltestellen, Adressen) ändert sich kaum: einen Tag zwischenspeichern – im Speicher und im Cloudflare-Cache.
 // Spart Transitous die meisten Abfragen (jeder getippte Buchstabe ist sonst eine).
 const GEO = new Map(), GEO_MS = 6 * 3600e3;
-async function geoFetch(url) {
+async function geoFetch(env, pathQs) {
+  const url = PUBLIC + pathQs;   // Cache-Schlüssel (gleich, egal welcher Server antwortet)
   const m = GEO.get(url); if (m && Date.now() - m.t < GEO_MS) { count("geo_memo"); return new Response(m.body, { status: 200 }); }
   const cache = typeof caches !== "undefined" ? caches.default : null, key = cache ? new Request(url) : null;
   const c = cache ? await cache.match(key).catch(() => null) : null;
   if (c) { const body = await c.text(); count("geo_cache"); GEO.set(url, { t: Date.now(), body }); return new Response(body, { status: 200 }); }
   count("motis"); count("mt_geocode");
-  const r = await fetch(url, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/1.0 (+https://umstiegsheld.de; kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+  const r = await transitFetch(env, pathQs);
   if (!r || !r.ok) return r;
   const body = await r.text();
   if (GEO.size > 3000) GEO.clear(); GEO.set(url, { t: Date.now(), body });
@@ -185,9 +188,9 @@ async function geoFetch(url) {
 export async function searchStops(env, q, limit = 6) {
   if (!q || q.trim().length < 3) return [];
   if (env.MOCK === "1") return /halt|platz|str/i.test(q) ? [{ eva: "", id: "mock_mommsen", name: "Mommsenstraße", area: "Berlin", lat: 52.5045, lon: 13.3066, stop: true }] : [];
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+
   const qs = new URLSearchParams({ text: q.trim(), type: "STOP", numResults: String(limit + 4), language: "de" });
-  const r = await geoFetch(`${base}/api/v1/geocode?${qs}`);
+  const r = await geoFetch(env, `/api/v1/geocode?${qs}`);
   if (!r || !r.ok) return [];
   const list = await r.json().catch(() => []);
   const seen = new Set();
@@ -202,12 +205,12 @@ export async function searchStops(env, q, limit = 6) {
 // und gleiche Abrufe kurz zwischenspeichern – mehrere Fahrten/Alternativen fragen oft dieselbe Fahrt ab
 const VER = {}, MEMO = new Map(), MEMO_MS = 50e3;
 async function motisGet(env, path, params) {
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org", qs = new URLSearchParams(params).toString(), mk = `${path}?${qs}`;
+  const qs = new URLSearchParams(params).toString(), mk = `${path}?${qs}`;
   const hit = MEMO.get(mk); if (hit && Date.now() - hit.t < MEMO_MS) { count("motis_memo"); return hit.p; }
   const p = (async () => {
     const vs = VER[path] ? [VER[path]] : ["v5", "v4", "v3", "v2", "v1"];
     for (const v of vs) {
-      count("motis"); count(`mt_${path}`); const r = await fetch(`${base}/api/${v}/${path}?${qs}`, { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Umstiegsheld/1.0 (+https://umstiegsheld.de; kontakt@umstiegsheld.de)", Accept: "application/json" } }).catch(() => null);
+      count("motis"); count(`mt_${path}`); const r = await transitFetch(env, `/api/${v}/${path}?${qs}`);
       if (!r) continue;
       if (r.status === 404 && !VER[path]) continue;
       if (!r.ok) throw new Error(`Haltestelle: HTTP ${r.status}`);
@@ -257,10 +260,10 @@ export async function tripStops(env, tripId, afterMs) {
 // Haltestelle per Name nachschlagen (MOTIS-Geocoder), bevorzugt nahe einem bekannten Punkt
 export async function geocodeStop(env, name, near) {
   if (env.MOCK === "1" || !name) return null;
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+
   const q = new URLSearchParams({ text: String(name).replace(/\s*\((Berlin|tief)\)/g, ""), type: "STOP", numResults: "5", language: "de",
     ...(near ? { place: `${near.lat},${near.lon}`, placeBias: "8" } : {}) });
-  const r = await geoFetch(`${base}/api/v1/geocode?${q}`);
+  const r = await geoFetch(env, `/api/v1/geocode?${q}`);
   if (!r || !r.ok) return null;
   const list = await r.json().catch(() => []);
   const dist = m => near ? Math.hypot((m.lat - near.lat) * 111, (m.lon - near.lon) * 68) : 0;
@@ -285,9 +288,9 @@ export async function accessTime(env, from, to, mode) {
 export async function searchPlaces(env, q, limit = 8) {
   if (!q || q.trim().length < 3) return [];
   if (env.MOCK === "1") return [{ eva: "", name: `${q.trim()} 12`, area: "Berlin", lat: 52.4876, lon: 13.2851, addr: true }];
-  const base = env.TRANSITOUS_URL || "https://api.transitous.org";
+
   const qs = new URLSearchParams({ text: q.trim(), numResults: String(limit + 4), language: "de" });
-  const r = await geoFetch(`${base}/api/v1/geocode?${qs}`);
+  const r = await geoFetch(env, `/api/v1/geocode?${qs}`);
   if (!r || !r.ok) return [];
   const list = await r.json().catch(() => []), seen = new Set();
   return (Array.isArray(list) ? list : []).filter(m => m.lat != null && m.lon != null).map(m => {

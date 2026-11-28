@@ -168,3 +168,15 @@ export async function helpSent(env, limit = 50) {
   if (mem(env)) return [...MEM.rb_help.values()].filter(r => r.sent_at).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1)).slice(0, limit);
   return rest(env, `rb_help?sent_at=not.is.null&order=sent_at.desc&limit=${limit}&select=id,created_at,q,a,note,sent_at,mailed,helpful,ver`);
 }
+
+// Betriebszustand (z. B. eigener MOTIS-Server): ein JSON je Schlüssel
+export async function opsGet(env, key) {
+  if (mem(env)) return MEM.rb_ops?.get(key) || {};
+  const [r] = await rest(env, `rb_ops?key=eq.${encodeURIComponent(key)}&select=value`).catch(() => []);
+  return r?.value || {};
+}
+export async function opsSet(env, key, value) {
+  if (mem(env)) { (MEM.rb_ops ||= new Map()).set(key, value); return; }
+  await rest(env, "rb_ops", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal", "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }) }).catch(() => {});
+}
