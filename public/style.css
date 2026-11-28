@@ -627,3 +627,9 @@ span.blk-a { border: 0; background: none; cursor: default; }
 /* Alles passt (auch nur laut Fahrplan): leicht grün – auf einen Blick „gut“. Schon laut Fahrplan knapp: neutral mit blauem Rand */
 .hero.s-PLAN { background: var(--ok-bg); border-color: var(--ok); } .s-PLAN .k { color: var(--ok); }
 .hero.s-PLAN.tight { background: var(--card); border-color: var(--accent); } .s-PLAN.tight .k { color: var(--accent); }
+/* iPhone: Weg zur App auf dem Home-Bildschirm – ruhig, aber deutlich (blauer Rand wie ein Hinweis) */
+.ios-card { border: 1.5px solid var(--accent); }
+.ios-card .k { color: var(--accent); }
+.ios-steps { margin: 8px 0 0; padding-left: 22px; } .ios-steps li { margin: 6px 0; }
+.ios-share { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.code-inline { font-variant-numeric: tabular-nums; letter-spacing: .08em; }

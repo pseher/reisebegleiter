@@ -69,7 +69,7 @@
       const trend = (a, b) => (!b && !a ? "" : !b ? `<span class="up">neu</span>` : a === b ? "wie Vorwoche" : `<span class="${a > b ? "up" : "down"}">${a > b ? "▲" : "▼"} ${Math.abs(Math.round((a - b) / b * 100))} %</span> zur Vorwoche`);
       const kpi = (t, v, x, extra = "") => `<div class="kpi"><span class="t">${t}</span><b>${v}</b>${extra}${x ? `<span class="x">${x}</span>` : ""}</div>`;
       const wk = (t, ks, x) => { const a = S(W, ...ks), b = S(P, ...ks); const tr = trend(a, b); return kpi(t, num(a), x, `<span class="d">7 Tage${tr ? ` · ${tr}` : ""}</span>${spark(perDay(...ks))}`); };
-      const cost = list => (S(list, "tok_in_fast") * PRICE.fast.in + S(list, "tok_out_fast") * PRICE.fast.out + S(list, "tok_in_strong") * PRICE.strong.in + S(list, "tok_out_strong") * PRICE.strong.out) / 1e6;
+      const cost = list => (S(list, "tok_in_fast") * PRICE.fast.in + S(list, "tok_out_fast") * PRICE.fast.out + S(list, "tok_in_strong") * PRICE.strong.in + S(list, "tok_out_strong") * PRICE.strong.out + S(list, "tok_in_help") * PRICE.fast.in + S(list, "tok_out_help") * PRICE.fast.out) / 1e6;
       const costToday = cost(rows.filter(x => berlin(Date.parse(x.hour)) === today)), costMonth = cost(rows.filter(x => berlin(Date.parse(x.hour)).startsWith(month)));
 
       // ---- 1. Auf einen Blick
@@ -80,7 +80,7 @@
         ${light(runAge == null ? "y" : runAge <= 3 ? "g" : runAge <= 10 ? "y" : "r", "Überwachung", runAge == null ? "noch kein Lauf erfasst" : runAge <= 1 ? "läuft" : `letzter Lauf vor ${runAge} Min.`, "läuft jede Minute")}
         ${light(errH ? (errH > 10 ? "r" : "y") : "g", "Fehler, letzte Stunde", errH ? `${errH} Fehler` : "keine", "fehlgeschlagene Abrufe und Serverfehler")}
         ${light(peakPct > 60 ? "r" : peakPct > 30 ? "y" : "g", "DB-Auslastung, 24 Std.", `${peakPct} % der Grenze`, `Spitze ${peak} von ${LIMIT_MIN} Abrufen je Minute`)}
-        ${light(costMonth > 20 ? "y" : "g", "KI-Kosten", `${usd(costToday)} heute · ${usd(costMonth)} im Monat`, "geschätzt, Ticket-Einlesen")}
+        ${light(costMonth > 20 ? "y" : "g", "KI-Kosten", `${usd(costToday)} heute · ${usd(costMonth)} im Monat`, "geschätzt, Ticket-Einlesen und Hilfe")}
       </div>`;
 
       // ---- 2. Wer nutzt die App?

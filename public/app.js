@@ -274,7 +274,7 @@ function renderList(active) {
     ${nowShown.map((t, i) => jetztCard(t, i > 0 || nowList.length > 1)).join("")}
     ${nowList.length > 3 ? `<button class="link small now-more" data-nowmore>${NOW_MORE ? "Weniger zeigen" : `+ ${nowList.length - 3} weitere jetzt`}</button>` : ""}
     ${tiles(cur, nowShown)}
-    ${fresh && isIOS ? iosFirst() : ""}
+    ${fresh && isIOS ? iosFirst() : iosCard()}
     ${soon.length ? `<div class="sec-row"><span>Demnächst</span></div><ul class="trips compact">${grouped(soon)}</ul>` : ""}
     ${later.length ? `<div class="sec-row"><span>Später · ${later.length} ${later.length === 1 ? "Fahrt" : "Fahrten"}</span><button class="link" data-later>${LATER_OPEN ? "Weniger" : "Zeigen ›"}</button></div>
       ${LATER_OPEN ? `<p class="small muted" style="margin:-4px 2px 6px">Live geprüft wird ab ca. 3 Std. vor der Abfahrt – dann erscheinen sie oben.</p><ul class="trips compact">${grouped(later)}</ul>` : ""}` : ""}
@@ -1365,7 +1365,7 @@ const later = k => { try { return Date.now() < +(localStorage.getItem(`rb_later_
 // Welcher Browser, was geht dort? (Installieren als App, Mitteilungen) – mit passender Anleitung
 const UA = navigator.userAgent, isAndroid = /Android/i.test(UA);
 const BRANDS = (navigator.userAgentData?.brands || []).map(b => b.brand).join(" ");
-const BROWSER = /DuckDuckGo/i.test(UA + BRANDS) ? "DuckDuckGo" : /SamsungBrowser/i.test(UA) ? "Samsung Internet" : /EdgA?\//.test(UA) ? "Edge" : /OPR\/|Opera/i.test(UA) ? "Opera"
+const BROWSER = /DuckDuckGo|Ddg\//i.test(UA + BRANDS) ? "DuckDuckGo" : /SamsungBrowser/i.test(UA) ? "Samsung Internet" : /EdgA?\/|EdgiOS\//.test(UA) ? "Edge" : /OPR\/|Opera/i.test(UA) ? "Opera"
   : /Firefox|FxiOS/i.test(UA) ? "Firefox" : navigator.brave ? "Brave" : /CriOS/.test(UA) ? "Chrome" : /Chrome\//.test(UA) ? "Chrome" : /Safari/.test(UA) ? "Safari" : "Browser";
 const pushPossible = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 const BNAME = () => (BROWSER === "Chrome" && !pushPossible() ? "diesem Browser" : BROWSER);   // z. B. DuckDuckGo gibt sich als Chrome aus
@@ -1402,6 +1402,7 @@ const browserGrid = () => (isAndroid ? `<div class="br-grid">${openerBtns("btn s
 function hintCard() {
   if (!hasSomething()) return "";
   const recOr = () => { loadRec(); return REC.has === false && (REC.lost || !later("rec")) ? recHint() : ""; };   // danach: Konto sichern
+  if (isIOS && !standalone) return later("ios") ? recOr() : "";   // iPhone-Karte steht schon oben – nur ein Hinweis auf einmal
   if (pushState() === "on") return recOr();
   const foot = k => `<div class="hint-foot"><button class="link small" data-later-hint="${k}">Nicht jetzt</button></div>`;
   // Browser ohne Mitteilungen (z. B. DuckDuckGo): klar sagen, was geht, und andere Browser anbieten
@@ -1415,10 +1416,29 @@ function hintCard() {
   const push = pushCard();
   return push && !later("push") ? push.replace(/<\/div>$/, `${foot("push")}</div>`) : recOr();
 }
+// iPhone im Browser mit etwas zu überwachen: deutlich zeigen, wie die App auf den Home-Bildschirm kommt – sonst keine Warnungen.
+// Schritte passend zum Browser; der Code zum Mitnehmen der Fahrten steht gleich dabei (die App startet leer).
+function iosCard() {
+  if (!isIOS || standalone || !hasSomething() || later("ios")) return "";
+  const saf = BROWSER === "Safari", cr = /^(Chrome|Edge)$/.test(BROWSER), sh = `<span class="ios-share" aria-hidden="true">⬆︎</span>`;
+  const s1 = saf ? `Unten auf „Teilen“ ${sh} tippen – bei neuerem iOS zuerst auf „⋯“.` : cr ? `Oben in der Adresszeile auf „Teilen“ ${sh} tippen.` : `Auf „Teilen“ ${sh} tippen.`;
+  const codeOk = DEV.code && Date.parse(DEV.until) > Date.now();
+  return `<section class="card ios-card"><div class="k">Damit ich dich warnen kann</div>
+    <p>Auf dem iPhone kommen Warnungen nur, wenn Umstiegsheld als App auf dem Home-Bildschirm liegt. Das dauert eine Minute:</p>
+    <ol class="ios-steps"><li>${s1}</li>
+      <li>„Zum Home-Bildschirm“ wählen (evtl. etwas nach unten scrollen), dann „Hinzufügen“.</li>
+      <li>Umstiegsheld über das neue Symbol öffnen und „Mitteilungen einschalten“.</li>
+      <li>Fahrten mitnehmen: in der App „Code eingeben“ ${codeOk ? `– dein Code: <b class="code-inline">${fmtCode(DEV.code)}</b> <span class="small muted">(gilt bis ${hm(DEV.until)} Uhr)</span>` : `– <button class="link" data-ioscode>Code anzeigen</button>`}</li></ol>
+    ${saf ? "" : `<p class="small muted" style="margin:8px 0 0">Fehlt „Zum Home-Bildschirm“ im Teilen-Menü? Dann kann ${BROWSER === "Browser" ? "dieser Browser" : esc(BROWSER)} das nicht – öffne umstiegsheld.de in Safari. <button class="link small" data-ioscopy>Link kopieren</button></p>`}
+    <div class="hint-foot"><button class="link small" data-later-ios>Morgen erinnern</button></div></section>`;
+}
 // iPhone in Safari, noch nichts angelegt: zuerst installieren – sonst landen die Fahrten in Safari statt in der App
 const iosFirst = () => (isIOS && !standalone && !later("iosfirst") ? `<div class="banner info hint row" style="align-items:center"><span><b>Tipp fürs iPhone:</b> Erst auf den Home-Bildschirm legen – Safari „Teilen“ <span aria-hidden="true">⬆︎</span> → „Zum Home-Bildschirm“ – und Umstiegsheld von dort öffnen.
   Nur dann bekommst du Mitteilungen, und deine Fahrten liegen gleich in der App.</span><button class="link small hint-later" data-later-hint="iosfirst">Nicht jetzt</button></div>` : "");
 function bindHints() {
+  $app.querySelector("[data-ioscode]")?.addEventListener("click", async () => { try { const r = await api("/api/link/start", { method: "POST" }); DEV.code = r.code; DEV.until = r.until; render(); } catch (e) { alert(e.message); } });
+  $app.querySelector("[data-ioscopy]")?.addEventListener("click", async e => { try { await navigator.clipboard.writeText("https://umstiegsheld.de/"); e.currentTarget.textContent = "Kopiert – in Safari einfügen"; } catch { prompt("Diesen Link in Safari öffnen:", "https://umstiegsheld.de/"); } });
+  $app.querySelector("[data-later-ios]")?.addEventListener("click", () => { try { localStorage.setItem("rb_later_ios", String(Date.now() + 864e5)); } catch {} render(); });
   document.getElementById("recHint")?.addEventListener("click", makeRecovery);
   $app.querySelectorAll("[data-later-hint]").forEach(b => b.onclick = () => { try { localStorage.setItem(`rb_later_${b.dataset.laterHint}`, String(Date.now() + 3 * 864e5)); } catch {} render(); });
   document.getElementById("installApp")?.addEventListener("click", async () => { const e = INSTALL; if (!e) return; INSTALL = null;
