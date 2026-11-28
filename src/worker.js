@@ -157,6 +157,9 @@ async function earlierFor(env, t, i) {
 }
 
 // Reise mit neuen Teilstrecken: Ticket und Zugehörigkeit bleiben, Überwachung beginnt neu
+// Dieselbe Fahrt? Gleicher Start und gleiches Ziel zur gleichen Minute – egal, wie die Linien gerade heißen
+const nStop = x => String(x || "").toLowerCase().replace(/\(.*?\)|[^a-zäöüß0-9]/g, "");
+export const tripSig = L => { const a = L[0], z = L[L.length - 1]; return `${nStop(a.from.name)}@${Math.round(Date.parse(a.from.plan) / 60e3)}>${nStop(z.to.name)}@${Math.round(Date.parse(z.to.plan) / 60e3)}`; };
 async function replaceLegs(env, t, legs, ticket) {
   const minT = +t.legs[0]?.minT || 0;
   t.legs = legs.map(l => cleanLeg({ ...l, minT: l.minT ?? minT }));
@@ -170,7 +173,13 @@ async function replaceLegs(env, t, legs, ticket) {
   await assess(env, t, now, cache);
   t.state = { ...t.state, rem: {}, start: null, pl: {}, zb: false };
   await db.update(env, "rb_trips", t.id, { legs: t.legs, obs: t.obs, state: t.state, ticket: t.ticket, active: true, ends_at: t.ends_at, updated_at: new Date().toISOString() });
-  return view(t, now);
+  // Jetzt genau wie eine andere eigene Fahrt? Dann ist die andere doppelt – weg damit (nicht bei mitverfolgten Fahrten)
+  let merged = 0;
+  for (const o of await db.tripsOf(env, t.account_id || t.device_id).catch(() => [])) {
+    if (o.id === t.id || !o.active || o.state?.follow || tripSig(o.legs) !== tripSig(t.legs)) continue;
+    await db.remove(env, "rb_trips", o.id).catch(() => {}); merged++; count("t_merged");
+  }
+  return { ...view(t, now), ...(merged ? { merged } : {}) };
 }
 
 // Statistik: Quelle und Art einer neuen Fahrt (nur Summen)
@@ -428,7 +437,7 @@ async function api(req, env, url) {
     const clean = legs.map(cleanLeg);
     // Dieselbe Reise schon da (z. B. doppelt getippt oder Antwort ging verloren)? Dann keine zweite anlegen
     const sigOf = L => L.map(l => `${String(l.label).replace(/\s/g, "")}@${Date.parse(l.from.plan)}>${Date.parse(l.to.plan)}`).join("|");
-    const twin = (await db.tripsOf(env, dev.account_id).catch(() => [])).find(t => t.active && sigOf(t.legs) === sigOf(clean));
+    const twin = (await db.tripsOf(env, dev.account_id).catch(() => [])).find(t => t.active && !t.state?.follow && (sigOf(t.legs) === sigOf(clean) || tripSig(t.legs) === tripSig(clean)));
     if (twin) return json({ ...view(twin, Date.now()), existed: true }, 200);
     const trip = await db.insert(env, "rb_trips", { device_id: dev.id, account_id: dev.account_id, ticket, legs: clean, obs: [], state: {}, active: true, ends_at: clean[clean.length - 1].to.plan });
     countTrip(clean, ["search", "board", "import", "quick", "fav", "share"].includes(b.src) ? b.src : "other");

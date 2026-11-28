@@ -2444,9 +2444,9 @@ async function saveTrip(ticket) {
     W.busy = "Fahrt wird geändert …"; render();
     try {
       const K = keepInfo();
-      await api(`/api/trips/${id}`, { method: "PUT", body: K ? { keep: { a: K.a, b: K.b }, pre: (W.preLegs || []).map(l => ({ ...l, minT })), post: (W.postLegs || []).map(l => ({ ...l, minT })), minT, ticket }
+      const RES = await api(`/api/trips/${id}`, { method: "PUT", body: K ? { keep: { a: K.a, b: K.b }, pre: (W.preLegs || []).map(l => ({ ...l, minT })), post: (W.postLegs || []).map(l => ({ ...l, minT })), minT, ticket }
         : { legs: W.legs.map(l => ({ ...l, minT })), minT, ticket } });
-      flash = "Fahrt geändert. Ich überwache jetzt die neue Verbindung."; SHARE_AFTER = id;
+      flash = `Fahrt geändert. Ich überwache jetzt die neue Verbindung.${RES?.merged ? " Die gleiche Fahrt gab es schon einmal – die doppelte habe ich entfernt." : ""}`; SHARE_AFTER = id;
       W = null; await loadTrips(); openId = id; sheetId = null; return go("home");
     } catch (e) { if (!W) return; W.busy = null; W.error = e.message; return render(); }
   }
@@ -2454,7 +2454,8 @@ async function saveTrip(ticket) {
   W.busy = "Fahrt wird angelegt …"; render();
   try {
     let newId = null;
-    for (const legs of W.multi || [W.legs]) newId = (await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket, src: W.mode === "import" ? "import" : W.mode === "train" ? "board" : W.quick ? "quick" : W.fav ? "fav" : "search" } })).id || newId;
+    let twin = false;
+    for (const legs of W.multi || [W.legs]) { const r = await api("/api/trips", { method: "POST", body: { legs: legs.map(l => ({ ...l, minT: MINT })), ticket, src: W.mode === "import" ? "import" : W.mode === "train" ? "board" : W.quick ? "quick" : W.fav ? "fav" : "search" } }); newId = r.id || newId; if (r.existed) twin = true; }
     if (W.reg && newId && !W.multi) {
       // gleich regelmäßig: genaue Abfahrt (aus dieser Reise) oder Zeitfenster (Start/Ziel dieser Reise)
       const R = W.reg, f = W.legs[0].from, t = W.legs[W.legs.length - 1].to;
@@ -2480,7 +2481,7 @@ async function saveTrip(ticket) {
     if (W.pushAsk) { const ask0 = W.pushAsk; ask0.then(r => (r === "granted" ? enablePush().then(() => render()) : null)).catch(() => {}); }
     const n = (W.multi || [W.legs]).length;
     const tell = pushState() === "on" ? "Ich melde mich, wenn du etwas tun solltest." : "Schalte Mitteilungen ein, damit ich dich unterwegs warnen kann.";
-    flash = n > 1 ? `${n} Fahrten angelegt. ${tell}` : `Fahrt angelegt. ${tell}`;
+    flash = twin && n <= 1 ? "Diese Fahrt überwachst du schon – ich habe sie nicht doppelt angelegt." : n > 1 ? `${n} Fahrten angelegt. ${tell}` : `Fahrt angelegt. ${tell}`;
     const optOut = W.pushNo, lg = W.legs || [];
     if (n === 1 && lg.length && !W.retNo && !W.quick) offerReturn({ tripId: newId, from: W.rFrom || placeOfStop(lg[0].from), to: W.rTo || placeOfStop(lg[lg.length - 1].to), after: Date.parse(lg[lg.length - 1].to.plan) });
     W = null; await loadTrips().catch(() => {}); openId = n > 1 ? null : newId; go("home"); if (!optOut) askPushSoon();
